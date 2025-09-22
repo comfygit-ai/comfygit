@@ -106,48 +106,51 @@ class WorkflowDependencyParser:
         for node_id, node_info in nodes_data.items():
             node_type = node_info.type
 
-            if self.model_config.is_model_loader_node(node_type):
-                standard_nodes.add(node_id)
-                model_paths = self._extract_paths_from_node_info(node_type, node_info)
+            # Skip non-model loader nodes
+            if not self.model_config.is_model_loader_node(node_type):
+                continue
+            
+            standard_nodes.add(node_id)
+            model_paths = self._extract_paths_from_node_info(node_type, node_info)
 
-                # Try alternative paths until we find one that exists
-                resolved = False
-                for full_path in model_paths:
-                    if full_path in full_path_models:
-                        model = full_path_models[full_path]
-                        if model.hash not in processed_hashes:
-                            resolved_models.append(model)
-                            processed_hashes.add(model.hash)
-                            logger.debug(
-                                f"Resolved standard loader: {node_type} -> {full_path} -> {model.hash}"
-                            )
-                        else:
-                            logger.debug(
-                                f"Model already resolved by another node: {node_type} -> {full_path} -> {model.hash}"
-                            )
-                        resolved = True
-                        break
+            # Try alternative paths until we find one that exists
+            resolved = False
+            for full_path in model_paths:
+                if full_path in full_path_models:
+                    model = full_path_models[full_path]
+                    if model.hash not in processed_hashes:
+                        resolved_models.append(model)
+                        processed_hashes.add(model.hash)
+                        logger.debug(
+                            f"Resolved standard loader: {node_type} -> {full_path} -> {model.hash}"
+                        )
+                    else:
+                        logger.debug(
+                            f"Model already resolved by another node: {node_type} -> {full_path} -> {model.hash}"
+                        )
+                    resolved = True
+                    break
 
-                # Mark as missing if none of the alternatives worked
-                if not resolved and model_paths:
-                    widget_values = node_info.widgets_values
-                    widget_index = self.model_config.get_widget_index_for_node(
-                        node_type
-                    )
-                    widget_value = (
-                        widget_values[widget_index]
-                        if widget_index < len(widget_values)
-                        else "unknown"
-                    )
-                    missing_models.append(
-                        {
-                            "relative_path": f"{node_type}:{widget_value}",
-                            "attempted_paths": model_paths,
-                        }
-                    )
-                    logger.warning(
-                        f"Standard loader model not found: {node_type} with '{widget_value}' (tried: {model_paths})"
-                    )
+            # Mark as missing if none of the alternatives worked
+            if not resolved and model_paths:
+                widget_values = node_info.widgets_values
+                widget_index = self.model_config.get_widget_index_for_node(
+                    node_type
+                )
+                widget_value = (
+                    widget_values[widget_index]
+                    if widget_index < len(widget_values)
+                    else "unknown"
+                )
+                missing_models.append(
+                    {
+                        "relative_path": f"{node_type}:{widget_value}",
+                        "attempted_paths": model_paths,
+                    }
+                )
+                logger.warning(
+                    f"Standard loader model not found: {node_type} with '{widget_value}' (tried: {model_paths})"
+                )
 
         # Process remaining nodes for model references
         remaining_nodes = {

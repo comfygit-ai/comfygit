@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from ..configs.comfyui_models import COMFYUI_MODELS_CONFIG
+from ..configs.model_config import ModelConfig
 from ..logging.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -196,7 +196,7 @@ class ModelPathManager:
         Returns:
             List of standard directory names
         """
-        return COMFYUI_MODELS_CONFIG["standard_directories"]
+        return ModelConfig.load().standard_directories
 
     def _discover_additional_directories(self, standard_directories: list[str]) -> list[str]:
         """Discover additional model directories in the base path.

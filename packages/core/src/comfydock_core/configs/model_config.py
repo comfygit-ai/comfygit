@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .comfyui_models import COMFYUI_MODELS_CONFIG
 from ..logging.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -30,24 +31,28 @@ class ModelConfig:
         Returns:
             ModelConfig instance
         """
+        data = {}
         if config_path is None:
-            config_path = Path(__file__).parent / "comfyui_models.json"
+            # Load hardcoded config (fallback)
+            data = COMFYUI_MODELS_CONFIG
+        else:
+            if not config_path.exists():
+                raise FileNotFoundError(f"Model config file not found: {config_path}")
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load model config from {config_path}: {e}")
+                raise
 
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            return cls(
-                version=data["version"],
-                default_extensions=data["default_extensions"],
-                standard_directories=data["standard_directories"],
-                directory_overrides=data.get("directory_overrides", {}),
-                node_directory_mappings=data.get("node_directory_mappings", {}),
-                node_widget_indices=data.get("node_widget_indices", {})
-            )
-        except Exception as e:
-            logger.error(f"Failed to load model config from {config_path}: {e}")
-            raise
+        return cls(
+            version=data.get("version", "unknown"),
+            default_extensions=data.get("default_extensions", []),
+            standard_directories=data.get("standard_directories", []),
+            directory_overrides=data.get("directory_overrides", {}),
+            node_directory_mappings=data.get("node_directory_mappings", {}),
+            node_widget_indices=data.get("node_widget_indices", {})
+        )
 
     def get_extensions_for_directory(self, directory: str) -> list[str]:
         """Get file extensions for a specific directory.

@@ -1,8 +1,59 @@
-"""ComfyUI models configuration loader."""
-import json
-from pathlib import Path
+"""Default ComfyUI models configuration"""
 
-# Load configuration from JSON file
-_config_path = Path(__file__).parent / "comfyui_models.json"
-with open(_config_path, 'r', encoding='utf-8') as f:
-    COMFYUI_MODELS_CONFIG = json.load(f)
+COMFYUI_MODELS_CONFIG = {
+    "version": "2024.1",
+    "default_extensions": [
+        ".ckpt",
+        ".pt",
+        ".pth",
+        ".pt2",
+        ".bin",
+        ".safetensors",
+        ".pkl",
+        ".sft",
+    ],
+    "standard_directories": [
+        "checkpoints",
+        "configs",
+        "loras",
+        "vae",
+        "vae_approx",
+        "embeddings",
+        "diffusion_models",
+        "text_encoders",
+        "clip_vision",
+        "style_models",
+        "diffusers",
+        "controlnet",
+        "gligen",
+        "upscale_models",
+        "hypernetworks",
+        "photomaker",
+        "classifiers",
+    ],
+    "directory_overrides": {"configs": {"extensions": [".yaml", ".yml", ".json"]}},
+    "node_directory_mappings": {
+        "CheckpointLoaderSimple": ["checkpoints"],
+        "CheckpointLoader": ["checkpoints", "configs"],
+        "unCLIPCheckpointLoader": ["checkpoints"],
+        "ImageOnlyCheckpointLoader": ["checkpoints"],
+        "VAELoader": ["vae", "vae_approx"],
+        "LoraLoader": ["loras"],
+        "LoraLoaderModelOnly": ["loras"],
+        "CLIPLoader": ["clip"],
+        "DualCLIPLoader": ["clip"],
+        "TripleCLIPLoader": ["clip"],
+        "QuadrupleCLIPLoader": ["clip"],
+        "UNETLoader": ["diffusion_models"],
+        "CLIPVisionLoader": ["clip_vision"],
+        "ControlNetLoader": ["controlnet"],
+        "DiffControlNetLoader": ["controlnet"],
+        "StyleModelLoader": ["style_models"],
+        "UpscaleModelLoader": ["upscale_models"],
+        "GLIGENLoader": ["gligen"],
+        "HypernetworkLoader": ["hypernetworks"],
+        "PhotoMakerLoader": ["photomaker"],
+        "DiffusersLoader": ["diffusers"],
+    },
+    "node_widget_indices": {"CheckpointLoader": 1},
+}
