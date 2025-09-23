@@ -5,10 +5,11 @@ import sys
 from functools import cached_property
 from typing import TYPE_CHECKING
 
+from comfydock_core.models.environment import UserAction
+
 if TYPE_CHECKING:
     from comfydock_core.core.environment import Environment
     from comfydock_core.core.workspace import Workspace
-    from comfydock_core.models.environment import EnvironmentStatus, UserAction, WorkflowSyncAction, SyncPreview
 
 from .cli_utils import get_workspace_or_exit
 from .logging.environment_logger import with_env_logging
@@ -64,7 +65,7 @@ class EnvironmentCommands:
     # === Commands that operate ON environments ===
 
     @with_env_logging("env create")
-    def create(self, args):
+    def create(self, args, logger=None):
         """Create a new environment."""
         print(f"🚀 Creating environment: {args.name}")
 
@@ -76,6 +77,8 @@ class EnvironmentCommands:
                 template_path=args.template
             )
         except Exception as e:
+            if logger:
+                logger.error(f"Environment creation failed for '{args.name}': {e}", exc_info=True)
             print(f"✗ Failed to create environment: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -84,6 +87,8 @@ class EnvironmentCommands:
                 self.workspace.set_active_environment(args.name)
 
             except Exception as e:
+                if logger:
+                    logger.error(f"Failed to set active environment '{args.name}': {e}", exc_info=True)
                 print(f"✗ Failed to set active environment: {e}", file=sys.stderr)
                 sys.exit(1)
 
@@ -101,11 +106,13 @@ class EnvironmentCommands:
 
 
     @with_env_logging("env use")
-    def use(self, args):
+    def use(self, args, logger=None):
         """Set the active environment."""
         try:
             self.workspace.set_active_environment(args.name)
         except Exception as e:
+            if logger:
+                logger.error(f"Failed to set active environment '{args.name}': {e}", exc_info=True)
             print(f"✗ Failed to set active environment: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -114,7 +121,7 @@ class EnvironmentCommands:
 
 
     @with_env_logging("env delete")
-    def delete(self, args):
+    def delete(self, args, logger=None):
         """Delete an environment."""
         # Check that environment exists
         self._get_env(args)
@@ -131,6 +138,8 @@ class EnvironmentCommands:
         try:
             self.workspace.delete_environment(args.name)
         except Exception as e:
+            if logger:
+                logger.error(f"Environment deletion failed for '{args.name}': {e}", exc_info=True)
             print(f"✗ Failed to delete environment: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -297,7 +306,7 @@ class EnvironmentCommands:
                     print(f"    - {workflow_name}.json")
 
     @with_env_logging("env log")
-    def log(self, args):
+    def log(self, args, logger=None):
         """Show environment version history with simple identifiers."""
         env = self._get_env(args)
 
@@ -328,13 +337,15 @@ class EnvironmentCommands:
             print("Use 'comfydock rollback <version>' to restore to a specific version")
 
         except Exception as e:
+            if logger:
+                logger.error(f"Failed to read version history for environment '{env.name}': {e}", exc_info=True)
             print(f"✗ Could not read version history: {e}", file=sys.stderr)
             sys.exit(1)
 
     # === Node management ===
 
     @with_env_logging("env node add")
-    def node_add(self, args):
+    def node_add(self, args, logger=None):
         """Add a custom node - directly modifies pyproject.toml."""
         env = self._get_env(args)
 
@@ -347,6 +358,8 @@ class EnvironmentCommands:
         try:
             env.add_node(args.node_name, is_development=args.dev, no_test=args.no_test)
         except Exception as e:
+            if logger:
+                logger.error(f"Node add failed for '{args.node_name}': {e}", exc_info=True)
             print(f"✗ Failed to add node '{args.node_name}'", file=sys.stderr)
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
@@ -366,7 +379,7 @@ class EnvironmentCommands:
 
 
     @with_env_logging("env node remove")
-    def node_remove(self, args):
+    def node_remove(self, args, logger=None):
         """Remove a custom node - directly modifies pyproject.toml."""
         env = self._get_env(args)
 
@@ -376,6 +389,8 @@ class EnvironmentCommands:
         try:
             env.remove_node(args.node_name)
         except Exception as e:
+            if logger:
+                logger.error(f"Node remove failed for '{args.node_name}': {e}", exc_info=True)
             print(f"✗ Failed to remove node '{args.node_name}'", file=sys.stderr)
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
@@ -420,7 +435,7 @@ class EnvironmentCommands:
     # === Constraint management ===
 
     @with_env_logging("env constraint add")
-    def constraint_add(self, args):
+    def constraint_add(self, args, logger=None):
         """Add constraint dependencies to [tool.uv]."""
         env = self._get_env(args)
 
@@ -431,6 +446,8 @@ class EnvironmentCommands:
             for package in args.packages:
                 env.add_constraint(package)
         except Exception as e:
+            if logger:
+                logger.error(f"Constraint add failed: {e}", exc_info=True)
             print("✗ Failed to add constraints", file=sys.stderr)
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
@@ -455,7 +472,7 @@ class EnvironmentCommands:
             print(f"  • {constraint}")
 
     @with_env_logging("env constraint remove")
-    def constraint_remove(self, args):
+    def constraint_remove(self, args, logger=None):
         """Remove constraint dependencies from [tool.uv]."""
         env = self._get_env(args)
 
@@ -470,6 +487,8 @@ class EnvironmentCommands:
                 else:
                     print(f"   Warning: constraint '{package}' not found")
         except Exception as e:
+            if logger:
+                logger.error(f"Constraint remove failed: {e}", exc_info=True)
             print("✗ Failed to remove constraints", file=sys.stderr)
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
@@ -484,7 +503,7 @@ class EnvironmentCommands:
     # === Git-based operations ===
 
     @with_env_logging("env sync")
-    def sync(self, args):
+    def sync(self, args, logger=None):
         """Apply changes: commit pyproject.toml and run uv sync."""
         env = self._get_env(args)
 
@@ -534,6 +553,8 @@ class EnvironmentCommands:
         try:
             env.sync()
         except Exception as e:
+            if logger:
+                logger.error(f"Sync failed for environment '{env.name}': {e}", exc_info=True)
             print(f"✗ Failed to apply changes: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -549,7 +570,7 @@ class EnvironmentCommands:
         print(f"\nEnvironment '{env.name}' is ready to use")
 
     @with_env_logging("env rollback")
-    def rollback(self, args):
+    def rollback(self, args, logger=None):
         """Rollback to previous state or discard uncommitted changes."""
         env = self._get_env(args)
 
@@ -602,11 +623,13 @@ class EnvironmentCommands:
             print("\nTip: Run 'comfydock log' to see available versions")
             sys.exit(1)
         except Exception as e:
+            if logger:
+                logger.error(f"Rollback failed for environment '{env.name}': {e}", exc_info=True)
             print(f"✗ Rollback failed: {e}", file=sys.stderr)
             sys.exit(1)
 
     @with_env_logging("env commit")
-    def commit(self, args):
+    def commit(self, args, logger=None):
         """Commit current state without applying (git commit only)."""
         env = self._get_env(args)
 
@@ -630,6 +653,8 @@ class EnvironmentCommands:
             git_commit(env.cec_path, message)
             print(f"✓ Committed changes: {message}")
         except Exception as e:
+            if logger:
+                logger.error(f"Commit failed for environment '{env.name}': {e}", exc_info=True)
             print(f"✗ Commit failed: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -671,7 +696,7 @@ class EnvironmentCommands:
             print(f"  {state_icon} {name} [{info.state}]")
 
     @with_env_logging("workflow track")
-    def workflow_track(self, args):
+    def workflow_track(self, args, logger=None):
         """Start tracking a workflow with smart model resolution."""
         env = self._get_env(args)
 
@@ -698,6 +723,8 @@ class EnvironmentCommands:
                 self._track_single_workflow_enhanced(env, args.name, getattr(args, 'skip_disambiguation', False))
                 print(f"✓ Started tracking workflow '{args.name}'")
             except Exception as e:
+                if logger:
+                    logger.error(f"Workflow track failed for '{args.name}': {e}", exc_info=True)
                 print(f"✗ Failed to track workflow '{args.name}': {e}", file=sys.stderr)
                 sys.exit(1)
         else:
@@ -860,7 +887,7 @@ class EnvironmentCommands:
         return to_install
 
     @with_env_logging("workflow untrack")
-    def workflow_untrack(self, args):
+    def workflow_untrack(self, args, logger=None):
         """Stop tracking a workflow."""
         env = self._get_env(args)
 
@@ -868,6 +895,8 @@ class EnvironmentCommands:
             env.untrack_workflow(args.name)
             print(f"✓ Stopped tracking workflow '{args.name}' (ComfyUI copy preserved)")
         except Exception as e:
+            if logger:
+                logger.error(f"Workflow untrack failed for '{args.name}': {e}", exc_info=True)
             print(f"✗ Failed to untrack workflow '{args.name}': {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -930,7 +959,7 @@ class EnvironmentCommands:
     # === Environment Model Commands ===
 
     @with_env_logging("model add")
-    def model_add(self, args):
+    def model_add(self, args, logger=None):
         """Add model to environment manifest."""
         env = self._get_env(args)
         workspace = self.workspace
@@ -1007,6 +1036,8 @@ class EnvironmentCommands:
                     print(f"Warning: Workflow '{args.workflow}' not found")
 
         except Exception as e:
+            if logger:
+                logger.error(f"Model add failed: {e}", exc_info=True)
             print(f"✗ Failed to add model to manifest: {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -1015,7 +1046,7 @@ class EnvironmentCommands:
         print(f"  Path: {model.relative_path}")
 
     @with_env_logging("model remove")
-    def model_remove(self, args):
+    def model_remove(self, args, logger=None):
         """Remove model from environment manifest."""
         env = self._get_env(args)
 
@@ -1030,13 +1061,15 @@ class EnvironmentCommands:
                 sys.exit(1)
 
         except Exception as e:
+            if logger:
+                logger.error(f"Model remove failed: {e}", exc_info=True)
             print(f"✗ Failed to remove model: {e}", file=sys.stderr)
             sys.exit(1)
 
         print(f"✓ Removed model: {model_hash[:12]}...")
 
     @with_env_logging("model list")
-    def model_list(self, args):
+    def model_list(self, args, logger=None):
         """List models in environment manifest."""
         env = self._get_env(args)
         workspace = self.workspace
@@ -1044,6 +1077,8 @@ class EnvironmentCommands:
         try:
             manifest = env.pyproject.models.get_all()
         except Exception as e:
+            if logger:
+                logger.error(f"Model list failed: {e}", exc_info=True)
             print(f"✗ Failed to read model manifest: {e}", file=sys.stderr)
             sys.exit(1)
 

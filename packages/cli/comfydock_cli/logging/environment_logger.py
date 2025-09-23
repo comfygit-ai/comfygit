@@ -433,7 +433,12 @@ def with_env_logging(command_name: str, get_env_name: Callable | None = None, lo
                     context[key] = value
 
             # Run with logging context
-            with EnvironmentLogger.log_command(env_name, command_name, **context):
+            with EnvironmentLogger.log_command(env_name, command_name, **context) as logger:
+                # Pass logger to function if it accepts it
+                import inspect
+                sig = inspect.signature(func)
+                if 'logger' in sig.parameters:
+                    kwargs['logger'] = logger
                 return func(self, args, *extra_args, **kwargs)
 
         return wrapper
