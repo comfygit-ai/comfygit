@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from comfydock_core.core.environment import Environment
     from comfydock_core.core.workspace import Workspace
-    from comfydock_core.models.environment import EnvironmentStatus
+    from comfydock_core.models.environment import EnvironmentStatus, UserAction, WorkflowSyncAction, SyncPreview
 
 from .cli_utils import get_workspace_or_exit
 from .logging.environment_logger import with_env_logging
@@ -162,23 +162,21 @@ class EnvironmentCommands:
 
     @with_env_logging("env status")
     def status(self, args):
-        """Show environment status with detailed changes."""
+        """Show environment status using semantic methods."""
         env = self._get_env(args)
 
         print(f"Environment: {env.name}")
         print(f"Path: {env.path}")
 
-        # TODO: Should use pre-format output data method instead
         status = env.status()
 
         # Show sync status
         if not status.is_synced:
             print('\n===================================================')
-            print("🔁 Sync Status: ✗ Out of sync with pyproject.toml")
+            print("🔁 Sync Status: ✗ Out of sync")
             print('===================================================')
-            # print("  Environment does not match pyproject.toml")
-            print()
 
+            # Show missing/extra nodes
             if status.comparison.missing_nodes:
                 print(f"  Missing nodes ({len(status.comparison.missing_nodes)}):")
                 for node in status.comparison.missing_nodes:
@@ -197,105 +195,37 @@ class EnvironmentCommands:
             if not status.comparison.packages_in_sync:
                 print(f"  {status.comparison.package_sync_message}")
 
-            if not status.workflow.in_sync:
-                out_of_sync_workflows = [
-                    name for name, sync_status in status.workflow.sync_status.items()
-                    if sync_status != "in_sync"
-                ]
-                print(f"  Workflows ({len(out_of_sync_workflows)}):")
-                for name in out_of_sync_workflows:
-                    sync_status = status.workflow.sync_status[name]
-                    if sync_status == "comfyui_newer":
-                        print(f"    ✏️  {name} (modified in ComfyUI)")
-                    elif sync_status == "tracked_newer":
-                        print(f"    📂 {name} (modified in .cec)")
-                    elif sync_status == "missing_comfyui":
-                        print(f"    🔄 {name} (needs restore to ComfyUI)")
-                    elif sync_status == "missing_tracked":
-                        print(f"    📋 {name} (needs update to .cec)")
-                    else:
-                        print(f"    ⚠️  {name} ({sync_status})")
+            # Show workflow sync actions using semantic methods
+            workflow_actions = status.get_workflow_sync_actions()
+            if workflow_actions:
+                print(f"  Workflows ({len(workflow_actions)}):")
+                for action in workflow_actions:
+                    print(f"    {action.icon} {action.name} ({action.description})")
 
-            # print("  Run 'comfydock sync' to apply changes")
             print("\n  Run 'comfydock sync' to update tracked files")
         else:
             print('\n===================================================')
             print("🔁 Sync Status: ✓ In sync")
             print('===================================================')
-            # print("  Environment matches pyproject.toml")
 
-        # Show git status with detailed changes
+        # Show git status using semantic methods
         if not status.git.has_changes:
             print('\n===================================================')
             print("📦 Git Status: ✓ Clean")
             print('===================================================')
         else:
+            changes_summary = status.get_changes_summary()
             print('\n===================================================')
-            print("📦 Git Status: ~ Modified (uncommitted changes)")
+            print(f"📦 Git Status: ~ {changes_summary.get_headline()}")
             print('===================================================')
 
-            # Show node changes
-            if status.git.nodes_added or status.git.nodes_removed:
-                print("\n  Custom Nodes:")
-                for node in status.git.nodes_added:
-                    print(f"    + {node}")
-                for node in status.git.nodes_removed:
-                    print(f"    - {node}")
+            # Show detailed changes with consistent formatting
+            self._show_git_changes(status)
 
-            # Show dependency changes
-            if status.git.dependencies_added or status.git.dependencies_removed or status.git.dependencies_updated:
-                print("\n  Python Packages:")
-                for dep in status.git.dependencies_added:
-                    version = dep.get('version', 'any')
-                    source = dep.get('source', '')
-                    if source:
-                        print(f"    + {dep['name']} ({version}) [{source}]")
-                    else:
-                        print(f"    + {dep['name']} ({version})")
-                for dep in status.git.dependencies_removed:
-                    version = dep.get('version', 'any')
-                    print(f"    - {dep['name']} ({version})")
-                for dep in status.git.dependencies_updated:
-                    old = dep.get('old_version', 'any')
-                    new = dep.get('new_version', 'any')
-                    print(f"    ~ {dep['name']}: {old} → {new}")
-
-            # Show constraint changes
-            if status.git.constraints_added or status.git.constraints_removed:
-                print("\n  Constraint Dependencies:")
-                for constraint in status.git.constraints_added:
-                    print(f"    + {constraint}")
-                for constraint in status.git.constraints_removed:
-                    print(f"    - {constraint}")
-
-            # Show workflow changes (tracking and content)
-            workflow_changes_shown = False
-
-            # Show tracking changes
-            if status.git.workflows_tracked or status.git.workflows_untracked:
-                if not workflow_changes_shown:
-                    print("\n  Workflows:")
-                    workflow_changes_shown = True
-                for name in status.git.workflows_tracked:
-                    print(f"    📋 {name} (now tracked)")
-                for name in status.git.workflows_untracked:
-                    print(f"    ❌ {name} (untracked)")
-
-            # Show workflow file changes (standard git style)
-            if status.git.workflow_changes:
-                if not workflow_changes_shown:
-                    print("\n  Workflows:")
-                    workflow_changes_shown = True
-                for workflow_name, git_status in status.git.workflow_changes.items():
-                    if git_status == "modified":
-                        print(f"    ~ {workflow_name}.json")
-                    elif git_status == "added":
-                        print(f"    + {workflow_name}.json")
-                    elif git_status == "deleted":
-                        print(f"    - {workflow_name}.json")
-
-
-            print("\n  Run 'comfydock commit -m \"message\"' to save changes")
+            # Show recommended action
+            action = status.get_recommended_action()
+            if action == UserAction.COMMIT_REQUIRED:
+                print("\n  Run 'comfydock commit -m \"message\"' to save changes")
 
             # Show full diff if verbose
             if hasattr(args, 'verbose') and args.verbose and status.git.diff:
@@ -303,6 +233,68 @@ class EnvironmentCommands:
                 print("Full diff:")
                 print("=" * 60)
                 print(status.git.diff)
+
+    def _show_git_changes(self, status):
+        """Helper method to show git changes in a structured way."""
+        # Show node changes
+        if status.git.nodes_added or status.git.nodes_removed:
+            print("\n  Custom Nodes:")
+            for node in status.git.nodes_added:
+                print(f"    + {node}")
+            for node in status.git.nodes_removed:
+                print(f"    - {node}")
+
+        # Show dependency changes
+        if status.git.dependencies_added or status.git.dependencies_removed or status.git.dependencies_updated:
+            print("\n  Python Packages:")
+            for dep in status.git.dependencies_added:
+                version = dep.get('version', 'any')
+                source = dep.get('source', '')
+                if source:
+                    print(f"    + {dep['name']} ({version}) [{source}]")
+                else:
+                    print(f"    + {dep['name']} ({version})")
+            for dep in status.git.dependencies_removed:
+                version = dep.get('version', 'any')
+                print(f"    - {dep['name']} ({version})")
+            for dep in status.git.dependencies_updated:
+                old = dep.get('old_version', 'any')
+                new = dep.get('new_version', 'any')
+                print(f"    ~ {dep['name']}: {old} → {new}")
+
+        # Show constraint changes
+        if status.git.constraints_added or status.git.constraints_removed:
+            print("\n  Constraint Dependencies:")
+            for constraint in status.git.constraints_added:
+                print(f"    + {constraint}")
+            for constraint in status.git.constraints_removed:
+                print(f"    - {constraint}")
+
+        # Show workflow changes (tracking and content)
+        workflow_changes_shown = False
+
+        # Show tracking changes
+        if status.git.workflows_tracked or status.git.workflows_untracked:
+            if not workflow_changes_shown:
+                print("\n  Workflows:")
+                workflow_changes_shown = True
+            for name in status.git.workflows_tracked:
+                print(f"    📋 {name} (now tracked)")
+            for name in status.git.workflows_untracked:
+                print(f"    ❌ {name} (untracked)")
+
+        # Show workflow file changes
+        if status.git.workflow_changes:
+            if not workflow_changes_shown:
+                print("\n  Workflows:")
+                workflow_changes_shown = True
+            for workflow_name, git_status in status.git.workflow_changes.items():
+                if git_status == "modified":
+                    print(f"    ~ {workflow_name}.json")
+                elif git_status == "added":
+                    print(f"    + {workflow_name}.json")
+                elif git_status == "deleted":
+                    print(f"    - {workflow_name}.json")
 
     @with_env_logging("env log")
     def log(self, args):
@@ -505,40 +497,31 @@ class EnvironmentCommands:
 
         # Confirm unless --yes
         if not args.yes:
+            preview = status.get_sync_preview()
             print("This will apply the following changes:")
-            if status.comparison.missing_nodes:
-                print(f"  • Install {len(status.comparison.missing_nodes)} missing nodes:")
-                for node in status.comparison.missing_nodes:
+
+            if preview.nodes_to_install:
+                print(f"  • Install {len(preview.nodes_to_install)} missing nodes:")
+                for node in preview.nodes_to_install:
                     print(f"    - {node}")
-            if status.comparison.extra_nodes:
-                print(f"  • Remove {len(status.comparison.extra_nodes)} extra nodes:")
-                for node in status.comparison.extra_nodes:
+
+            if preview.nodes_to_remove:
+                print(f"  • Remove {len(preview.nodes_to_remove)} extra nodes:")
+                for node in preview.nodes_to_remove:
                     print(f"    - {node}")
-            if status.comparison.version_mismatches:
-                print(f"  • Update {len(status.comparison.version_mismatches)} nodes to correct versions:")
-                for mismatch in status.comparison.version_mismatches:
+
+            if preview.nodes_to_update:
+                print(f"  • Update {len(preview.nodes_to_update)} nodes to correct versions:")
+                for mismatch in preview.nodes_to_update:
                     print(f"    - {mismatch['name']}: {mismatch['actual']} → {mismatch['expected']}")
-            if not status.comparison.packages_in_sync:
+
+            if preview.packages_to_sync:
                 print("  • Sync Python packages")
 
-            if not status.workflow.in_sync:
-                out_of_sync_workflows = [
-                    name for name, sync_status in status.workflow.sync_status.items()
-                    if sync_status != "in_sync"
-                ]
-                print(f"  • Sync {len(out_of_sync_workflows)} workflows:")
-                for name in out_of_sync_workflows:
-                    sync_status = status.workflow.sync_status[name]
-                    if sync_status == "comfyui_newer":
-                        print(f"    - {name} (update .cec from ComfyUI)")
-                    elif sync_status == "tracked_newer":
-                        print(f"    - {name} (update ComfyUI from .cec)")
-                    elif sync_status == "missing_comfyui":
-                        print(f"    - {name} (restore to ComfyUI)")
-                    elif sync_status == "missing_tracked":
-                        print(f"    - {name} (update to .cec)")
-                    else:
-                        print(f"    - {name} ({sync_status})")
+            if preview.workflows_to_sync:
+                print(f"  • Sync {len(preview.workflows_to_sync)} workflows:")
+                for action in preview.workflows_to_sync:
+                    print(f"    - {action.name} ({action.description})")
 
             response = input("\nContinue? (y/N): ")
             if response.lower() != 'y':
@@ -637,7 +620,7 @@ class EnvironmentCommands:
                 print("✓ No changes to commit")
                 return
 
-            message = self._generate_commit_message(status)
+            message = status.generate_commit_message()
             print(f"Auto-generated message: {message}")
 
         # Commit changes
@@ -650,67 +633,6 @@ class EnvironmentCommands:
             print(f"✗ Commit failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    def _generate_commit_message(self, status: EnvironmentStatus) -> str:
-        """Generate commit message based on git changes."""
-        parts = []
-
-        # Node changes (most specific)
-        if status.git.nodes_added and status.git.nodes_removed:
-            parts.append(f"Update nodes: +{len(status.git.nodes_added)}, -{len(status.git.nodes_removed)}")
-        elif status.git.nodes_added:
-            if len(status.git.nodes_added) == 1:
-                parts.append(f"Add {status.git.nodes_added[0]}")
-            else:
-                parts.append(f"Add {len(status.git.nodes_added)} nodes")
-        elif status.git.nodes_removed:
-            if len(status.git.nodes_removed) == 1:
-                parts.append(f"Remove {status.git.nodes_removed[0]}")
-            else:
-                parts.append(f"Remove {len(status.git.nodes_removed)} nodes")
-
-        # Dependency changes
-        if status.git.dependencies_added or status.git.dependencies_removed or status.git.dependencies_updated:
-            dep_count = len(status.git.dependencies_added) + len(status.git.dependencies_removed) + len(status.git.dependencies_updated)
-            parts.append(f"Update {dep_count} dependencies")
-
-        # Constraint changes
-        if status.git.constraints_added or status.git.constraints_removed:
-            parts.append("Update constraints")
-
-        # Workflow tracking changes (prioritized)
-        if status.git.workflows_tracked and status.git.workflows_untracked:
-            parts.append(f"Update workflow tracking: +{len(status.git.workflows_tracked)}, -{len(status.git.workflows_untracked)}")
-        elif status.git.workflows_tracked:
-            if len(status.git.workflows_tracked) == 1:
-                parts.append(f"Track workflow: {status.git.workflows_tracked[0]}")
-            else:
-                parts.append(f"Track {len(status.git.workflows_tracked)} workflows")
-        elif status.git.workflows_untracked:
-            if len(status.git.workflows_untracked) == 1:
-                parts.append(f"Untrack workflow: {status.git.workflows_untracked[0]}")
-            else:
-                parts.append(f"Untrack {len(status.git.workflows_untracked)} workflows")
-
-
-        # Workflow file changes
-        if status.git.workflow_changes:
-            workflow_count = len(status.git.workflow_changes)
-            if workflow_count == 1:
-                workflow_name, workflow_status = list(status.git.workflow_changes.items())[0]
-                if workflow_status == "modified":
-                    parts.append(f"Update {workflow_name}")
-                elif workflow_status == "added":
-                    parts.append(f"Add {workflow_name}")
-                elif workflow_status == "deleted":
-                    parts.append(f"Remove {workflow_name}")
-            else:
-                parts.append(f"Update {workflow_count} workflows")
-
-        # Fallback
-        if not parts:
-            parts.append("Update environment configuration")
-
-        return "; ".join(parts)
 
     @with_env_logging("env reset")
     def reset(self, args):
