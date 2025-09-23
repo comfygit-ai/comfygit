@@ -391,9 +391,8 @@ def with_env_logging(command_name: str, get_env_name: Callable | None = None, lo
             env_name = None
             if get_env_name:
                 env_name = get_env_name(args)
-            elif hasattr(self, '_get_env_name'):
-                # Prefer _get_env_name for EnvironmentCommands as it handles -e flag and active env
-                env_name = self._get_env_name(args)
+            elif hasattr(self, '_get_env'):
+                env_name = self._get_env(args).name
             elif hasattr(args, 'name'):
                 env_name = args.name
             elif hasattr(args, 'env_name'):

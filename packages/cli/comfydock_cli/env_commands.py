@@ -61,36 +61,6 @@ class EnvironmentCommands:
             sys.exit(1)
         return active
 
-    def _get_env_name(self, args) -> str | None:
-        """Get environment name from global -e flag or active environment.
-        
-        This is used by the @with_env_logging decorator to determine which
-        environment log file to write to.
-        
-        Args:
-            args: Parsed command line arguments
-            
-        Returns:
-            Environment name string, or None if no environment available
-        """
-        # Check global -e flag first
-        if hasattr(args, 'target_env') and args.target_env:
-            # Validate it exists
-            try:
-                self.workspace.get_environment(args.target_env)
-                return args.target_env
-            except Exception as e:
-                logger.debug(f"Failed to get environment '{args.target_env}': {e}")
-                return None
-
-        # Fall back to active environment
-        try:
-            active = self.workspace.get_active_environment()
-            return active.name if active else None
-        except Exception as e:
-            logger.debug(f"Failed to get active environment: {e}")
-            return None
-
     # === Commands that operate ON environments ===
 
     @with_env_logging("env create")
@@ -146,14 +116,8 @@ class EnvironmentCommands:
     @with_env_logging("env delete")
     def delete(self, args):
         """Delete an environment."""
-        try:
-            self.workspace.get_environment(args.name)
-        except:
-            print(f"✗ Unknown environment: {args.name}")
-            print("Available environments:")
-            for e in self.workspace.list_environments():
-                print(f"  • {e.name}")
-            sys.exit(1)
+        # Check that environment exists
+        self._get_env(args)
 
         # Confirm deletion unless --yes is specified
         if not args.yes:
@@ -180,8 +144,11 @@ class EnvironmentCommands:
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
 
-        print("🔁 Syncing environment...")
-        env.sync()
+        # TODO: Handle no sync arg
+        if not args.no_sync:
+            print("🔁 Syncing environment...")
+            # TODO: Handle interactive resolution
+            env.sync()
 
         print(f"🎮 Starting ComfyUI in environment: {env.name}")
         if comfyui_args:
@@ -201,6 +168,7 @@ class EnvironmentCommands:
         print(f"Environment: {env.name}")
         print(f"Path: {env.path}")
 
+        # TODO: Should use pre-format output data method instead
         status = env.status()
 
         # Show sync status
