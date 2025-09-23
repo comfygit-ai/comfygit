@@ -16,6 +16,7 @@ from comfydock_core.configs.model_config import ModelConfig
 from ..logging.logging_config import get_logger
 from ..models.environment import WorkflowStatus
 from ..models.exceptions import CDEnvironmentError
+from ..models.sync import ModelResolutionMap
 from ..models.workflow import InstalledPackageInfo, WorkflowAnalysisResult
 from ..services.global_node_resolver import GlobalNodeResolver
 # from ..utils.workflow_parser import WorkflowParser
@@ -385,13 +386,13 @@ class WorkflowManager:
     def track_workflow_with_resolutions(
         self,
         name: str,
-        resolutions: Dict[Tuple[str, int], "ModelWithLocation"] | None = None
+        resolutions: ModelResolutionMap | None = None
     ) -> Tuple[int, int]:
         """Track workflow with user-selected resolutions for ambiguous models
 
         Args:
             name: Workflow name
-            resolutions: {(node_id, widget_index): chosen_model} for ambiguous cases
+            resolutions: ModelResolutionMap for ambiguous cases, or None to skip resolution
 
         Returns:
             (resolved_count, unresolved_count)

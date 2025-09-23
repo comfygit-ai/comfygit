@@ -1,11 +1,12 @@
 """Model disambiguator for handling ambiguous model references."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING, List
+
+from comfydock_core.models.sync import ModelResolutionMap
 
 if TYPE_CHECKING:
     from comfydock_core.models.workflow import ModelResolutionResult
-    from comfydock_core.models.shared import ModelWithLocation
 
 
 class ModelDisambiguator:
@@ -14,9 +15,9 @@ class ModelDisambiguator:
     def resolve_ambiguous_models(
         self,
         results: List["ModelResolutionResult"]
-    ) -> Dict[Tuple[str, int], "ModelWithLocation"]:
+    ) -> ModelResolutionMap:
         """Prompt user to resolve ambiguous models"""
-        resolutions = {}
+        resolutions: ModelResolutionMap = {}
 
         # Filter to ambiguous cases only
         ambiguous = [r for r in results if r.resolution_type == "ambiguous"]

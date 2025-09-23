@@ -154,11 +154,15 @@ class EnvironmentCommands:
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
 
-        # TODO: Handle no sync arg
+        # Handle sync if needed
         if not args.no_sync:
             print("🔁 Syncing environment...")
-            # TODO: Handle interactive resolution
-            env.sync()
+            from comfydock_cli.interactive.model_resolver import SilentResolver
+            # Use silent resolver for run command to avoid interrupting startup
+            sync_result = env.sync(model_resolver=SilentResolver())
+            if not sync_result.success:
+                for error in sync_result.errors:
+                    print(f"⚠️  {error}", file=sys.stderr)
 
         print(f"🎮 Starting ComfyUI in environment: {env.name}")
         if comfyui_args:
@@ -370,7 +374,10 @@ class EnvironmentCommands:
         # Now try to sync environment:
         if not env.status().is_synced:
             print("🔁 Syncing environment...")
-            env.sync()
+            from comfydock_cli.interactive.model_resolver import InteractiveModelResolver
+            sync_result = env.sync(model_resolver=InteractiveModelResolver())
+            if sync_result.has_unresolved_models:
+                print("⚠️  Some workflow models remain unresolved")
 
         # if result.resolution_success is not None:
         #     if result.conflict_message:
@@ -401,7 +408,10 @@ class EnvironmentCommands:
         # Now try to sync environment:
         if not env.status().is_synced:
             print("🔁 Syncing environment...")
-            env.sync()
+            from comfydock_cli.interactive.model_resolver import InteractiveModelResolver
+            sync_result = env.sync(model_resolver=InteractiveModelResolver())
+            if sync_result.has_unresolved_models:
+                print("⚠️  Some workflow models remain unresolved")
 
         print(f"\nRun 'comfydock -e {env.name} env status' to review changes")
         # print(f"Run 'comfydock -e {env.name} env sync' to apply changes")
@@ -550,22 +560,26 @@ class EnvironmentCommands:
 
         print(f"⚙️ Applying changes to: {env.name}")
 
-        # Apply changes
+        # Apply changes with interactive model resolver
         try:
-            env.sync()
+            from comfydock_cli.interactive.model_resolver import InteractiveModelResolver
+            sync_result = env.sync(model_resolver=InteractiveModelResolver())
+
+            # Check for errors
+            if not sync_result.success:
+                for error in sync_result.errors:
+                    print(f"⚠️  {error}", file=sys.stderr)
+
+            # Show unresolved models warning if any
+            if sync_result.has_unresolved_models:
+                print("\n⚠️  Some workflow models remain unresolved")
+                print("   Update model paths in ComfyUI to resolve")
+
         except Exception as e:
             if logger:
                 logger.error(f"Sync failed for environment '{env.name}': {e}", exc_info=True)
             print(f"✗ Failed to apply changes: {e}", file=sys.stderr)
             sys.exit(1)
-
-        # Re-analyze workflows after sync
-        if not status.workflow.in_sync:
-            out_of_sync_workflows = [
-                name for name, sync_status in status.workflow.sync_status.items()
-                if sync_status != "in_sync"
-            ]
-            self._reanalyze_workflows(env, out_of_sync_workflows)
 
         print("✓ Changes applied successfully!")
         print(f"\nEnvironment '{env.name}' is ready to use")
@@ -608,7 +622,10 @@ class EnvironmentCommands:
             # Now try to sync environment:
             if not env.status().is_synced:
                 print("🔁 Syncing environment...")
-                env.sync()
+                from comfydock_cli.interactive.model_resolver import InteractiveModelResolver
+                sync_result = env.sync(model_resolver=InteractiveModelResolver())
+                if sync_result.has_unresolved_models:
+                    print("⚠️  Some workflow models remain unresolved")
 
             if args.target:
                 print(f"\nEnvironment is now at version {args.target}")
@@ -739,15 +756,15 @@ class EnvironmentCommands:
         results, existing_metadata = env.workflow_manager.analyze_workflow_models(name)
 
         # Show resolution summary
-        from comfydock_cli.interactive.model_disambiguator import ModelDisambiguator
-        disambiguator = ModelDisambiguator()
-        disambiguator.show_resolution_summary(results)
+        from comfydock_cli.interactive.model_resolver import InteractiveModelResolver
+        resolver = InteractiveModelResolver()
+        resolver.show_summary(results)
 
         # Handle ambiguous models
         resolutions = None
         ambiguous = [r for r in results if r.resolution_type == "ambiguous"]
         if ambiguous and not skip_disambiguation:
-            resolutions = disambiguator.resolve_ambiguous_models(results)
+            resolutions = resolver.resolve_ambiguous(results)
 
         # Track with resolutions
         resolved_count, unresolved_count = env.workflow_manager.track_workflow_with_resolutions(
@@ -901,61 +918,35 @@ class EnvironmentCommands:
             print(f"✗ Failed to untrack workflow '{args.name}': {e}", file=sys.stderr)
             sys.exit(1)
 
-    def _reanalyze_workflows(self, env: Environment, workflow_names: list[str]):
-        """Re-analyze workflows after sync and handle model disambiguation."""
-        if not workflow_names:
-            return
-
-        print("\n📊 Re-analyzing workflow models...")
-
-        for name in workflow_names:
-            print(f"  Analyzing '{name}'...")
-
-            # Re-analyze after sync - metadata will be preserved if still valid
-            model_results, existing_metadata = env.workflow_manager.analyze_workflow_models(name)
-
-            # Only show details if there are issues
-            ambiguous = [r for r in model_results if r.resolution_type == "ambiguous"]
-            unresolved = [r for r in model_results if r.resolution_type == "not_found"]
-
-            if ambiguous:
-                print(f"    ⚠️  Found {len(ambiguous)} ambiguous models")
-                from comfydock_cli.interactive.model_disambiguator import ModelDisambiguator
-                disambiguator = ModelDisambiguator()
-                resolutions = disambiguator.resolve_ambiguous_models(model_results)
-
-                # Update with resolutions
-                env.workflow_manager.track_workflow_with_resolutions(name, resolutions)
-            elif unresolved:
-                print(f"    ⚠️  {len(unresolved)} models unresolved")
-            else:
-                metadata_count = len([r for r in model_results if r.resolution_type == "metadata"])
-                if metadata_count > 0:
-                    print(f"    ✅ All models resolved ({metadata_count} from cached metadata)")
-                else:
-                    print("    ✅ All models resolved")
 
     @with_env_logging("workflow sync")
     def workflow_sync(self, args):
         """Sync workflows and update metadata"""
         env = self._get_env(args)
 
-        # Sync files first
-        results = env.workflow_manager.sync_workflows()
+        # Sync files with model resolution
+        from comfydock_cli.interactive.model_resolver import InteractiveModelResolver
+        sync_result = env.sync(model_resolver=InteractiveModelResolver())
 
-        any_synced = False
-        workflows_to_reanalyze = []
-        for name, action in results.items():
-            if action != "in_sync":
-                print(f"Syncing '{name}': {action}")
-                any_synced = True
-                workflows_to_reanalyze.append(name)
+        # Report results
+        if sync_result.workflows_synced:
+            any_changed = False
+            for name, action in sync_result.workflows_synced.items():
+                if action != "in_sync":
+                    print(f"Synced '{name}': {action}")
+                    any_changed = True
 
-        if any_synced:
-            # Use the shared helper to re-analyze workflows
-            self._reanalyze_workflows(env, workflows_to_reanalyze)
+            if not any_changed:
+                print("All workflows are in sync")
+
+            # Report model resolution results
+            for resolution in sync_result.workflow_resolutions:
+                if resolution.unresolved_count > 0:
+                    print(f"  ⚠️  '{resolution.name}': {resolution.unresolved_count} models unresolved")
+                elif resolution.resolved_count > 0:
+                    print(f"  ✅ '{resolution.name}': {resolution.resolved_count} models resolved")
         else:
-            print("All workflows are in sync")
+            print("No workflows to sync")
 
     # === Environment Model Commands ===
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 import subprocess
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 from ..factories.uv_factory import create_uv_for_environment
 from ..logging.logging_config import get_logger
@@ -18,6 +18,7 @@ from ..managers.status_scanner import StatusScanner
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
+from ..models.sync import ModelResolutionMap, ModelResolutionStrategy, NoOpResolver, SyncResult, WorkflowResolution
 from ..services.node_registry import NodeInfo, NodeRegistry
 from ..utils.common import run_command
 
@@ -150,36 +151,147 @@ class Environment:
             workflow_status=workflow_status
         )
 
-    def sync(self, dry_run: bool = False) -> None:
+    def sync(
+        self,
+        dry_run: bool = False,
+        model_resolver: ModelResolutionStrategy | None = None
+    ) -> SyncResult:
         """Apply changes: sync packages and custom nodes with environment.
-        
+
+        Args:
+            dry_run: If True, don't actually apply changes
+            model_resolver: Optional strategy for resolving ambiguous models
+                          If None, ambiguous models are left unresolved
+
+        Returns:
+            SyncResult with details of what was synced
+
         Raises:
             UVCommandError: If sync fails
         """
+        result = SyncResult()
 
         logger.info("Syncing environment...")
 
         # Sync packages with UV
-        self.uv_manager.sync_project(all_groups=True, dry_run=dry_run)
+        try:
+            self.uv_manager.sync_project(all_groups=True, dry_run=dry_run)
+            result.packages_synced = True
+        except Exception as e:
+            logger.error(f"Package sync failed: {e}")
+            result.errors.append(f"Package sync failed: {e}")
+            result.success = False
 
         # Sync custom nodes to filesystem
-        self.node_manager.sync_nodes_to_filesystem()
+        try:
+            # TODO: Enhance node_manager to return what was changed
+            self.node_manager.sync_nodes_to_filesystem()
+            # For now, we just note it happened
+        except Exception as e:
+            logger.error(f"Node sync failed: {e}")
+            result.errors.append(f"Node sync failed: {e}")
+            result.success = False
 
         # Sync workflows
         workflow_results = self.workflow_manager.sync_workflows()
-        for name, result in workflow_results.items():
-            if result != "in_sync":
-                logger.info(f"Workflow '{name}': {result}")
+        result.workflows_synced = {name: str(action) for name, action in workflow_results.items()}
+        for name, action in workflow_results.items():
+            if action != "in_sync":
+                logger.info(f"Workflow '{name}': {action}")
+
+        # Re-analyze workflows if resolver provided
+        if model_resolver:
+            out_of_sync_workflows = [
+                name for name, action in result.workflows_synced.items()
+                if action != "in_sync"
+            ]
+            if out_of_sync_workflows:
+                result.workflow_resolutions = self._resolve_workflow_models(
+                    out_of_sync_workflows,
+                    model_resolver
+                )
 
         # Sync model paths to ensure models are available
         try:
             self.model_path_manager.sync_model_paths()
-            # ModelPathManager now handles its own logging
+            result.model_paths_configured = True
         except Exception as e:
             logger.warning(f"Failed to configure model paths: {e}")
+            result.errors.append(f"Model path configuration failed: {e}")
             # Continue anyway - ComfyUI might still work
 
-        logger.info("Successfully synced environment")
+        if result.success:
+            logger.info("Successfully synced environment")
+        else:
+            logger.warning(f"Sync completed with {len(result.errors)} errors")
+
+        return result
+
+    def _resolve_workflow_models(
+        self,
+        workflow_names: List[str],
+        resolver: ModelResolutionStrategy
+    ) -> List[WorkflowResolution]:
+        """Re-analyze workflow models and resolve ambiguous references.
+
+        Args:
+            workflow_names: Names of workflows to analyze
+            resolver: Strategy for resolving ambiguous models
+
+        Returns:
+            List of WorkflowResolution results
+        """
+        resolutions = []
+
+        logger.info(f"Resolving models for {len(workflow_names)} workflows...")
+
+        for name in workflow_names:
+            logger.debug(f"Analyzing workflow '{name}'...")
+
+            # Analyze workflow models
+            model_results, existing_metadata = self.workflow_manager.analyze_workflow_models(name)
+
+            # Show summary if resolver wants to
+            if hasattr(resolver, 'show_summary'):
+                resolver.show_summary(model_results)
+
+            # Count different types
+            ambiguous = [r for r in model_results if r.resolution_type == "ambiguous"]
+            unresolved = [r for r in model_results if r.resolution_type == "not_found"]
+            metadata_resolved = [r for r in model_results if r.resolution_type == "metadata"]
+
+            # Let resolver handle ambiguous models
+            user_resolutions: ModelResolutionMap = {}
+            if ambiguous:
+                user_resolutions = resolver.resolve_ambiguous(model_results)
+
+            # Update workflow with resolutions
+            resolved_count = 0
+            unresolved_count = 0
+
+            if user_resolutions or model_results:
+                resolved_count, unresolved_count = self.workflow_manager.track_workflow_with_resolutions(
+                    name,
+                    user_resolutions
+                )
+
+            # Create resolution result
+            resolution = WorkflowResolution(
+                name=name,
+                resolved_count=resolved_count,
+                unresolved_count=unresolved_count,
+                ambiguous_count=len(ambiguous),
+                action="resolved"  # Workflow was just resolved
+            )
+            resolutions.append(resolution)
+
+            # Log summary
+            if unresolved_count > 0:
+                logger.warning(f"Workflow '{name}': {resolved_count} resolved, {unresolved_count} unresolved")
+            else:
+                logger.info(f"Workflow '{name}': All {resolved_count} models resolved")
+
+        return resolutions
 
     def rollback(self, target: str | None = None) -> None:
         """Rollback environment to a previous state and/or discard uncommitted changes.
