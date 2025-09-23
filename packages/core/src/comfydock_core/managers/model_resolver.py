@@ -1,10 +1,14 @@
 """ModelResolver - Resolve model requirements for environment import/export."""
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..logging.logging_config import get_logger
-from ..models.shared import ModelIndex
+
+if TYPE_CHECKING:
+    from ..managers.model_index_manager import ModelIndexManager
 
 logger = get_logger(__name__)
 
@@ -42,7 +46,7 @@ class ResolutionResult:
 class ModelResolver:
     """Resolve model requirements for environments using multiple strategies."""
 
-    def __init__(self, index_manager, download_manager=None):
+    def __init__(self, index_manager: ModelIndexManager, download_manager=None):
         """Initialize ModelResolver.
         
         Args:
@@ -80,7 +84,7 @@ class ModelResolver:
             logger.debug(f"Resolving model: {model_spec.get('filename', 'unknown')} [{short_hash[:8]}...]")
 
             # Strategy 1: Try short hash first
-            matches = self.index_manager.find_by_hash(short_hash)
+            matches = self.index_manager.find_model_by_hash(short_hash)
             if matches:
                 result.resolved[short_hash] = matches[0]
                 logger.debug(f"✓ Resolved by short hash: {short_hash[:8]}...")
@@ -88,7 +92,7 @@ class ModelResolver:
 
             # Strategy 2: Try full BLAKE3 hash
             if blake3_hash := model_spec.get('blake3'):
-                matches = self.index_manager.find_by_blake3(blake3_hash)
+                matches = self.index_manager.find_model_by_hash(blake3_hash)
                 if matches:
                     result.resolved[short_hash] = matches[0]
                     logger.debug(f"✓ Resolved by BLAKE3: {short_hash[:8]}...")
@@ -96,7 +100,7 @@ class ModelResolver:
 
             # Strategy 3: Try SHA256 hash
             if sha256_hash := model_spec.get('sha256'):
-                matches = self.index_manager.find_by_sha256(sha256_hash)
+                matches = self.index_manager.find_model_by_hash(sha256_hash)
                 if matches:
                     result.resolved[short_hash] = matches[0]
                     logger.debug(f"✓ Resolved by SHA256: {short_hash[:8]}...")
@@ -279,7 +283,7 @@ class ModelResolver:
         }
 
         for model_hash in model_hashes:
-            models = self.index_manager.find_by_hash(model_hash)
+            models = self.index_manager.find_model_by_hash(model_hash)
             if not models:
                 logger.warning(f"Model not found for export: {model_hash[:8]}...")
                 continue
@@ -296,7 +300,7 @@ class ModelResolver:
 
             if model_path.exists():
                 # Only compute if we don't already have them
-                existing_models = self.index_manager.find_by_hash(model_hash)
+                existing_models = self.index_manager.find_model_by_hash(model_hash)
                 if existing_models:
                     # Check if we need to compute additional hashes
                     try:

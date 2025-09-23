@@ -1,15 +1,18 @@
 """Environment-specific commands for ComfyDock CLI - Simplified."""
+from __future__ import annotations
 
 import sys
 from functools import cached_property
+from typing import TYPE_CHECKING
 
-from comfydock_core.core.workspace import Workspace
-from comfydock_core.core.environment import Environment
-from comfydock_core.models.environment import EnvironmentStatus
+if TYPE_CHECKING:
+    from comfydock_core.core.environment import Environment
+    from comfydock_core.core.workspace import Workspace
+    from comfydock_core.models.environment import EnvironmentStatus
 
-from .logging.logging_config import get_logger
-from .logging.environment_logger import with_env_logging
 from .cli_utils import get_workspace_or_exit
+from .logging.environment_logger import with_env_logging
+from .logging.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -22,7 +25,7 @@ class EnvironmentCommands:
         pass
 
     @cached_property
-    def workspace(self) -> "Workspace":
+    def workspace(self) -> Workspace:
         return get_workspace_or_exit()
 
     def _get_env(self, args) -> Environment:
@@ -42,7 +45,7 @@ class EnvironmentCommands:
             try:
                 env = self.workspace.get_environment(args.target_env)
                 return env
-            except:
+            except Exception as e:
                 print(f"✗ Unknown environment: {args.target_env}")
                 print("Available environments:")
                 for e in self.workspace.list_environments():
@@ -105,11 +108,11 @@ class EnvironmentCommands:
         except Exception as e:
             print(f"✗ Failed to create environment: {e}", file=sys.stderr)
             sys.exit(1)
-            
+
         if args.use:
             try:
                 self.workspace.set_active_environment(args.name)
-                
+
             except Exception as e:
                 print(f"✗ Failed to set active environment: {e}", file=sys.stderr)
                 sys.exit(1)
@@ -118,8 +121,8 @@ class EnvironmentCommands:
         if args.use:
             print(f"✓ Active environment set to: {args.name}")
             print("\nNext steps:")
-            print(f"  • Run ComfyUI: comfydock run")
-            print(f"  • Add nodes: comfydock node add <node-name>")
+            print("  • Run ComfyUI: comfydock run")
+            print("  • Add nodes: comfydock node add <node-name>")
         else:
             print("\nNext steps:")
             print(f"  • Run ComfyUI: comfydock -e {args.name} run")
@@ -375,11 +378,14 @@ class EnvironmentCommands:
         """Add a custom node - directly modifies pyproject.toml."""
         env = self._get_env(args)
 
-        print(f"📦 Adding node: {args.node_name}")
+        if args.dev:
+            print(f"🔍 Searching for development node: {args.node_name}")
+        else:
+            print(f"📦 Adding node: {args.node_name}")
 
         # Directly add the node
         try:
-            env.add_node(args.node_name, no_test=args.no_test)
+            env.add_node(args.node_name, is_development=args.dev, no_test=args.no_test)
         except Exception as e:
             print(f"✗ Failed to add node '{args.node_name}'", file=sys.stderr)
             print(f"   {e}", file=sys.stderr)
@@ -438,9 +444,18 @@ class EnvironmentCommands:
             return
 
         print(f"Custom nodes in '{env.name}':")
+
+        # List regular nodes
         for node_name, info in nodes.items():
+            if node_name == 'development':
+                continue  # Skip development section
             source = info.get('source', 'unknown')
             print(f"  • {node_name} ({source})")
+
+        # List development nodes
+        dev_nodes = nodes.get('development', {})
+        for dev_name, _dev_info in dev_nodes.items():
+            print(f"  • {dev_name} (development)")
 
     # === Constraint management ===
 
@@ -516,7 +531,7 @@ class EnvironmentCommands:
         # Get status first
         status = env.status()
 
-        if status.is_synced:
+        if status.is_synced and status.workflow.in_sync:
             print("✓ No changes to apply")
             return
 
@@ -570,6 +585,14 @@ class EnvironmentCommands:
         except Exception as e:
             print(f"✗ Failed to apply changes: {e}", file=sys.stderr)
             sys.exit(1)
+
+        # Re-analyze workflows after sync
+        if not status.workflow.in_sync:
+            out_of_sync_workflows = [
+                name for name, sync_status in status.workflow.sync_status.items()
+                if sync_status != "in_sync"
+            ]
+            self._reanalyze_workflows(env, out_of_sync_workflows)
 
         print("✓ Changes applied successfully!")
         print(f"\nEnvironment '{env.name}' is ready to use")
@@ -895,7 +918,7 @@ class EnvironmentCommands:
                 identifier = pkg.github_url
             else:
                 # Skip if we have no way to install
-                print(f"⚠️ Cannot install package - no registry ID or GitHub URL available")
+                print("⚠️ Cannot install package - no registry ID or GitHub URL available")
                 continue
 
             to_install.append(identifier)
@@ -922,7 +945,7 @@ class EnvironmentCommands:
                 marker = " (suggested)" if version == pkg.suggested_version else ""
                 print(f"  {i}. v{version}{marker}")
 
-            selection = input(f"Select version [1]: ").strip()
+            selection = input("Select version [1]: ").strip()
             if selection.isdigit() and 1 <= int(selection) <= len(versions):
                 selected_version = versions[int(selection) - 1]
             else:
@@ -936,7 +959,7 @@ class EnvironmentCommands:
             elif pkg.github_url:
                 # Only use GitHub as last resort
                 identifier = pkg.github_url
-                print(f"  ⚠️ Using GitHub URL (no registry version available)")
+                print("  ⚠️ Using GitHub URL (no registry version available)")
             else:
                 print(f"  ⚠️ Cannot install {name} - no installation source available")
                 continue
@@ -958,6 +981,40 @@ class EnvironmentCommands:
             print(f"✗ Failed to untrack workflow '{args.name}': {e}", file=sys.stderr)
             sys.exit(1)
 
+    def _reanalyze_workflows(self, env: Environment, workflow_names: list[str]):
+        """Re-analyze workflows after sync and handle model disambiguation."""
+        if not workflow_names:
+            return
+
+        print("\n📊 Re-analyzing workflow models...")
+
+        for name in workflow_names:
+            print(f"  Analyzing '{name}'...")
+
+            # Re-analyze after sync - metadata will be preserved if still valid
+            model_results, existing_metadata = env.workflow_manager.analyze_workflow_models(name)
+
+            # Only show details if there are issues
+            ambiguous = [r for r in model_results if r.resolution_type == "ambiguous"]
+            unresolved = [r for r in model_results if r.resolution_type == "not_found"]
+
+            if ambiguous:
+                print(f"    ⚠️  Found {len(ambiguous)} ambiguous models")
+                from comfydock_cli.interactive.model_disambiguator import ModelDisambiguator
+                disambiguator = ModelDisambiguator()
+                resolutions = disambiguator.resolve_ambiguous_models(model_results)
+
+                # Update with resolutions
+                env.workflow_manager.track_workflow_with_resolutions(name, resolutions)
+            elif unresolved:
+                print(f"    ⚠️  {len(unresolved)} models unresolved")
+            else:
+                metadata_count = len([r for r in model_results if r.resolution_type == "metadata"])
+                if metadata_count > 0:
+                    print(f"    ✅ All models resolved ({metadata_count} from cached metadata)")
+                else:
+                    print("    ✅ All models resolved")
+
     @with_env_logging("workflow sync")
     def workflow_sync(self, args):
         """Sync workflows and update metadata"""
@@ -967,39 +1024,17 @@ class EnvironmentCommands:
         results = env.workflow_manager.sync_workflows()
 
         any_synced = False
+        workflows_to_reanalyze = []
         for name, action in results.items():
             if action != "in_sync":
                 print(f"Syncing '{name}': {action}")
                 any_synced = True
+                workflows_to_reanalyze.append(name)
 
-                # Re-analyze after sync - metadata will be preserved if still valid
-                model_results, existing_metadata = env.workflow_manager.analyze_workflow_models(name)
-
-                # Only show details if there are issues
-                needs_attention = False
-                ambiguous = [r for r in model_results if r.resolution_type == "ambiguous"]
-                unresolved = [r for r in model_results if r.resolution_type == "not_found"]
-
-                if ambiguous:
-                    print(f"  ⚠️  Found {len(ambiguous)} ambiguous models")
-                    from comfydock_cli.interactive.model_disambiguator import ModelDisambiguator
-                    disambiguator = ModelDisambiguator()
-                    resolutions = disambiguator.resolve_ambiguous_models(model_results)
-                    needs_attention = True
-
-                    # Update with resolutions
-                    env.workflow_manager.track_workflow_with_resolutions(name, resolutions)
-                elif unresolved:
-                    print(f"  ⚠️  {len(unresolved)} models unresolved")
-                    needs_attention = True
-                else:
-                    metadata_count = len([r for r in model_results if r.resolution_type == "metadata"])
-                    if metadata_count > 0:
-                        print(f"  ✅ All models resolved ({metadata_count} from cached metadata)")
-                    else:
-                        print(f"  ✅ All models resolved")
-
-        if not any_synced:
+        if any_synced:
+            # Use the shared helper to re-analyze workflows
+            self._reanalyze_workflows(env, workflows_to_reanalyze)
+        else:
             print("All workflows are in sync")
 
     # === Environment Model Commands ===

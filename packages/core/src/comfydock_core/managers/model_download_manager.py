@@ -70,7 +70,7 @@ class ModelDownloadManager:
         )
 
         # Return the indexed model
-        indexed_models = self.model_manager.index_manager.find_by_hash(model_info.short_hash)
+        indexed_models = self.model_manager.index_manager.find_model_by_hash(model_info.short_hash)
         if not indexed_models:
             raise ComfyDockError(f"Failed to index downloaded model: {filename}")
 

@@ -203,10 +203,10 @@ class NodeRegistry:
     @staticmethod
     def parse_expected_nodes(pyproject_config: dict) -> dict[str, NodeInfo]:
         """Parse expected nodes from pyproject.toml configuration.
-        
+
         Args:
             pyproject_config: Loaded pyproject.toml configuration
-            
+
         Returns:
             Dict of node_name -> NodeInfo for expected nodes
         """
@@ -216,10 +216,25 @@ class NodeRegistry:
             return {}
 
         expected_nodes = {}
-        for node_identifier, _ in nodes_config.items():
+
+        # Parse regular nodes
+        for node_identifier, node_data in nodes_config.items():
+            # Skip 'development' key as it's a section, not a node
+            if node_identifier == 'development':
+                continue
             node_info = NodeInfo.from_pyproject_config(nodes_config, node_identifier=node_identifier)
             if node_info:
                 expected_nodes[node_info.name] = node_info
+
+        # Parse development nodes
+        dev_nodes = nodes_config.get('development', {})
+        for dev_identifier, dev_data in dev_nodes.items():
+            # Create simple NodeInfo for development nodes
+            expected_nodes[dev_identifier] = NodeInfo(
+                name=dev_data.get('name', dev_identifier),
+                version=dev_data.get('version', 'dev'),
+                source='development'
+            )
 
         return expected_nodes
 
@@ -240,7 +255,7 @@ class NodeRegistry:
         # Ensure directory exists
         custom_nodes_dir.mkdir(exist_ok=True)
 
-        # Remove nodes that shouldn't exist
+        # Remove nodes that shouldn't exist (development nodes are in expected_nodes)
         if custom_nodes_dir.exists():
             for node_dir in custom_nodes_dir.iterdir():
                 if node_dir.is_dir() and node_dir.name not in expected_nodes:
@@ -248,9 +263,14 @@ class NodeRegistry:
                     import shutil
                     shutil.rmtree(node_dir, ignore_errors=True)
 
-        # Install nodes that should exist
+        # Install nodes that should exist (skip development nodes)
         for node_name, node_info in expected_nodes.items():
             if not node_info:
+                continue
+
+            # Skip development nodes - they're already on disk
+            if node_info.source == 'development':
+                logger.debug(f"Skipping development node: {node_name}")
                 continue
 
             node_path = custom_nodes_dir / node_name

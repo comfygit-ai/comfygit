@@ -1,6 +1,8 @@
 # managers/node_manager.py
 from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..logging.logging_config import get_logger
 from ..managers.pyproject_manager import PyprojectManager
@@ -14,8 +16,6 @@ from ..models.exceptions import (
 from ..models.shared import NodePackage
 from ..services.global_node_resolver import GlobalNodeResolver
 from ..services.node_registry import NodeInfo, NodeRegistry
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..services.registry_data_manager import RegistryDataManager
@@ -85,7 +85,7 @@ class NodeManager:
         # Store node configuration
         self.pyproject.nodes.add(node_package.node_info, node_package.identifier)
 
-    def add_node(self, identifier: str, is_local: bool = False, no_test: bool = False) -> NodeInfo:
+    def add_node(self, identifier: str, is_local: bool = False, is_development: bool = False, no_test: bool = False) -> NodeInfo:
         """Add a custom node to the environment.
 
         Raises:
@@ -94,6 +94,10 @@ class NodeManager:
             CDEnvironmentError: If node with same name already exists
         """
         logger.info(f"Adding node: {identifier}")
+
+        # Handle development nodes
+        if is_development:
+            return self._add_development_node(identifier)
 
         # Check for existing installation by registry ID (if GitHub URL provided)
         registry_id = None
@@ -155,10 +159,18 @@ class NodeManager:
 
     def remove_node(self, identifier: str):
         """Remove a custom node.
-        
+
         Raises:
             CDNodeNotFoundError: If node not found
         """
+        # Check development nodes first
+        if self.pyproject.dev_nodes.exists(identifier):
+            removed = self.pyproject.dev_nodes.remove(identifier)
+            if removed:
+                logger.info(f"Removed development node '{identifier}' from tracking")
+                print(f"ℹ️ Development node '{identifier}' removed from tracking (files preserved)")
+                return
+
         # Get node info before removal to capture dependency sources
         existing_nodes = self.pyproject.nodes.get_existing()
         if identifier not in existing_nodes:
@@ -212,3 +224,44 @@ class NodeManager:
                     'source': node_info.source
                 }
         return {}
+
+    def _add_development_node(self, identifier: str) -> NodeInfo:
+        """Add a development node by discovering it in the custom_nodes directory."""
+        # Look for existing directory
+        node_path = self.custom_nodes_path / identifier
+
+        if not node_path.exists() or not node_path.is_dir():
+            # Try case-insensitive search
+            for item in self.custom_nodes_path.iterdir():
+                if item.is_dir() and item.name.lower() == identifier.lower():
+                    node_path = item
+                    identifier = item.name  # Use actual directory name
+                    break
+            else:
+                raise CDNodeNotFoundError(
+                    f"Development node directory '{identifier}' not found in {self.custom_nodes_path}"
+                )
+
+        # Check if already tracked
+        if self.pyproject.dev_nodes.exists(identifier):
+            print(f"⚠️ Development node '{identifier}' is already tracked")
+            # Return a simple NodeInfo for consistency
+            dev_node = self.pyproject.dev_nodes.get_all()[identifier]
+            return NodeInfo(
+                name=dev_node.get('name', identifier),
+                version=dev_node.get('version', 'dev'),
+                source='development'
+            )
+
+        # Add to development section
+        self.pyproject.dev_nodes.add(identifier, identifier)
+
+        print(f"✓ Added development node '{identifier}' for tracking")
+
+        # Return a simple NodeInfo
+        return NodeInfo(
+            name=identifier,
+            version='dev',
+            source='development'
+        )
+

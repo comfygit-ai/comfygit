@@ -243,15 +243,15 @@ class Environment:
     # Node Management
     # =====================================================
 
-    def add_node(self, identifier: str, is_local: bool = False, no_test: bool = False) -> NodeInfo:
+    def add_node(self, identifier: str, is_local: bool = False, is_development: bool = False, no_test: bool = False) -> NodeInfo:
         """Add a custom node to the environment.
-        
+
         Raises:
             CDNodeNotFoundError: If node not found
             CDNodeConflictError: If node has dependency conflicts
             CDEnvironmentError: If node with same name already exists
         """
-        return self.node_manager.add_node(identifier, is_local, no_test)
+        return self.node_manager.add_node(identifier, is_local, is_development, no_test)
 
     def remove_node(self, identifier: str):
         """Remove a custom node.

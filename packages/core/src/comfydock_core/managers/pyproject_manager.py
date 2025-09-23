@@ -38,6 +38,7 @@ class PyprojectManager:
         # Lazy-initialized handlers
         self._dependencies: DependencyHandler | None = None
         self._nodes: NodeHandler | None = None
+        self._dev_nodes: DevNodeHandler | None = None
         self._uv_config: UVConfigHandler | None = None
         self._workflows: WorkflowHandler | None = None
         self._models: ModelHandler | None = None
@@ -55,6 +56,13 @@ class PyprojectManager:
         if self._nodes is None:
             self._nodes = NodeHandler(self)
         return self._nodes
+
+    @property
+    def dev_nodes(self) -> DevNodeHandler:
+        """Get development node handler."""
+        if self._dev_nodes is None:
+            self._dev_nodes = DevNodeHandler(self)
+        return self._dev_nodes
 
     @property
     def uv_config(self) -> UVConfigHandler:
@@ -152,13 +160,13 @@ class PyprojectManager:
         """
         if state not in ('local', 'exportable'):
             raise ValueError(f"Invalid manifest state: {state}")
-        
+
         config = self.load()
         if 'tool' not in config:
             config['tool'] = {}
         if 'comfydock' not in config['tool']:
             config['tool']['comfydock'] = {}
-        
+
         config['tool']['comfydock']['manifest_state'] = state
         self.save(config)
         logger.info(f"Set manifest state to: {state}")
@@ -570,6 +578,55 @@ class NodeHandler(BaseHandler):
         return f"{normalized}-{hash_digest}"
 
 
+class DevNodeHandler(BaseHandler):
+    """Handles development node management under [tool.comfydock.nodes.development]."""
+
+    def add(self, identifier: str, name: str, version: str = "dev") -> None:
+        """Add a development node."""
+        config = self.load()
+        self.ensure_section(config, 'tool', 'comfydock', 'nodes', 'development')
+
+        # Simple table with minimal fields
+        dev_node = tomlkit.table()
+        dev_node['name'] = name
+        dev_node['version'] = version
+
+        config['tool']['comfydock']['nodes']['development'][identifier] = dev_node
+
+        logger.info(f"Added development node: {identifier}")
+        self.save(config)
+
+    def get_all(self) -> dict[str, dict]:
+        """Get all development nodes."""
+        config = self.load()
+        return (config.get('tool', {})
+                      .get('comfydock', {})
+                      .get('nodes', {})
+                      .get('development', {}))
+
+    def remove(self, identifier: str) -> bool:
+        """Remove a development node."""
+        config = self.load()
+
+        dev_nodes = (config.get('tool', {})
+                           .get('comfydock', {})
+                           .get('nodes', {})
+                           .get('development', {}))
+
+        if identifier in dev_nodes:
+            del config['tool']['comfydock']['nodes']['development'][identifier]
+            # Clean up empty sections
+            self.clean_empty_sections(config, 'tool', 'comfydock', 'nodes', 'development')
+            self.save(config)
+            logger.info(f"Removed development node: {identifier}")
+            return True
+        return False
+
+    def exists(self, identifier: str) -> bool:
+        """Check if a development node exists."""
+        return identifier in self.get_all()
+
+
 class WorkflowHandler(BaseHandler):
     """Handles workflow management."""
 
@@ -667,7 +724,7 @@ class ModelHandler(BaseHandler):
     """Handles model configuration in pyproject.toml."""
 
     def _ensure_structure(self, config: dict) -> None:
-        """Ensure tool.comfydock.models exists."""
+        """Ensure tool.comfydock.models exists with required sections."""
         if "tool" not in config:
             config["tool"] = tomlkit.table()
         if "comfydock" not in config["tool"]:
@@ -677,6 +734,13 @@ class ModelHandler(BaseHandler):
             models_table["required"] = tomlkit.table()
             models_table["optional"] = tomlkit.table()
             config["tool"]["comfydock"]["models"] = models_table
+        else:
+            # Ensure both sections exist even if models section exists
+            models = config["tool"]["comfydock"]["models"]
+            if "required" not in models:
+                models["required"] = tomlkit.table()
+            if "optional" not in models:
+                models["optional"] = tomlkit.table()
 
     def add_model(
         self,
@@ -697,6 +761,10 @@ class ModelHandler(BaseHandler):
         """
         config = self.load()
         self._ensure_structure(config)
+
+        # Ensure the specific category exists
+        if category not in config["tool"]["comfydock"]["models"]:
+            config["tool"]["comfydock"]["models"][category] = tomlkit.table()
 
         models_section = config["tool"]["comfydock"]["models"][category]
         models_section[model_hash] = {

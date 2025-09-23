@@ -8,10 +8,8 @@ This module also consolidates all dataclasses used throughout the detector
 to provide a single source of truth for data structures.
 """
 
-import json
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse

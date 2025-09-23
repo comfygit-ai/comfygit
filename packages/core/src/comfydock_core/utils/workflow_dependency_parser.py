@@ -384,7 +384,7 @@ class WorkflowDependencyParser:
                 return None
 
             # Try to find model by hash
-            models = self.model_index.find_by_hash(metadata_hash)
+            models = self.model_index.find_model_by_hash(metadata_hash)
             if models and len(models) > 0:
                 # Valid metadata - use it
                 model = models[0]

@@ -220,7 +220,8 @@ def _add_env_commands(subparsers):
 
     # node add
     node_add_parser = node_subparsers.add_parser("add", help="Add custom node")
-    node_add_parser.add_argument("node_name", help="Node registry ID")
+    node_add_parser.add_argument("node_name", help="Node directory name or registry ID")
+    node_add_parser.add_argument("--dev", action="store_true", help="Track existing local development node")
     node_add_parser.add_argument("--no-test", action="store_true", help="Don't test resolution")
     node_add_parser.set_defaults(func=env_cmds.node_add)
 
