@@ -593,95 +593,73 @@ class NodeHandler(BaseHandler):
 
 
 class WorkflowHandler(BaseHandler):
-    """Handles workflow management."""
+    """Handles workflow model resolutions (no tracking - all workflows are auto-managed)."""
 
-    def add(self, name: str, workflow_info: dict) -> None:
-        """Add a workflow to tracking in pyproject.toml."""
+    def set_model_resolutions(self, name: str, model_resolutions: dict) -> None:
+        """Set model resolutions for a workflow.
+
+        Args:
+            name: Workflow name
+            model_resolutions: Dict mapping model hash to node references
+                Format: {
+                    "model_hash": {
+                        "nodes": [{"node_id": "3", "widget_idx": 0}]
+                    }
+                }
+        """
         config = self.load()
-        self.ensure_section(config, 'tool', 'comfydock')
+        self.ensure_section(config, 'tool', 'comfydock', 'workflows')
 
-        if 'workflows' not in config['tool']['comfydock']:
-            config['tool']['comfydock']['workflows'] = tomlkit.table()
-
-        if 'tracked' not in config['tool']['comfydock']['workflows']:
-            config['tool']['comfydock']['workflows']['tracked'] = tomlkit.table()
-
-        # Create inline table for requires to keep everything grouped
-        requires = workflow_info.get('requires', {})
-        requires_table = tomlkit.inline_table()
-
-        # Add each requires section, filtering out None values
-        for key, value in requires.items():
-            if value is None:
-                continue
-
-            if isinstance(value, list):
-                # Filter out None values from lists
-                filtered_value = [v for v in value if v is not None]
-                if filtered_value:  # Only add non-empty lists
-                    requires_table[key] = filtered_value
-            elif isinstance(value, dict):
-                # Skip private/debug keys that start with underscore
-                # These are for debugging and shouldn't be saved to TOML
-                if key.startswith('_'):
-                    continue
-                # For other dict values, create a proper nested table
-                dict_table = tomlkit.table()
-                for dict_key, dict_value in value.items():
-                    if dict_key is not None and dict_value is not None:
-                        # Ensure dict values are properly formatted
-                        if isinstance(dict_value, list):
-                            # Filter None from nested lists
-                            filtered_dict_value = [v for v in dict_value if v is not None]
-                            if filtered_dict_value:
-                                dict_table[dict_key] = filtered_dict_value
-                        else:
-                            dict_table[dict_key] = dict_value
-                if dict_table:  # Only add non-empty tables
-                    requires_table[key] = dict_table
-            else:
-                # For other scalar values, wrap in list
-                requires_table[key] = [value]
-
-        # Create the workflow entry with None checks
         workflow_entry = tomlkit.table()
+        workflow_entry['models'] = tomlkit.table()
 
-        # Ensure file path is not None
-        file_path = workflow_info.get('file')
-        if file_path is None:
-            raise ValueError(f"Workflow file path cannot be None for workflow '{name}'")
+        for model_hash, resolution_data in model_resolutions.items():
+            model_table = tomlkit.table()
+            nodes_list = tomlkit.aot()  # Array of tables
 
-        workflow_entry['file'] = file_path
-        workflow_entry['requires'] = requires_table
+            for node_ref in resolution_data.get('nodes', []):
+                node_table = tomlkit.inline_table()
+                node_table['node_id'] = node_ref['node_id']
+                node_table['widget_idx'] = node_ref['widget_idx']
+                nodes_list.append(node_table)
 
-        config['tool']['comfydock']['workflows']['tracked'][name] = workflow_entry
+            model_table['nodes'] = nodes_list
+            workflow_entry['models'][model_hash] = model_table
 
-
+        config['tool']['comfydock']['workflows'][name] = workflow_entry
         self.save(config)
-        logger.info(f"Added tracked workflow: {name}")
+        logger.info(f"Set model resolutions for workflow: {name}")
 
-    def get_tracked(self) -> dict:
-        """Get all tracked workflows from pyproject.toml."""
+    def get_model_resolutions(self, name: str) -> dict:
+        """Get model resolutions for a specific workflow."""
         try:
             config = self.load()
-            return config.get('tool', {}).get('comfydock', {}).get('workflows', {}).get('tracked', {})
+            workflow_data = config.get('tool', {}).get('comfydock', {}).get('workflows', {}).get(name, {})
+            return workflow_data.get('models', {})
         except Exception:
             return {}
 
-    def remove(self, name: str) -> bool:
-        """Remove a tracked workflow from pyproject.toml."""
+    def get_all_with_resolutions(self) -> dict:
+        """Get all workflows that have model resolutions."""
+        try:
+            config = self.load()
+            return config.get('tool', {}).get('comfydock', {}).get('workflows', {})
+        except Exception:
+            return {}
+
+    def clear_workflow_resolutions(self, name: str) -> bool:
+        """Clear model resolutions for a workflow."""
         config = self.load()
-        workflows = config.get('tool', {}).get('comfydock', {}).get('workflows', {}).get('tracked', {})
+        workflows = config.get('tool', {}).get('comfydock', {}).get('workflows', {})
 
         if name not in workflows:
             return False
 
         del workflows[name]
         # Clean up empty sections
-        self.clean_empty_sections(config, 'tool', 'comfydock', 'workflows', 'tracked')
         self.clean_empty_sections(config, 'tool', 'comfydock', 'workflows')
         self.save(config)
-        logger.info(f"Removed tracked workflow: {name}")
+        logger.info(f"Cleared model resolutions for workflow: {name}")
         return True
 
 

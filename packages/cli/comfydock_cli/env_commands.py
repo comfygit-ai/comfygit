@@ -210,11 +210,24 @@ class EnvironmentCommands:
             if not status.comparison.packages_in_sync:
                 print(f"  {status.comparison.package_sync_message}")
 
-            # Show tracked/untracked workflows
-            if status.workflow.tracked:
-                print(f"  Tracked workflows: {', '.join(status.workflow.tracked)}")
-            if status.workflow.untracked:
-                print(f"  Untracked workflows: {', '.join(status.workflow.untracked[:3])}")
+            # Show workflow changes
+            if status.workflow.has_changes:
+                changes = []
+                if status.workflow.new:
+                    changes.append(f"{len(status.workflow.new)} new")
+                if status.workflow.modified:
+                    changes.append(f"{len(status.workflow.modified)} modified")
+                if status.workflow.deleted:
+                    changes.append(f"{len(status.workflow.deleted)} deleted")
+
+                print(f"  Workflow changes: {', '.join(changes)}")
+
+                if status.workflow.new:
+                    print(f"    New: {', '.join(status.workflow.new[:3])}{'...' if len(status.workflow.new) > 3 else ''}")
+                if status.workflow.modified:
+                    print(f"    Modified: {', '.join(status.workflow.modified[:3])}{'...' if len(status.workflow.modified) > 3 else ''}")
+            elif status.workflow.total_workflows > 0:
+                print(f"  All {status.workflow.total_workflows} workflows are synced")
 
             print("\n  Run 'comfydock sync' to update tracked files")
         else:
@@ -299,15 +312,7 @@ class EnvironmentCommands:
         # Show workflow changes (tracking and content)
         workflow_changes_shown = False
 
-        # Show tracking changes
-        if status.git.workflows_tracked or status.git.workflows_untracked:
-            if not workflow_changes_shown:
-                print("\n  Workflows:")
-                workflow_changes_shown = True
-            for name in status.git.workflows_tracked:
-                print(f"    📋 {name} (now tracked)")
-            for name in status.git.workflows_untracked:
-                print(f"    ❌ {name} (untracked)")
+        # Workflow tracking no longer needed - all workflows are automatically managed
 
         # Show workflow file changes
         if status.git.workflow_changes:
@@ -652,18 +657,33 @@ class EnvironmentCommands:
         else:
             # Auto-generate message based on changes
             status = env.status()
-            if not status.git.has_changes:
+
+            # Check if there are any changes (git changes OR workflow changes)
+            has_git_changes = status.git.has_changes
+            has_workflow_changes = status.workflow.has_changes
+
+            if not has_git_changes and not has_workflow_changes:
                 print("✓ No changes to commit")
                 return
 
-            message = status.generate_commit_message()
-            # print(f"Auto-generated message: {message}")
+            # Generate commit message
+            if has_git_changes:
+                message = status.generate_commit_message()
+            else:
+                # Only workflow changes - generate simple message
+                workflow_changes = []
+                if status.workflow.new:
+                    workflow_changes.append(f"{len(status.workflow.new)} new")
+                if status.workflow.modified:
+                    workflow_changes.append(f"{len(status.workflow.modified)} modified")
+                if status.workflow.deleted:
+                    workflow_changes.append(f"{len(status.workflow.deleted)} deleted")
 
-        # Commit changes
-        from comfydock_core.utils.git import git_commit
+                message = f"Update workflows: {', '.join(workflow_changes)}"
 
+        # Copy all workflows and commit everything
         try:
-            git_commit(env.cec_path, message)
+            env.commit_workflows(message)
             print(f"✓ Committed changes: {message}")
         except Exception as e:
             if logger:
@@ -694,80 +714,45 @@ class EnvironmentCommands:
 
     @with_env_logging("workflow list")
     def workflow_list(self, args):
-        """List workflow tracking status."""
+        """List all workflows with their sync status."""
         env = self._get_env(args)
 
-        workflows_dict = env.list_workflows()
-        tracked = workflows_dict.get('tracked', [])
-        untracked = workflows_dict.get('untracked', [])
+        workflows = env.list_workflows()
+        total_workflows = sum(len(workflows[key]) for key in workflows)
 
-        if not tracked and not untracked:
+        if total_workflows == 0:
             print("No workflows found")
             return
 
         print(f"Workflows in '{env.name}':")
-        if tracked:
-            print("\nTracked:")
-            for name in tracked:
+
+        if workflows['synced']:
+            print("\n✓ Synced (up to date):")
+            for name in workflows['synced']:
                 print(f"  📋 {name}")
-        if untracked:
-            print("\nUntracked:")
-            for name in untracked:
-                print(f"  👁️ {name}")
 
-    @with_env_logging("workflow track")
-    def workflow_track(self, args, logger=None):
-        """Start tracking a workflow - just registers it, no analysis."""
-        env = self._get_env(args)
+        if workflows['modified']:
+            print("\n⚠ Modified (changed since last commit):")
+            for name in workflows['modified']:
+                print(f"  📝 {name}")
 
-        if args.all:
-            # Track all untracked workflows
-            workflows_dict = env.list_workflows()
-            tracked = workflows_dict.get('tracked', [])
-            untracked = workflows_dict.get('untracked', [])
+        if workflows['new']:
+            print("\n🆕 New (not committed yet):")
+            for name in workflows['new']:
+                print(f"  ➕ {name}")
 
-            if not untracked:
-                print("No untracked workflows found")
-                return
+        if workflows['deleted']:
+            print("\n🗑 Deleted (removed from ComfyUI):")
+            for name in workflows['deleted']:
+                print(f"  ➖ {name}")
 
-            print(f"Tracking {len(untracked)} workflows...")
-            for name in untracked:
-                try:
-                    env.track_workflow(name)
-                    print(f"  ✓ {name}")
-                except Exception as e:
-                    print(f"  ✗ {name}: {e}")
-
-            print("\nRun 'comfydock commit' to snapshot current state")
-        elif args.name:
-            # Track single workflow
-            try:
-                env.track_workflow(args.name)
-                print(f"✓ Now tracking workflow '{args.name}'")
-                print("  Run 'comfydock commit' to snapshot current state")
-            except Exception as e:
-                if logger:
-                    logger.error(f"Workflow track failed for '{args.name}': {e}", exc_info=True)
-                print(f"✗ Failed to track workflow '{args.name}': {e}", file=sys.stderr)
-                sys.exit(1)
-        else:
-            print("✗ Either provide a workflow name or use --all", file=sys.stderr)
-            sys.exit(1)
+        # Show commit suggestion if there are changes
+        has_changes = workflows['new'] or workflows['modified'] or workflows['deleted']
+        if has_changes:
+            print("\nRun 'comfydock commit' to save current state")
 
 
-    @with_env_logging("workflow untrack")
-    def workflow_untrack(self, args, logger=None):
-        """Stop tracking a workflow."""
-        env = self._get_env(args)
 
-        try:
-            env.untrack_workflow(args.name)
-            print(f"✓ Stopped tracking workflow '{args.name}' (ComfyUI copy preserved)")
-        except Exception as e:
-            if logger:
-                logger.error(f"Workflow untrack failed for '{args.name}': {e}", exc_info=True)
-            print(f"✗ Failed to untrack workflow '{args.name}': {e}", file=sys.stderr)
-            sys.exit(1)
 
     @with_env_logging("workflow restore")
     def workflow_restore(self, args, logger=None):
@@ -848,22 +833,10 @@ class EnvironmentCommands:
                 category=category
             )
 
-            # Link to workflow if specified
-            if args.workflow:
-                workflow_config = env.pyproject.workflows.get_tracked().get(args.workflow)
-                if workflow_config:
-                    # Add model to workflow requirements
-                    if 'requires' not in workflow_config:
-                        workflow_config['requires'] = {}
-                    if 'models' not in workflow_config['requires']:
-                        workflow_config['requires']['models'] = []
-
-                    if model.hash not in workflow_config['requires']['models']:
-                        workflow_config['requires']['models'].append(model.hash)
-                        env.pyproject.save()
-                        print(f"✓ Linked model to workflow '{args.workflow}'")
-                else:
-                    print(f"Warning: Workflow '{args.workflow}' not found")
+            # TODO: Workflow linking will be re-implemented with model resolution during commit
+            if hasattr(args, 'workflow') and args.workflow:
+                print(f"⚠️  Workflow linking not yet implemented with auto-tracking")
+                print("   Models will be automatically resolved during commit")
 
         except Exception as e:
             if logger:

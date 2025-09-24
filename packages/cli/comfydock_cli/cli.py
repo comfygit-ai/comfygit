@@ -233,25 +233,8 @@ def _add_env_commands(subparsers):
     workflow_parser = subparsers.add_parser("workflow", help="Manage workflows")
     workflow_subparsers = workflow_parser.add_subparsers(dest="workflow_command", help="Workflow commands")
 
-    # workflow track
-    workflow_track_parser = workflow_subparsers.add_parser("track", help="Start tracking workflow(s)")
-    workflow_track_parser.add_argument("name", nargs="?", help="Workflow name to track")
-    workflow_track_parser.add_argument("--all", action="store_true", help="Track all untracked workflows")
-    workflow_track_parser.add_argument(
-        "--install-mode",
-        choices=["auto", "manual", "skip"],
-        default="auto",
-        help="How to handle missing nodes: auto (default), manual, or skip"
-    )
-    workflow_track_parser.set_defaults(func=env_cmds.workflow_track)
-
-    # workflow untrack
-    workflow_untrack_parser = workflow_subparsers.add_parser("untrack", help="Stop tracking workflow")
-    workflow_untrack_parser.add_argument("name", help="Workflow name to untrack")
-    workflow_untrack_parser.set_defaults(func=env_cmds.workflow_untrack)
-
     # workflow list
-    workflow_list_parser = workflow_subparsers.add_parser("list", help="List workflow tracking status")
+    workflow_list_parser = workflow_subparsers.add_parser("list", help="List all workflows with sync status")
     workflow_list_parser.set_defaults(func=env_cmds.workflow_list)
 
     # workflow restore

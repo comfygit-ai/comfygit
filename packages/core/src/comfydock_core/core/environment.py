@@ -63,7 +63,7 @@ class Environment:
 
         # Workflow paths
         self.workflows_active_path = self.comfyui_path / "user" / "default" / "workflows"
-        self.workflows_tracked_path = self.cec_path / "workflows"
+        self.workflows_cec_path = self.cec_path / "workflows"
 
     ## Cached properties ##
 
@@ -289,56 +289,44 @@ class Environment:
     # Workflow Management
     # =====================================================
 
-    def list_workflows(self) -> dict[str, str]:
-        """List workflows and their tracking status.
+    def list_workflows(self) -> dict[str, list[str]]:
+        """List all workflows categorized by sync status.
 
         Returns:
-            Dict with 'tracked' and 'untracked' workflow names
+            Dict with 'new', 'modified', 'deleted', and 'synced' workflow names
         """
-        return {
-            'tracked': self.workflow_manager.list_tracked(),
-            'untracked': self.workflow_manager.get_untracked()
-        }
+        return self.workflow_manager.get_all_workflows()
 
 
-    def track_workflow(self, name: str) -> None:
-        """Start tracking a workflow - just registers it, no analysis.
-
-        Args:
-            name: Workflow name
-        """
-        self.workflow_manager.track_workflow(name)
-
-
-    def untrack_workflow(self, name: str) -> None:
-        """Stop tracking a workflow."""
-        self.workflow_manager.untrack_workflow(name)
 
     def commit_workflows(self, message: str | None = None) -> None:
-        """Commit all tracked workflows - copies from ComfyUI to .cec and git commits.
+        """Commit all workflows - copies ALL from ComfyUI to .cec and git commits.
 
         Args:
             message: Optional commit message (auto-generated if not provided)
         """
-        # Copy all tracked workflows to .cec
-        results = self.workflow_manager.copy_all_tracked()
+        # Copy all workflows to .cec (not just tracked ones)
+        results = self.workflow_manager.copy_all_workflows()
 
         if not results:
-            logger.info("No tracked workflows to commit")
+            logger.info("No workflows found to commit")
             return
 
         # Log results
         copied_count = sum(1 for status in results.values() if status == "copied")
-        missing_count = sum(1 for status in results.values() if status == "missing")
+        deleted_count = sum(1 for status in results.values() if status == "deleted")
+        failed_count = sum(1 for status in results.values() if status == "failed")
 
-        logger.info(f"Copied {copied_count} workflows, {missing_count} missing")
+        logger.info(f"Copied {copied_count} workflows, deleted {deleted_count}, failed {failed_count}")
 
         # Generate commit message if needed
         if not message:
             if copied_count > 0:
                 message = f"Snapshot {copied_count} workflow(s)"
+            elif deleted_count > 0:
+                message = f"Remove {deleted_count} workflow(s)"
             else:
-                message = "Workflow snapshot"
+                message = "Update workflows"
 
         # Git add and commit all changes in .cec
         from ..utils.git import git_commit

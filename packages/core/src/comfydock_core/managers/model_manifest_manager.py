@@ -193,9 +193,9 @@ class ModelManifestManager:
             Set of model hashes referenced by remaining workflows
         """
         referenced_models = set()
-        tracked_workflows = self.pyproject.workflows.get_tracked()
+        workflow_resolutions = self.pyproject.workflows.get_all_with_resolutions()
 
-        for workflow_config in tracked_workflows.values():
+        for workflow_config in workflow_resolutions.values():
             requires = workflow_config.get('requires', {})
             models = requires.get('models', [])
             referenced_models.update(models)
