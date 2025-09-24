@@ -254,6 +254,11 @@ def _add_env_commands(subparsers):
     workflow_list_parser = workflow_subparsers.add_parser("list", help="List workflow tracking status")
     workflow_list_parser.set_defaults(func=env_cmds.workflow_list)
 
+    # workflow restore
+    workflow_restore_parser = workflow_subparsers.add_parser("restore", help="Restore workflow from .cec to ComfyUI")
+    workflow_restore_parser.add_argument("name", help="Workflow name to restore")
+    workflow_restore_parser.set_defaults(func=env_cmds.workflow_restore)
+
     # Environment Model management subcommands
     env_model_parser = subparsers.add_parser("model", help="Manage environment model requirements")
     env_model_subparsers = env_model_parser.add_subparsers(dest="env_model_command", help="Environment model commands")

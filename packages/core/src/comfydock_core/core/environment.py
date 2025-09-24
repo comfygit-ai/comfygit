@@ -18,13 +18,7 @@ from ..managers.status_scanner import StatusScanner
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
-from ..models.sync import (
-    ModelResolutionMap,
-    ModelResolutionStrategy,
-    NoOpResolver,
-    SyncResult,
-    WorkflowResolution,
-)
+from ..models.sync import SyncResult
 from ..services.node_registry import NodeInfo, NodeRegistry
 from ..utils.common import run_command
 
@@ -119,9 +113,6 @@ class Environment:
         return WorkflowManager(
             self.path,
             self.pyproject,
-            self.model_index_manager,
-            self.global_models_path,
-            self.registry_data_manager,
         )
 
     @cached_property
@@ -159,15 +150,12 @@ class Environment:
 
     def sync(
         self,
-        dry_run: bool = False,
-        model_resolver: ModelResolutionStrategy | None = None
+        dry_run: bool = False
     ) -> SyncResult:
         """Apply changes: sync packages and custom nodes with environment.
 
         Args:
             dry_run: If True, don't actually apply changes
-            model_resolver: Optional strategy for resolving ambiguous models
-                          If None, ambiguous models are left unresolved
 
         Returns:
             SyncResult with details of what was synced
@@ -198,24 +186,7 @@ class Environment:
             result.errors.append(f"Node sync failed: {e}")
             result.success = False
 
-        # Sync workflows
-        workflow_results = self.workflow_manager.sync_workflows()
-        result.workflows_synced = {name: str(action) for name, action in workflow_results.items()}
-        for name, action in workflow_results.items():
-            if action != "in_sync":
-                logger.info(f"Workflow '{name}': {action}")
-
-        # Re-analyze workflows if resolver provided
-        if model_resolver:
-            out_of_sync_workflows = [
-                name for name, action in result.workflows_synced.items()
-                if action != "in_sync"
-            ]
-            if out_of_sync_workflows:
-                result.workflow_resolutions = self._resolve_workflow_models(
-                    out_of_sync_workflows,
-                    model_resolver
-                )
+        # No workflow sync in new architecture - workflows are handled separately
 
         # Sync model paths to ensure models are available
         try:
@@ -233,69 +204,6 @@ class Environment:
 
         return result
 
-    def _resolve_workflow_models(
-        self,
-        workflow_names: list[str],
-        resolver: ModelResolutionStrategy
-    ) -> list[WorkflowResolution]:
-        """Re-analyze workflow models and resolve ambiguous references.
-
-        Args:
-            workflow_names: Names of workflows to analyze
-            resolver: Strategy for resolving ambiguous models
-
-        Returns:
-            List of WorkflowResolution results
-        """
-        resolutions = []
-
-        logger.info(f"Resolving models for {len(workflow_names)} workflows...")
-
-        for name in workflow_names:
-            logger.debug(f"Analyzing workflow '{name}'...")
-
-            # Analyze workflow models
-            model_results, existing_metadata = self.workflow_manager.analyze_workflow_models(name)
-
-            # Show summary if resolver wants to
-            if hasattr(resolver, 'show_summary'):
-                resolver.show_summary(model_results)
-
-            # Get ambiguous models for resolution
-            ambiguous = [r for r in model_results if r.resolution_type == "ambiguous"]
-
-            # Let resolver handle ambiguous models
-            user_resolutions: ModelResolutionMap = {}
-            if ambiguous:
-                user_resolutions = resolver.resolve_ambiguous(model_results)
-
-            # Update workflow with resolutions
-            resolved_count = 0
-            unresolved_count = 0
-
-            if user_resolutions or model_results:
-                resolved_count, unresolved_count = self.workflow_manager.track_workflow_with_resolutions(
-                    name,
-                    user_resolutions
-                )
-
-            # Create resolution result
-            resolution = WorkflowResolution(
-                name=name,
-                resolved_count=resolved_count,
-                unresolved_count=unresolved_count,
-                ambiguous_count=len(ambiguous),
-                action="resolved"  # Workflow was just resolved
-            )
-            resolutions.append(resolution)
-
-            # Log summary
-            if unresolved_count > 0:
-                logger.warning(f"Workflow '{name}': {resolved_count} resolved, {unresolved_count} unresolved")
-            else:
-                logger.info(f"Workflow '{name}': All {resolved_count} models resolved")
-
-        return resolutions
 
     def rollback(self, target: str | None = None) -> None:
         """Rollback environment to a previous state and/or discard uncommitted changes.
@@ -381,50 +289,70 @@ class Environment:
     # Workflow Management
     # =====================================================
 
-    def scan_workflows(self) -> dict:
-        """Scan for workflows and their tracking status."""
-        return self.workflow_manager.scan_workflows()
-
-    def analyze_workflow(self, name: str):
-        """Analyze a workflow's dependencies without side effects.
+    def list_workflows(self) -> dict[str, str]:
+        """List workflows and their tracking status.
 
         Returns:
-            WorkflowAnalysisResult with all dependency information
+            Dict with 'tracked' and 'untracked' workflow names
         """
-        return self.workflow_manager.analyze_workflow(name)
+        return {
+            'tracked': self.workflow_manager.list_tracked(),
+            'untracked': self.workflow_manager.get_untracked()
+        }
 
-    def track_workflow(self, name: str, analysis=None) -> None:
-        """Start tracking a workflow.
+
+    def track_workflow(self, name: str) -> None:
+        """Start tracking a workflow - just registers it, no analysis.
 
         Args:
             name: Workflow name
-            analysis: Pre-computed WorkflowAnalysisResult (optional)
         """
-        self.workflow_manager.track_workflow(name, analysis)
+        self.workflow_manager.track_workflow(name)
 
-    def track_workflow_with_resolution(
-        self,
-        name: str,
-        resolver: ModelResolutionStrategy | None = None
-    ) -> WorkflowResolution:
-        """Track a workflow with optional model resolution.
-
-        Args:
-            name: Workflow name to track
-            resolver: Optional resolver strategy (None = no resolution)
-
-        Returns:
-            WorkflowResolution with tracking results
-        """
-        if resolver is None:
-            resolver = NoOpResolver()
-
-        results = self._resolve_workflow_models([name], resolver)
-        return results[0] if results else WorkflowResolution(name=name)
 
     def untrack_workflow(self, name: str) -> None:
         """Stop tracking a workflow."""
         self.workflow_manager.untrack_workflow(name)
+
+    def commit_workflows(self, message: str | None = None) -> None:
+        """Commit all tracked workflows - copies from ComfyUI to .cec and git commits.
+
+        Args:
+            message: Optional commit message (auto-generated if not provided)
+        """
+        # Copy all tracked workflows to .cec
+        results = self.workflow_manager.copy_all_tracked()
+
+        if not results:
+            logger.info("No tracked workflows to commit")
+            return
+
+        # Log results
+        copied_count = sum(1 for status in results.values() if status == "copied")
+        missing_count = sum(1 for status in results.values() if status == "missing")
+
+        logger.info(f"Copied {copied_count} workflows, {missing_count} missing")
+
+        # Generate commit message if needed
+        if not message:
+            if copied_count > 0:
+                message = f"Snapshot {copied_count} workflow(s)"
+            else:
+                message = "Workflow snapshot"
+
+        # Git add and commit all changes in .cec
+        from ..utils.git import git_commit
+        git_commit(self.cec_path, message, add_all=True)
+
+        logger.info(f"Committed workflows: {message}")
+
+    def restore_workflow(self, name: str) -> None:
+        """Restore a workflow from .cec to ComfyUI directory.
+
+        Args:
+            name: Workflow name to restore
+        """
+        self.workflow_manager.restore_from_cec(name)
 
     # =====================================================
     # Constraint Management

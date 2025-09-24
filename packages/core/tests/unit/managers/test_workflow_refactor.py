@@ -1,5 +1,6 @@
 """Test the refactored WorkflowManager API."""
 
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 from comfydock_core.models.workflow import WorkflowAnalysisResult, InstalledPackageInfo
@@ -122,7 +123,7 @@ class TestAPIUsage:
 
     @patch('shutil.copy2')
     def test_track_workflow_without_analysis(self, mock_copy):
-        """Test that track_workflow can work with or without pre-analysis."""
+        """Test that track_workflow just registers without analysis."""
         from comfydock_core.managers.workflow_manager import WorkflowManager
 
         # Mock dependencies
@@ -130,28 +131,17 @@ class TestAPIUsage:
         mock_pyproject.workflows.get_tracked.return_value = {}
         mock_pyproject.workflows.add = Mock()
 
-        with patch.object(WorkflowManager, 'analyze_workflow') as mock_analyze:
-            # Setup mock analysis result
-            mock_analysis = Mock(spec=WorkflowAnalysisResult)
-            mock_analysis.already_tracked = False
-            mock_analysis.workflow_path = Path("/tmp/test.json")
-            mock_analysis.resolved_models = []
-            mock_analysis.to_pyproject_requires.return_value = {"nodes": [], "models": []}
-            mock_analyze.return_value = mock_analysis
+        # Create workflow file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir)
+            workflow_path = env_path / "ComfyUI/user/default/workflows/test.json"
+            workflow_path.parent.mkdir(parents=True)
+            workflow_path.write_text('{"nodes": []}')
 
-            # Mock model manifest manager
-            mock_model_manifest = Mock()
+            manager = WorkflowManager(env_path, mock_pyproject)
 
-            manager = WorkflowManager(
-                Path("/tmp"), mock_pyproject, Mock(), Path("/tmp")
-            )
-            manager.model_manifest_manager = mock_model_manifest
-
-            # Test without providing analysis - should analyze internally
+            # Track workflow - should just register it, no analysis
             manager.track_workflow("test")
-            mock_analyze.assert_called_once_with("test")
 
-            # Test with provided analysis - should not re-analyze
-            mock_analyze.reset_mock()
-            manager.track_workflow("test", mock_analysis)
-            mock_analyze.assert_not_called()
+            # Should add to pyproject with minimal config
+            mock_pyproject.workflows.add.assert_called_once_with("test", {"tracked": True})

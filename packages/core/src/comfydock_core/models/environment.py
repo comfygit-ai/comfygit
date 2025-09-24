@@ -36,13 +36,10 @@ class GitStatus:
 
 @dataclass
 class WorkflowStatus:
-    """Encapsulated workflow status information."""
+    """Simple workflow tracking status."""
 
-    in_sync: bool
-    sync_status: dict[str, str] = field(default_factory=dict)
     tracked: list[str] = field(default_factory=list)
-    watched: list[str] = field(default_factory=list)
-    changes_needed: list[dict] = field(default_factory=list)  # {name, status}
+    untracked: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -71,31 +68,12 @@ class EnvironmentComparison:
 # === Semantic Value Objects ===
 
 
-class SyncDirection(Enum):
-    """Direction for workflow synchronization."""
-
-    UPDATE_COMFYUI = "update_comfyui"
-    UPDATE_TRACKED = "update_tracked"
-    RESTORE_TO_COMFYUI = "restore"
-    UPDATE_TO_CEC = "update_to_cec"
-
-
 class UserAction(Enum):
     """Recommended user actions."""
 
     SYNC_REQUIRED = "sync"
     COMMIT_REQUIRED = "commit"
     NO_ACTION_NEEDED = "none"
-
-
-@dataclass
-class WorkflowSyncAction:
-    """Semantic workflow sync action."""
-
-    name: str
-    action: SyncDirection
-    description: str
-    icon: str
 
 
 @dataclass
@@ -128,25 +106,6 @@ class ChangesSummary:
         return "; ".join(parts)
 
 
-@dataclass
-class SyncPreview:
-    """Preview of what sync operation will do."""
-
-    nodes_to_install: List[str] = field(default_factory=list)
-    nodes_to_remove: List[str] = field(default_factory=list)
-    nodes_to_update: List[dict] = field(default_factory=list)
-    workflows_to_sync: List[WorkflowSyncAction] = field(default_factory=list)
-    packages_to_sync: bool = False
-
-    def has_changes(self) -> bool:
-        """Check if sync would make any changes."""
-        return bool(
-            self.nodes_to_install
-            or self.nodes_to_remove
-            or self.nodes_to_update
-            or self.workflows_to_sync
-            or self.packages_to_sync
-        )
 
 
 @dataclass
@@ -170,60 +129,9 @@ class EnvironmentStatus:
     @property
     def is_synced(self) -> bool:
         """Check if environment is fully synced."""
-        return self.comparison.is_synced and self.workflow.in_sync
+        return self.comparison.is_synced
 
     # === Semantic Methods ===
-
-    def get_workflow_sync_actions(self) -> List[WorkflowSyncAction]:
-        """Convert string-based workflow statuses to semantic actions."""
-        actions = []
-        for name, status in self.workflow.sync_status.items():
-            if status == "comfyui_newer":
-                actions.append(
-                    WorkflowSyncAction(
-                        name=name,
-                        action=SyncDirection.UPDATE_TRACKED,
-                        description="modified in ComfyUI",
-                        icon="✏️",
-                    )
-                )
-            elif status == "tracked_newer":
-                actions.append(
-                    WorkflowSyncAction(
-                        name=name,
-                        action=SyncDirection.UPDATE_COMFYUI,
-                        description="modified in .cec",
-                        icon="📂",
-                    )
-                )
-            elif status == "missing_comfyui":
-                actions.append(
-                    WorkflowSyncAction(
-                        name=name,
-                        action=SyncDirection.RESTORE_TO_COMFYUI,
-                        description="needs restore to ComfyUI",
-                        icon="🔄",
-                    )
-                )
-            elif status == "missing_tracked":
-                actions.append(
-                    WorkflowSyncAction(
-                        name=name,
-                        action=SyncDirection.UPDATE_TO_CEC,
-                        description="needs update to .cec",
-                        icon="📋",
-                    )
-                )
-            else:
-                actions.append(
-                    WorkflowSyncAction(
-                        name=name,
-                        action=SyncDirection.UPDATE_TRACKED,
-                        description=status,
-                        icon="⚠️",
-                    )
-                )
-        return actions
 
     def get_changes_summary(self) -> ChangesSummary:
         """Analyze and categorize all changes."""
@@ -330,14 +238,11 @@ class EnvironmentStatus:
         summary = self.get_changes_summary()
         return summary.get_commit_message()
 
-    def get_sync_preview(self) -> SyncPreview:
+    def get_sync_preview(self) -> dict:
         """Get preview of what sync operation will do."""
-        workflow_actions = self.get_workflow_sync_actions()
-
-        return SyncPreview(
-            nodes_to_install=self.comparison.missing_nodes,
-            nodes_to_remove=self.comparison.extra_nodes,
-            nodes_to_update=self.comparison.version_mismatches,
-            workflows_to_sync=workflow_actions,
-            packages_to_sync=not self.comparison.packages_in_sync,
-        )
+        return {
+            'nodes_to_install': self.comparison.missing_nodes,
+            'nodes_to_remove': self.comparison.extra_nodes,
+            'nodes_to_update': self.comparison.version_mismatches,
+            'packages_to_sync': not self.comparison.packages_in_sync,
+        }
