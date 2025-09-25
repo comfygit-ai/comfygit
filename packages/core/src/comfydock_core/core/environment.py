@@ -17,12 +17,14 @@ from ..managers.resolution_tester import ResolutionTester
 from ..managers.status_scanner import StatusScanner
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
+from ..models.commit import WorkflowCommitResult
 from ..models.environment import EnvironmentStatus
 from ..models.sync import SyncResult
 from ..services.node_registry import NodeInfo, NodeRegistry
 from ..utils.common import run_command
 
 if TYPE_CHECKING:
+    from ..models.shared import ModelWithLocation
     from ..managers.model_index_manager import ModelIndexManager
     from ..managers.workspace_config_manager import WorkspaceConfigManager
     from ..services.registry_data_manager import RegistryDataManager
@@ -111,8 +113,10 @@ class Environment:
     @cached_property
     def workflow_manager(self) -> WorkflowManager:
         return WorkflowManager(
-            self.path,
+            self.comfyui_path,
+            self.cec_path,
             self.pyproject,
+            self.model_index_manager
         )
 
     @cached_property
@@ -299,48 +303,77 @@ class Environment:
 
 
 
-    def commit_workflows(self, message: str | None = None) -> None:
-        """Commit all workflows - copies ALL from ComfyUI to .cec and git commits.
+    def commit_workflows(
+        self,
+        message: str | None = None,
+        user_resolutions: dict[str, ModelWithLocation] | None = None
+    ) -> WorkflowCommitResult:
+        """Commit workflows with model resolution.
 
         Args:
-            message: Optional commit message (auto-generated if not provided)
+            message: Optional commit message
+            user_resolutions: Optional pre-resolved ambiguous models
+
+        Returns:
+            WorkflowCommitResult with all commit details
         """
-        # Copy all workflows to .cec (not just tracked ones)
-        results = self.workflow_manager.copy_all_workflows()
+        from ..utils.git import git_commit, git_diff
 
-        if not results:
+        # Analyze workflows and models
+        result = self.workflow_manager.analyze_commit()
+        logger.debug(f"Commit result: {result}")
+        
+        # Do a git diff and see if the working directory is clean
+        workflow_diffs = []
+        for workflow_path in result.workflows_copied.values():
+            if workflow_path is None or not workflow_path.exists():
+                continue
+            try:
+                diff = git_diff(self.cec_path, workflow_path)
+                if diff:
+                    logger.debug(f"Workflow diff: {diff}")
+                    workflow_diffs.append(diff)
+            except Exception as e:
+                result.success = False
+                result.errors.append(f"Git diff failed: {e}")
+                logger.error(f"Git diff failed: {e}")
+
+        # If there are no workflows copied and no models resolved, short-circuit
+        if not workflow_diffs:
             logger.info("No workflows found to commit")
-            return
+            result.success = True
+            result.no_changes = True
+            return result
 
-        # Log results
-        copied_count = sum(1 for status in results.values() if status == "copied")
-        deleted_count = sum(1 for status in results.values() if status == "deleted")
-        failed_count = sum(1 for status in results.values() if status == "failed")
+        # Apply resolutions
+        self.workflow_manager.apply_resolutions(result, user_resolutions)
 
-        logger.info(f"Copied {copied_count} workflows, deleted {deleted_count}, failed {failed_count}")
-
-        # Generate commit message if needed
+        # Generate message if needed
         if not message:
-            if copied_count > 0:
-                message = f"Snapshot {copied_count} workflow(s)"
-            elif deleted_count > 0:
-                message = f"Remove {deleted_count} workflow(s)"
-            else:
-                message = "Update workflows"
+            message = result.summary
 
-        # Git add and commit all changes in .cec
-        from ..utils.git import git_commit
-        git_commit(self.cec_path, message, add_all=True)
+        # Git commit
+        try:
+            git_commit(self.cec_path, message, add_all=True)
+            result.success = True
+            logger.info(f"Committed workflows: {message}")
+        except Exception as e:
+            result.success = False
+            result.errors.append(f"Git commit failed: {e}")
+            logger.error(f"Git commit failed: {e}")
 
-        logger.info(f"Committed workflows: {message}")
+        return result
 
-    def restore_workflow(self, name: str) -> None:
+    def restore_workflow(self, name: str) -> bool:
         """Restore a workflow from .cec to ComfyUI directory.
 
         Args:
             name: Workflow name to restore
+
+        Returns:
+            True if successful, False if workflow not found
         """
-        self.workflow_manager.restore_from_cec(name)
+        return self.workflow_manager.restore_from_cec(name)
 
     # =====================================================
     # Constraint Management

@@ -648,47 +648,66 @@ class EnvironmentCommands:
 
     @with_env_logging("env commit")
     def commit(self, args, logger=None):
-        """Commit current state without applying (git commit only)."""
+        """Commit workflows with model resolution."""
+        from .resolution_strategies import InteractiveModelResolver, AutomaticModelResolver
+
         env = self._get_env(args)
 
-        # Get or generate commit message
-        if args.message:
-            message = args.message
-        else:
-            # Auto-generate message based on changes
-            status = env.status()
+        print("📋 Analyzing workflows and models...")
 
-            # Check if there are any changes (git changes OR workflow changes)
-            has_git_changes = status.git.has_changes
-            has_workflow_changes = status.workflow.has_changes
-
-            if not has_git_changes and not has_workflow_changes:
-                print("✓ No changes to commit")
-                return
-
-            # Generate commit message
-            if has_git_changes:
-                message = status.generate_commit_message()
-            else:
-                # Only workflow changes - generate simple message
-                workflow_changes = []
-                if status.workflow.new:
-                    workflow_changes.append(f"{len(status.workflow.new)} new")
-                if status.workflow.modified:
-                    workflow_changes.append(f"{len(status.workflow.modified)} modified")
-                if status.workflow.deleted:
-                    workflow_changes.append(f"{len(status.workflow.deleted)} deleted")
-
-                message = f"Update workflows: {', '.join(workflow_changes)}"
-
-        # Copy all workflows and commit everything
+        # Initial commit analysis
         try:
-            env.commit_workflows(message)
-            print(f"✓ Committed changes: {message}")
+            result = env.commit_workflows(message=args.message)
         except Exception as e:
             if logger:
-                logger.error(f"Commit failed for environment '{env.name}': {e}", exc_info=True)
+                logger.error(f"Commit analysis failed for environment '{env.name}': {e}", exc_info=True)
             print(f"✗ Commit failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        # Handle ambiguous models if needed
+        if result.has_ambiguous_models:
+            interactive_mode = not (hasattr(args, 'no_interactive') and args.no_interactive)
+
+            if interactive_mode:
+                print(f"🔍 Resolving {len(result.models_needing_resolution)} ambiguous models...")
+                resolver = InteractiveModelResolver()
+            else:
+                print(f"🔍 Auto-resolving {len(result.models_needing_resolution)} ambiguous models...")
+                resolver = AutomaticModelResolver()
+
+            user_resolutions = resolver.resolve_ambiguous_models(result.models_needing_resolution)
+
+            # Re-commit with resolutions
+            try:
+                result = env.commit_workflows(
+                    message=args.message,
+                    user_resolutions=user_resolutions
+                )
+            except Exception as e:
+                if logger:
+                    logger.error(f"Commit with resolutions failed for environment '{env.name}': {e}", exc_info=True)
+                print(f"✗ Commit failed: {e}", file=sys.stderr)
+                sys.exit(1)
+
+        # Display results
+        if result.success:
+            if result.no_changes:
+                print("\n✓ No changes to commit")
+            else:
+                print("\n✓ Commit successful!")
+            if result.workflows_copied:
+                copied_count = len([s for s in result.workflows_copied.values() if s == "copied"])
+                if copied_count > 0:
+                    print(f"  • Processed {copied_count} workflows")
+            if result.models_resolved:
+                print(f"  • Resolved {len(result.models_resolved)} models")
+            if result.models_unresolved:
+                print(f"\n⚠️  {len(result.models_unresolved)} models couldn't be resolved:")
+                for unresolved in result.models_unresolved:
+                    print(f"  • {unresolved["value"]} at {unresolved['node_type']} #{unresolved['node_id']}")
+                    print(f"    - Issue: Model not found in model directory")
+        else:
+            print(f"✗ Commit failed: {', '.join(result.errors)}", file=sys.stderr)
             sys.exit(1)
 
 
@@ -759,14 +778,11 @@ class EnvironmentCommands:
         """Restore a workflow from .cec to ComfyUI."""
         env = self._get_env(args)
 
-        try:
-            env.restore_workflow(args.name)
+        if env.restore_workflow(args.name):
             print(f"✓ Restored workflow '{args.name}' to ComfyUI")
             print("⚠️ Please reload the workflow in your ComfyUI browser tab")
-        except Exception as e:
-            if logger:
-                logger.error(f"Workflow restore failed for '{args.name}': {e}", exc_info=True)
-            print(f"✗ Failed to restore workflow '{args.name}': {e}", file=sys.stderr)
+        else:
+            print(f"✗ Workflow '{args.name}' not found in .cec directory", file=sys.stderr)
             sys.exit(1)
 
 

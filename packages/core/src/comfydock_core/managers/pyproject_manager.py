@@ -618,9 +618,9 @@ class WorkflowHandler(BaseHandler):
             nodes_list = tomlkit.aot()  # Array of tables
 
             for node_ref in resolution_data.get('nodes', []):
-                node_table = tomlkit.inline_table()
-                node_table['node_id'] = node_ref['node_id']
-                node_table['widget_idx'] = node_ref['widget_idx']
+                node_table = tomlkit.table()
+                node_table['node_id'] = str(node_ref['node_id'])
+                node_table['widget_idx'] = int(node_ref['widget_idx'])
                 nodes_list.append(node_table)
 
             model_table['nodes'] = nodes_list

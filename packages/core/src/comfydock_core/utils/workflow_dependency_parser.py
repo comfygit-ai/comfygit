@@ -10,11 +10,11 @@ from comfydock_core.services.workflow_repository import WorkflowRepository
 from ..logging.logging_config import get_logger
 from ..services.node_classifier import NodeClassifier
 from ..configs.model_config import ModelConfig
+from ..models.workflow import ModelReference, WorkflowNode, ModelResolutionResult
 
 if TYPE_CHECKING:
     from comfydock_core.managers.model_index_manager import ModelIndexManager
     from comfydock_core.models.shared import ModelWithLocation
-    from ..models.workflow import Workflow, WorkflowNode, ModelReference, ModelResolutionResult
 
 logger = get_logger(__name__)
 
@@ -41,23 +41,23 @@ class WorkflowDependencies:
 class WorkflowDependencyParser:
     """Manages workflow dependency analysis and resolution."""
 
-    def __init__(self, workflow_path: Path, model_index: ModelIndexManager, model_config: ModelConfig | None = None):
+    def __init__(self, workflow_path: Path, model_index: ModelIndexManager, model_config: ModelConfig | None = None, pyproject=None):
 
         self.model_index = model_index
         self.model_config = model_config or ModelConfig.load()
         self.node_classifier = NodeClassifier()
         self.repository = WorkflowRepository()
+        self.pyproject = pyproject  # Optional PyprojectManager for checking existing resolutions
+
         # Load workflow
         self.workflow = self.repository.load(workflow_path)
         logger.debug(f"Loaded workflow {self.workflow}")
 
+        # Store workflow name for pyproject lookup
+        self.workflow_name = workflow_path.stem
+
         # Keep raw text for legacy string matching
         self.workflow_text = self.repository.load_raw_text(workflow_path)
-
-        # Extract existing metadata if present
-        self.existing_metadata = self.workflow.extra.get("_comfydock_metadata") if self.workflow.extra else None
-        if self.existing_metadata:
-            logger.debug(f"Found existing metadata version {self.existing_metadata.get('version')}")
 
     def analyze_dependencies(self) -> WorkflowDependencies:
         """Analyze workflow for all dependencies, including model information, node types, and Python dependencies."""
@@ -215,28 +215,28 @@ class WorkflowDependencyParser:
         results = []
         nodes_data = self.workflow.nodes
 
-        metadata_used = 0
+        pyproject_used = 0
         fresh_resolved = 0
 
         for node_id, node_info in nodes_data.items():
             refs = self._extract_model_refs(node_id, node_info)
             for ref in refs:
+                logger.debug(f"Trying to resolve {ref}")
                 result = self._resolve_with_strategies(ref)
                 results.append(result)
 
-                if result.resolution_type == "metadata":
-                    metadata_used += 1
-                elif result.resolution_type != "not_found" and result.resolution_type != "ambiguous":
+                if result.resolution_type == "pyproject":
+                    pyproject_used += 1
+                elif result.resolution_type not in ["not_found", "ambiguous"]:
                     fresh_resolved += 1
 
-        if metadata_used > 0:
-            logger.info(f"Used cached metadata for {metadata_used} models, resolved {fresh_resolved} fresh")
+        if pyproject_used > 0:
+            logger.info(f"Reused {pyproject_used} models from pyproject.toml, resolved {fresh_resolved} fresh")
 
         return results
 
-    def _extract_model_refs(self, node_id: str, node_info: "WorkflowNode") -> List["ModelReference"]:
+    def _extract_model_refs(self, node_id: str, node_info: WorkflowNode) -> List["ModelReference"]:
         """Extract model references from node"""
-        from ..models.workflow import ModelReference
 
         refs = []
 
@@ -285,22 +285,22 @@ class WorkflowDependencyParser:
 
         return refs
 
-    def _resolve_with_strategies(self, ref: "ModelReference") -> "ModelResolutionResult":
+    def _resolve_with_strategies(self, ref: ModelReference) -> ModelResolutionResult:
         """Try multiple resolution strategies"""
-        from ..models.workflow import ModelResolutionResult
-
         widget_value = ref.widget_value
 
-        # Strategy 0: Check existing metadata first
-        metadata_result = self._try_metadata_resolution(ref)
-        if metadata_result:
-            return metadata_result
+        # Strategy 0: Check existing pyproject model data first
+        pyproject_result = self._try_pyproject_resolution(ref)
+        if pyproject_result:
+            logger.debug(f"Resolved {ref} to {pyproject_result.reference.resolved_model} from pyproject.toml")
+            return pyproject_result
 
         # Strategy 1: Exact path match
         candidates = self._try_exact_match(widget_value)
         if len(candidates) == 1:
             ref.resolved_model = candidates[0]
             ref.resolution_confidence = 1.0
+            logger.debug(f"Resolved {ref} to {candidates[0]} as exact match")
             return ModelResolutionResult(ref, candidates, "exact")
 
         # Strategy 2: Reconstruct paths for native loaders
@@ -311,6 +311,7 @@ class WorkflowDependencyParser:
                 if len(candidates) == 1:
                     ref.resolved_model = candidates[0]
                     ref.resolution_confidence = 0.9
+                    logger.debug(f"Resolved {ref} to {candidates[0]} as reconstructed match")
                     return ModelResolutionResult(ref, candidates, "reconstructed")
 
         # Strategy 3: Case-insensitive match
@@ -318,6 +319,7 @@ class WorkflowDependencyParser:
         if len(candidates) == 1:
             ref.resolved_model = candidates[0]
             ref.resolution_confidence = 0.8
+            logger.debug(f"Resolved {ref} to {candidates[0]} as case-insensitive match")
             return ModelResolutionResult(ref, candidates, "case_insensitive")
 
         # Strategy 4: Filename-only match
@@ -326,12 +328,15 @@ class WorkflowDependencyParser:
         if len(candidates) == 1:
             ref.resolved_model = candidates[0]
             ref.resolution_confidence = 0.7
+            logger.debug(f"Resolved {ref} to {candidates[0]} as filename-only match")
             return ModelResolutionResult(ref, candidates, "filename")
         elif len(candidates) > 1:
             # Multiple matches - need disambiguation
+            logger.debug(f"Resolved {ref} to {candidates} as filename-only match, ambiguous")
             return ModelResolutionResult(ref, candidates, "ambiguous")
 
         # No matches found
+        logger.debug(f"No matches found in pyproject or model index for {ref}")
         return ModelResolutionResult(ref, [], "not_found")
 
     def _try_exact_match(self, path: str) -> List["ModelWithLocation"]:
@@ -352,48 +357,55 @@ class WorkflowDependencyParser:
         extensions = self.model_config.default_extensions
         return any(value.endswith(ext) for ext in extensions)
 
-    def _try_metadata_resolution(self, ref: "ModelReference") -> "ModelResolutionResult | None":
-        """Try to resolve using existing metadata if valid"""
-        from ..models.workflow import ModelResolutionResult
-
-        if not self.existing_metadata:
+    def _try_pyproject_resolution(self, ref: "ModelReference") -> "ModelResolutionResult | None":
+        """Try to resolve using existing model data in pyproject.toml if valid"""
+        # No pyproject manager available, can't check existing resolutions
+        if not self.pyproject:
             return None
 
-        # Check if metadata exists for this node
-        models_metadata = self.existing_metadata.get("models", {})
-        node_metadata = models_metadata.get(str(ref.node_id))
-        if not node_metadata:
-            return None
+        try:
+            # Load the pyproject config
+            config = self.pyproject.load()
 
-        # Find the metadata entry for this widget index
-        refs = node_metadata.get("refs", [])
-        for metadata_ref in refs:
-            if metadata_ref.get("widget_index") != ref.widget_index:
-                continue
+            # Navigate to tool.comfydock.workflows section
+            workflows = config.get('tool', {}).get('comfydock', {}).get('workflows', {})
 
-            # Check if the path in metadata matches current widget value
-            metadata_path = metadata_ref.get("path")
-            if metadata_path != ref.widget_value:
-                logger.debug(f"Metadata path '{metadata_path}' doesn't match current value '{ref.widget_value}'")
-                return None  # Path changed, need fresh resolution
-
-            # Validate the hash still exists in our index
-            metadata_hash = metadata_ref.get("hash")
-            if not metadata_hash:
-                logger.debug("No hash in metadata, needs resolution")
+            # Check if this workflow has entries
+            workflow_entry = workflows.get(self.workflow_name, {})
+            if not workflow_entry:
                 return None
 
-            # Try to find model by hash
-            models = self.model_index.find_model_by_hash(metadata_hash)
-            if models and len(models) > 0:
-                # Valid metadata - use it
-                model = models[0]
-                ref.resolved_model = model
-                ref.resolution_confidence = 1.0
-                logger.debug(f"Resolved from metadata: {ref.widget_value} -> {metadata_hash}")
-                return ModelResolutionResult(ref, [model], "metadata")
-            else:
-                logger.debug(f"Hash {metadata_hash} no longer in index")
-                return None  # Hash no longer valid
+            # Get model mappings for this workflow
+            models_section = workflow_entry.get('models', {})
+            if not models_section:
+                return None
 
-        return None  # No matching metadata entry found
+            # Search through all model entries for matching node_id and widget_idx
+            for model_hash, model_data in models_section.items():
+                nodes = model_data.get('nodes', [])
+
+                # Check if this node_id and widget_index combination exists
+                for node_entry in nodes:
+                    if (node_entry.get('node_id') == ref.node_id and
+                        node_entry.get('widget_idx') == ref.widget_index):
+
+                        # Found a match! Now verify the model still exists in the index
+                        models = self.model_index.find_model_by_hash(model_hash)
+                        if models and len(models) > 0:
+                            # Valid existing resolution - use it
+                            model = models[0]
+                            ref.resolved_model = model
+                            ref.resolution_confidence = 1.0
+                            logger.debug(f"Resolved from pyproject: {ref.widget_value} -> {model_hash[:8]}...")
+                            return ModelResolutionResult(ref, [model], "pyproject")
+                        else:
+                            # Hash no longer valid in index, need fresh resolution
+                            logger.debug(f"Pyproject hash {model_hash[:8]}... no longer in index for {ref.widget_value}")
+                            return None
+
+            # No matching node_id/widget_idx combination found
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error checking pyproject resolution: {e}")
+            return None

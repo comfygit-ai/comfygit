@@ -203,70 +203,6 @@ class ModelResolver:
 
         return False
 
-    def interactive_resolution(self, result: ResolutionResult) -> ResolutionResult:
-        """Perform interactive resolution for ambiguous matches.
-        
-        Args:
-            result: ResolutionResult with needs_confirmation entries
-            
-        Returns:
-            Updated ResolutionResult with user selections
-        """
-        if not result.needs_confirmation:
-            return result
-
-        print(f"\n🤔 Found {len(result.needs_confirmation)} models requiring confirmation:")
-
-        for short_hash, matches in result.needs_confirmation.copy().items():
-            print(f"\nModel {short_hash[:8]}... has {len(matches)} potential matches:")
-
-            for i, match in enumerate(matches):
-                print(f"  {i+1}. {match.filename} [{match.hash[:8]}...] ({match.model_type})")
-                print(f"      Size: {self._format_size(match.file_size)} | Path: {match.path}")
-
-            print("  0. Skip this model")
-
-            try:
-                choice = input(f"Select match for {short_hash[:8]}... [1]: ").strip()
-                if not choice:
-                    choice = "1"
-
-                choice_num = int(choice)
-
-                if choice_num == 0:
-                    # User chose to skip - move to missing
-                    model_spec = {
-                        'filename': matches[0].filename,
-                        'type': matches[0].model_type,
-                        'size': matches[0].file_size
-                    }
-                    result.missing[short_hash] = model_spec
-                elif 1 <= choice_num <= len(matches):
-                    # User selected a match
-                    selected_match = matches[choice_num - 1]
-                    result.resolved[short_hash] = selected_match
-                    print(f"✓ Selected: {selected_match.filename}")
-                else:
-                    print("Invalid choice - skipping model")
-                    result.missing[short_hash] = {
-                        'filename': matches[0].filename,
-                        'type': matches[0].model_type,
-                        'size': matches[0].file_size
-                    }
-
-                # Remove from needs_confirmation
-                del result.needs_confirmation[short_hash]
-
-            except (ValueError, KeyboardInterrupt):
-                print("Invalid input - skipping model")
-                result.missing[short_hash] = {
-                    'filename': matches[0].filename,
-                    'type': matches[0].model_type,
-                    'size': matches[0].file_size
-                }
-                del result.needs_confirmation[short_hash]
-
-        return result
 
     def generate_export_manifest(self, model_hashes: list[str]) -> dict:
         """Generate export manifest with full metadata for models.
@@ -348,30 +284,3 @@ class ModelResolver:
             size /= 1024.0
         return f"{size:.1f} TB"
 
-    def print_resolution_summary(self, result: ResolutionResult) -> None:
-        """Print a human-readable summary of resolution results.
-        
-        Args:
-            result: ResolutionResult to summarize
-        """
-        total = result.total_models
-
-        print(f"\n📊 Model Resolution Summary ({total} models):")
-        print(f"  ✓ Resolved: {len(result.resolved)} ({len(result.resolved)/total*100:.1f}%)")
-
-        if result.downloadable:
-            print(f"  📥 Downloadable: {len(result.downloadable)}")
-
-        if result.needs_confirmation:
-            print(f"  🤔 Need confirmation: {len(result.needs_confirmation)}")
-
-        if result.missing:
-            print(f"  ✗ Missing: {len(result.missing)}")
-            print("\nMissing models:")
-            for short_hash, spec in result.missing.items():
-                print(f"    • {spec.get('filename', 'unknown')} [{short_hash[:8]}...]")
-
-        if result.success_rate < 100:
-            print(f"\n⚠️  Resolution rate: {result.success_rate:.1f}%")
-        else:
-            print("\n✅ All models resolved successfully!")

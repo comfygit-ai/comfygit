@@ -249,6 +249,7 @@ Create a version snapshot of the current environment state.
 **Model Resolution Process:**
 ```python
 # For each model reference in workflow:
+0. See if we already have resolved the same model in our pyproject.toml
 1. Try exact path match in index
 2. Try directory-aware match (e.g., checkpoints/ for checkpoint loaders)
 3. Try filename similarity

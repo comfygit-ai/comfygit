@@ -4,12 +4,16 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from ..models.commit import ModelResolutionRequest, WorkflowCommitResult
+from ..utils.workflow_dependency_parser import WorkflowDependencyParser
 from ..logging.logging_config import get_logger
 
 if TYPE_CHECKING:
     from .pyproject_manager import PyprojectManager
+    from .model_index_manager import ModelIndexManager
+    from ..models.shared import ModelWithLocation
 
 logger = get_logger(__name__)
 
@@ -19,14 +23,18 @@ class WorkflowManager:
 
     def __init__(
         self,
-        env_path: Path,
+        comfyui_path: Path,
+        cec_path: Path,
         pyproject: PyprojectManager,
+        model_index_manager: ModelIndexManager,
     ):
-        self.env_path = env_path
+        self.comfyui_path = comfyui_path
+        self.cec_path = cec_path
         self.pyproject = pyproject
+        self.model_index_manager = model_index_manager
 
-        self.comfyui_workflows = env_path / "ComfyUI" / "user" / "default" / "workflows"
-        self.cec_workflows = env_path / ".cec" / "workflows"
+        self.comfyui_workflows = comfyui_path / "user" / "default" / "workflows"
+        self.cec_workflows = cec_path / "workflows"
 
         # Ensure directories exist
         self.comfyui_workflows.mkdir(parents=True, exist_ok=True)
@@ -109,11 +117,11 @@ class WorkflowManager:
             logger.warning(f"Error comparing workflows '{name}': {e}")
             return True
 
-    def copy_all_workflows(self) -> dict[str, str]:
+    def copy_all_workflows(self) -> dict[str, Path | None]:
         """Copy ALL workflows from ComfyUI to .cec for commit.
 
         Returns:
-            Dictionary of workflow names to copy status
+            Dictionary of workflow names to Path
         """
         results = {}
 
@@ -129,10 +137,10 @@ class WorkflowManager:
 
             try:
                 shutil.copy2(source, dest)
-                results[name] = "copied"
+                results[name] = dest
                 logger.debug(f"Copied workflow '{name}' to .cec")
             except Exception as e:
-                results[name] = "failed"
+                results[name] = None
                 logger.error(f"Failed to copy workflow '{name}': {e}")
 
         # Remove workflows from .cec that no longer exist in ComfyUI
@@ -150,21 +158,28 @@ class WorkflowManager:
 
         return results
 
-    def restore_from_cec(self, name: str) -> None:
+    def restore_from_cec(self, name: str) -> bool:
         """Restore a workflow from .cec to ComfyUI directory.
 
         Args:
             name: Workflow name
+
+        Returns:
+            True if successful, False if workflow not found
         """
         source = self.cec_workflows / f"{name}.json"
         dest = self.comfyui_workflows / f"{name}.json"
 
         if not source.exists():
-            raise ValueError(f"Workflow '{name}' not found in .cec directory")
+            return False
 
-        shutil.copy2(source, dest)
-        logger.info(f"Restored workflow '{name}' to ComfyUI")
-        print("⚠️ Please reload the workflow in your ComfyUI browser tab")
+        try:
+            shutil.copy2(source, dest)
+            logger.info(f"Restored workflow '{name}' to ComfyUI")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to restore workflow '{name}': {e}")
+            return False
 
     def restore_all_from_cec(self) -> dict[str, str]:
         """Restore all workflows from .cec to ComfyUI (for rollback).
@@ -181,12 +196,10 @@ class WorkflowManager:
         # Copy every workflow from .cec to ComfyUI
         for workflow_file in self.cec_workflows.glob("*.json"):
             name = workflow_file.stem
-            try:
-                self.restore_from_cec(name)
+            if self.restore_from_cec(name):
                 results[name] = "restored"
-            except Exception as e:
+            else:
                 results[name] = "failed"
-                logger.error(f"Failed to restore workflow '{name}': {e}")
 
         # Remove workflows from ComfyUI that don't exist in .cec (cleanup)
         if self.comfyui_workflows.exists():
@@ -246,3 +259,127 @@ class WorkflowManager:
             deleted=workflows['deleted'],
             synced=workflows['synced']
         )
+        
+    def analyze_commit(self) -> WorkflowCommitResult:
+        """Analyze workflows and prepare commit data WITHOUT user interaction.
+
+        Returns:
+            WorkflowCommitResult with all data needed for commit
+        """
+        result = WorkflowCommitResult()
+
+        # Step 1: Copy workflows
+        result.workflows_copied = self.copy_all_workflows()
+        logger.info(f"Copied {len(result.workflows_copied)} workflows")
+
+        # Step 2: Parse each workflow for models
+        for workflow_name, workflow_path in result.workflows_copied.items():
+            if workflow_path is None or not workflow_path.exists():
+                continue
+
+            try:
+                # Parse for models
+                parser = WorkflowDependencyParser(
+                    workflow_path,
+                    self.model_index_manager,
+                    pyproject=self.pyproject
+                )
+
+                # Analyze models with enhanced strategies
+                resolution_results = parser.analyze_models_enhanced()
+                result.workflow_resolutions[workflow_name] = resolution_results
+
+                # Categorize results
+                for res in resolution_results:
+                    if res.resolution_type in ["exact", "reconstructed", "metadata", "case_insensitive", "filename", "pyproject"]:
+                        # Automatically resolved
+                        if res.reference.resolved_model:
+                            model = res.reference.resolved_model
+                            result.models_resolved[model.hash] = model
+
+                    elif res.resolution_type == "ambiguous":
+                        # Needs user input
+                        result.models_needing_resolution.append(
+                            ModelResolutionRequest(
+                                workflow_name=workflow_name,
+                                node_id=res.reference.node_id,
+                                node_type=res.reference.node_type,
+                                widget_index=res.reference.widget_index,
+                                original_value=res.reference.widget_value,
+                                candidates=res.candidates
+                            )
+                        )
+
+                    elif res.resolution_type == "not_found":
+                        # Couldn't resolve
+                        result.models_unresolved.append({
+                            'workflow': workflow_name,
+                            'node_id': res.reference.node_id,
+                            'node_type': res.reference.node_type,
+                            'value': res.reference.widget_value
+                        })
+
+            except Exception as e:
+                logger.error(f"Failed to parse workflow {workflow_name}: {e}")
+                result.errors.append(f"Failed to parse workflow {workflow_name}: {e}")
+
+        logger.info(
+            f"Resolved {len(result.models_resolved)} models, "
+            f"{len(result.models_needing_resolution)} need user input, "
+            f"{len(result.models_unresolved)} unresolved"
+        )
+
+        return result
+
+    def apply_resolutions(
+        self,
+        commit_result: WorkflowCommitResult,
+        user_resolutions: dict[str, ModelWithLocation] | None = None
+    ) -> None:
+        """Apply model resolutions and update pyproject.toml.
+
+        Args:
+            commit_result: Result from analyze_commit()
+            user_resolutions: Optional dict mapping request key to selected model
+        """
+        # Process user resolutions if provided
+        if user_resolutions:
+            for selected_model in user_resolutions.values():
+                commit_result.models_resolved[selected_model.hash] = selected_model
+
+        # Update pyproject.toml with all resolved models
+        for model_hash, model in commit_result.models_resolved.items():
+            self.pyproject.models.add_model(
+                model_hash=model_hash,
+                filename=model.filename,
+                file_size=model.file_size,
+                relative_path=model.relative_path,
+                category="required"
+            )
+
+        # Update workflow resolutions in pyproject.toml
+        for workflow_name, resolutions in commit_result.workflow_resolutions.items():
+            model_mappings = {}
+
+            for res in resolutions:
+                if res.reference.resolved_model:
+                    model = res.reference.resolved_model
+                    if model.hash not in model_mappings:
+                        model_mappings[model.hash] = {"nodes": []}
+
+                    model_mappings[model.hash]["nodes"].append({
+                        "node_id": res.reference.node_id,
+                        "widget_idx": res.reference.widget_index
+                    })
+
+            if model_mappings:
+                self.pyproject.workflows.set_model_resolutions(
+                    workflow_name,
+                    model_mappings
+                )
+
+        logger.info(f"Updated pyproject.toml with {len(commit_result.models_resolved)} models")
+
+    def _generate_request_key(self, req: ModelResolutionRequest) -> str:
+        """Generate unique key for resolution request."""
+        return f"{req.workflow_name}:{req.node_id}:{req.widget_index}"
