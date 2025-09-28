@@ -32,6 +32,9 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
                     print(f"  Note: Manual package '{manual}' will need to be verified")
                 return None
             return None
+        
+        if len(possible) == 1:
+            return possible[0]
 
         print(f"\n🔍 Found {len(possible)} matches for '{node_type}':")
         for i, pkg in enumerate(possible[:5], 1):

@@ -1,7 +1,5 @@
 ## Important Documents
-- Read @docs/codebase-map.md
 - Read @docs/tech/UV-docs.md
-- Read @docs/layer-hierarchy.md (to understand what should import what)
 
 ## Python Environment Management
 

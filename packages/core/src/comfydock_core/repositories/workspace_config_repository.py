@@ -1,8 +1,9 @@
 from datetime import datetime
 from pathlib import Path
 import json
+import os
 
-from ..configs.workspace_config import WorkspaceConfig, ModelDirectory
+from ..configs.workspace_config import WorkspaceConfig, ModelDirectory, APICredentials
 from comfydock_core.models.exceptions import ComfyDockError
 from ..logging.logging_config import get_logger
 
@@ -74,3 +75,33 @@ class WorkspaceConfigRepository:
             raise ComfyDockError("No models directory set")
         data.global_model_directory.last_sync = str(datetime.now().isoformat())
         self.save(data)
+
+    def set_civitai_token(self, token: str | None):
+        """Set or clear CivitAI API token."""
+        data = self.load()
+        if token:
+            if not data.api_credentials:
+                data.api_credentials = APICredentials(civitai_token=token)
+            else:
+                data.api_credentials.civitai_token = token
+            logger.info("CivitAI API token configured")
+        else:
+            if data.api_credentials:
+                data.api_credentials.civitai_token = None
+            logger.info("CivitAI API token cleared")
+        self.save(data)
+
+    def get_civitai_token(self) -> str | None:
+        """Get CivitAI API token from config or environment."""
+        # Priority: environment variable > config file
+        env_token = os.environ.get("CIVITAI_API_TOKEN")
+        if env_token:
+            logger.debug("Using CivitAI token from environment")
+            return env_token
+
+        data = self.load()
+        if data.api_credentials and data.api_credentials.civitai_token:
+            logger.debug("Using CivitAI token from config")
+            return data.api_credentials.civitai_token
+
+        return None

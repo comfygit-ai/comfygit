@@ -17,13 +17,12 @@ from ..models.node_mapping import (
     GlobalNodePackageVersion
 )
 
-if TYPE_CHECKING:
-    from comfydock_core.models.workflow import (
-        NodeInput,
-        WorkflowNode,
-        ResolvedNodePackage,
-        NodeResolutionResult,
-    )
+
+from comfydock_core.models.workflow import (
+    WorkflowNode,
+    ResolvedNodePackage,
+    NodeResolutionResult,
+)
 
 from ..logging.logging_config import get_logger
 from ..utils.input_signature import create_node_key, normalize_workflow_inputs

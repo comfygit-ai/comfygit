@@ -18,8 +18,8 @@ ComfyDock v2.0 implements a **one-way sync architecture** where ComfyUI is the s
 
 ### Design Principles
 
-1. **One-Way Data Flow**: ComfyUI → ComfyDock (never reverse)
-2. **Lazy Resolution**: Model analysis only at commit/export time
+1. **One-Way Data Flow**: ComfyUI → ComfyDock (only reverse on restores)
+2. **Lazy Resolution**: Model/Node analysis only at commit/export time
 3. **Git-Based Versioning**: Every commit creates a restorable snapshot
 4. **Workspace Isolation**: Multiple environments with shared model index
 5. **Progressive Enhancement**: Simple tracking evolves to full reproducibility
