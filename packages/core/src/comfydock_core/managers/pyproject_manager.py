@@ -115,15 +115,18 @@ class PyprojectManager:
 
     def save(self, config: dict | None = None) -> None:
         """Save the configuration to pyproject.toml.
-        
+
         Args:
             config: Configuration to save (uses cache if not provided)
-            
+
         Raises:
             CDPyprojectError: If no configuration to save or write fails
         """
         if config is None:
             raise CDPyprojectError("No configuration to save")
+
+        # Clean up empty sections before saving
+        self._cleanup_empty_sections(config)
 
         try:
             # Ensure parent directory exists
@@ -135,6 +138,21 @@ class PyprojectManager:
             raise CDPyprojectError(f"Failed to write pyproject.toml to {self.path}: {e}")
 
         logger.debug(f"Saved pyproject.toml to {self.path}")
+
+    def _cleanup_empty_sections(self, config: dict) -> None:
+        """Recursively remove empty sections from config."""
+        def _clean_dict(d: dict) -> bool:
+            """Recursively clean dict, return True if dict became empty."""
+            keys_to_remove = []
+            for key, value in list(d.items()):
+                if isinstance(value, dict):
+                    if _clean_dict(value) or not value:
+                        keys_to_remove.append(key)
+            for key in keys_to_remove:
+                del d[key]
+            return not d
+
+        _clean_dict(config)
 
     def get_manifest_state(self) -> str:
         """Get the current manifest state.
@@ -483,6 +501,7 @@ class NodeHandler(BaseHandler):
         config = self.load()
         identifier = node_identifier or (node_info.registry_id if node_info.registry_id else node_info.name)
 
+        # Only create nodes section when actually adding a node
         self.ensure_section(config, 'tool', 'comfydock', 'nodes')
 
         # Build node data, excluding any None values (tomlkit requirement)
@@ -675,25 +694,6 @@ class WorkflowHandler(BaseHandler):
 class ModelHandler(BaseHandler):
     """Handles model configuration in pyproject.toml."""
 
-    def _ensure_structure(self, config: dict) -> None:
-        """Ensure tool.comfydock.models exists with required sections."""
-        if "tool" not in config:
-            config["tool"] = tomlkit.table()
-        if "comfydock" not in config["tool"]:
-            config["tool"]["comfydock"] = tomlkit.table()
-        if "models" not in config["tool"]["comfydock"]:
-            models_table = tomlkit.table()
-            models_table["required"] = tomlkit.table()
-            models_table["optional"] = tomlkit.table()
-            config["tool"]["comfydock"]["models"] = models_table
-        else:
-            # Ensure both sections exist even if models section exists
-            models = config["tool"]["comfydock"]["models"]
-            if "required" not in models:
-                models["required"] = tomlkit.table()
-            if "optional" not in models:
-                models["optional"] = tomlkit.table()
-
     def add_model(
         self,
         model_hash: str,
@@ -712,44 +712,39 @@ class ModelHandler(BaseHandler):
             **metadata: Additional metadata (blake3, sha256, sources, etc.)
         """
         config = self.load()
-        self._ensure_structure(config)
 
-        # Ensure the specific category exists
-        if category not in config["tool"]["comfydock"]["models"]:
-            config["tool"]["comfydock"]["models"][category] = tomlkit.table()
+        # Lazy section creation - only when adding a model
+        self.ensure_section(config, "tool", "comfydock", "models", category)
 
-        models_section = config["tool"]["comfydock"]["models"][category]
-        models_section[model_hash] = {
-            "filename": filename,
-            "size": file_size,
-            **metadata,
-        }
+        # Use inline table for compact formatting
+        model_entry = tomlkit.inline_table()
+        model_entry["filename"] = filename
+        model_entry["size"] = file_size
+        for key, value in metadata.items():
+            model_entry[key] = value
+
+        config["tool"]["comfydock"]["models"][category][model_hash] = model_entry
 
         self.save(config)
         logger.info(f"Added {category} model: {filename} ({model_hash[:8]}...)")
 
     def remove_model(self, model_hash: str, category: str | None = None) -> bool:
         """Remove a model from the manifest.
-        
+
         Args:
             model_hash: Model hash to remove
             category: Specific category to remove from, or None to check both
-            
+
         Returns:
             True if removed, False if not found
         """
         config = self.load()
-        self._ensure_structure(config)
-
-        models = config["tool"]["comfydock"]["models"]
+        models = config.get("tool", {}).get("comfydock", {}).get("models", {})
 
         if category:
             # Remove from specific category
             if model_hash in models.get(category, {}):
                 del models[category][model_hash]
-                # Clean up empty sections
-                self.clean_empty_sections(config, 'tool', 'comfydock', 'models', category)
-                self.clean_empty_sections(config, 'tool', 'comfydock', 'models')
                 self.save(config)
                 logger.info(f"Removed model from {category}: {model_hash[:8]}...")
                 return True
@@ -758,9 +753,6 @@ class ModelHandler(BaseHandler):
             for cat in ['required', 'optional']:
                 if model_hash in models.get(cat, {}):
                     del models[cat][model_hash]
-                    # Clean up empty sections
-                    self.clean_empty_sections(config, 'tool', 'comfydock', 'models', cat)
-                    self.clean_empty_sections(config, 'tool', 'comfydock', 'models')
                     self.save(config)
                     logger.info(f"Removed model from {cat}: {model_hash[:8]}...")
                     return True
@@ -769,13 +761,12 @@ class ModelHandler(BaseHandler):
 
     def get_all(self) -> dict:
         """Get all models in manifest.
-        
+
         Returns:
             Dictionary with 'required' and 'optional' sections
         """
         config = self.load()
-        self._ensure_structure(config)
-        return config["tool"]["comfydock"]["models"]
+        return config.get("tool", {}).get("comfydock", {}).get("models", {})
 
     def get_category(self, category: str) -> dict:
         """Get models from specific category.
