@@ -5,24 +5,20 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from comfydock_core.models.shared import ModelWithLocation
 from comfydock_core.resolvers.global_node_resolver import GlobalNodeResolver
 from comfydock_core.services.registry_data_manager import RegistryDataManager
 
-
 from ..resolvers.model_resolver import ModelResolver
-from ..models.commit import ModelResolutionRequest
 from ..models.workflow import (
-    WorkflowAnalysisResult,
     ResolutionResult,
     CommitAnalysis,
-    ModelResolutionResult,
+    WorkflowNode,
     WorkflowNodeWidgetRef,
 )
 from ..models.protocols import NodeResolutionStrategy, ModelResolutionStrategy
-from ..strategies import AutoNodeStrategy, AutoModelStrategy
 from ..analyzers.workflow_dependency_parser import WorkflowDependencyParser
 from ..logging.logging_config import get_logger
 
@@ -330,101 +326,186 @@ class WorkflowManager:
 
         return deps
 
-    def resolve_workflow(
-        self,
-        analysis: WorkflowDependencies,
-        node_strategy: NodeResolutionStrategy | None = None,
-        model_strategy: ModelResolutionStrategy | None = None,
-    ) -> ResolutionResult:
-        """Apply resolution strategies to workflow analysis."""
-        nodes_added: list[ResolvedNodePackage] = []
-        models_resolved: list[ModelWithLocation] = []
-        models_unresolved: list[WorkflowNodeWidgetRef] = []
-        external_models_added: list[str] = []
-        
-        name = analysis.workflow_name
+    def resolve_workflow(self, analysis: WorkflowDependencies) -> ResolutionResult:
+        """Phase 2: Attempt automatic resolution of workflow dependencies.
 
-        # If we don't have a node strategy or model strategy, use automatic defaults
-        if not node_strategy:
-            node_strategy = AutoNodeStrategy()
-        if not model_strategy:
-            model_strategy = AutoModelStrategy()
+        Takes the analysis from Phase 1 and tries to resolve:
+        - Missing nodes → node packages from registry/GitHub
+        - Model references → actual model files in index
+
+        Returns ResolutionResult showing what was resolved and what remains ambiguous.
+        Does NOT modify pyproject.toml - that happens in fix_workflow().
+
+        Args:
+            analysis: Workflow dependencies from analyze_workflow()
+
+        Returns:
+            ResolutionResult with resolved and unresolved dependencies
+        """
+        nodes_resolved: list[ResolvedNodePackage] = []
+        nodes_unresolved: list[WorkflowNode] = []
+        nodes_ambiguous: list[list[ResolvedNodePackage]] = []
+        models_resolved: list[ModelWithLocation] = []
+        models_ambiguous: list[tuple[WorkflowNodeWidgetRef, list[ModelWithLocation]]] = []
+        models_unresolved: list[WorkflowNodeWidgetRef] = []
+
+        workflow_name = analysis.workflow_name
 
         # Resolve missing nodes
         for node in analysis.missing_nodes:
-
-            # Resolve nodes via GlobalNodeResolver
             resolved_packages = self.global_node_resolver.resolve_single_node(node)
 
-            if resolved_packages:
-                package = node_strategy.resolve_unknown_node(
-                    node.type, resolved_packages
-                )
-                if package and node_strategy.confirm_node_install(package):
-                    # TODO: Add to pyproject
-                    try:
-                        # TODO: We'd need access to node_manager here - for now just track the ID
-                        nodes_added.append(package)
-                        logger.info(
-                            f"Would add node: {package.package_data.id} for {node}"
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Failed to add node {package.package_data.id}: {e}"
-                        )
+            if not resolved_packages:
+                nodes_unresolved.append(node)
+            elif len(resolved_packages) == 1:
+                # Single match - cleanly resolved
+                nodes_resolved.append(resolved_packages[0])
+            else:
+                # Multiple matches - ambiguous
+                nodes_ambiguous.append(resolved_packages)
 
         # Resolve models
         for model_ref in analysis.found_models:
-            resolved_model = self.model_resolver.resolve_model(model_ref, name)
+            result = self.model_resolver.resolve_model(model_ref, workflow_name)
 
-            if not resolved_model:
-                continue
-
-            model = resolved_model.resolved_model
-
-            # If ambiguous, let strategy resolve
-            if not model and resolved_model.candidates:
-                model = model_strategy.resolve_ambiguous_model(
-                    model_ref, resolved_model.candidates
-                )
-
-            # If still no model, try handling as missing
-            if not model:
-                if url := model_strategy.handle_missing_model(model_ref):
-                    external_models_added.append(url)
-                    logger.info(f"Added external model: {url}")
-                
-                logger.debug(f"Could not resolve model: {model_ref}")
+            if not result:
+                # Model not found at all
                 models_unresolved.append(model_ref)
-                continue
-
-            models_resolved.append(model)
-            logger.info(f"Resolved model: {model.filename}")
-
-        # Apply changes to pyproject if any
-        changes_made = bool(nodes_added or models_resolved or external_models_added)
-        if changes_made:
-            self._apply_resolution_to_pyproject(
-                nodes_added, models_resolved, external_models_added
-            )
+            elif result.resolved_model:
+                # Clean resolution (exact match or from pyproject cache)
+                models_resolved.append(result.resolved_model)
+                logger.debug(f"Resolved model: {result.resolved_model.filename}")
+            elif result.candidates:
+                # Ambiguous - multiple matches
+                models_ambiguous.append((model_ref, result.candidates))
+            else:
+                # No resolution possible
+                models_unresolved.append(model_ref)
 
         return ResolutionResult(
-            nodes_added=nodes_added,
+            nodes_resolved=nodes_resolved,
+            nodes_unresolved=nodes_unresolved,
+            nodes_ambiguous=nodes_ambiguous,
             models_resolved=models_resolved,
             models_unresolved=models_unresolved,
-            external_models_added=external_models_added,
-            changes_made=changes_made,
+            models_ambiguous=models_ambiguous,
+        )
+
+    def fix_resolution(
+        self,
+        resolution: ResolutionResult,
+        node_strategy: NodeResolutionStrategy | None = None,
+        model_strategy: ModelResolutionStrategy | None = None,
+    ) -> ResolutionResult:
+        """Phase 3a: Fix remaining issues using strategies.
+
+        Takes ResolutionResult from Phase 2 and uses strategies to resolve ambiguities.
+        Does NOT modify pyproject.toml - call apply_resolution() to persist changes.
+
+        Args:
+            resolution: Result from resolve_workflow()
+            node_strategy: Strategy for handling unresolved/ambiguous nodes
+            model_strategy: Strategy for handling ambiguous/missing models
+
+        Returns:
+            Updated ResolutionResult with fixes applied
+        """
+        nodes_to_add = list(resolution.nodes_resolved)
+        models_to_add = list(resolution.models_resolved)
+
+        remaining_nodes_ambiguous: list[list[ResolvedNodePackage]] = []
+        remaining_nodes_unresolved: list[WorkflowNode] = []
+        remaining_models_ambiguous: list[tuple[WorkflowNodeWidgetRef, list[ModelWithLocation]]] = []
+        remaining_models_unresolved: list[WorkflowNodeWidgetRef] = []
+
+        # Fix ambiguous nodes using strategy
+        if node_strategy:
+            for packages in resolution.nodes_ambiguous:
+                selected = node_strategy.resolve_unknown_node(packages[0].node_type, packages)
+                if selected:
+                    nodes_to_add.append(selected)
+                    logger.info(f"Resolved ambiguous node: {selected.package_data.id}")
+                else:
+                    remaining_nodes_ambiguous.append(packages)
+        else:
+            remaining_nodes_ambiguous = list(resolution.nodes_ambiguous)
+
+        # Handle unresolved nodes using strategy
+        if node_strategy:
+            for node in resolution.nodes_unresolved:
+                selected = node_strategy.resolve_unknown_node(node.type, [])
+                if selected:
+                    nodes_to_add.append(selected)
+                    logger.info(f"Resolved unresolved node: {selected.package_data.id}")
+                else:
+                    remaining_nodes_unresolved.append(node)
+        else:
+            remaining_nodes_unresolved = list(resolution.nodes_unresolved)
+
+        # Fix ambiguous models using strategy
+        if model_strategy:
+            for model_ref, candidates in resolution.models_ambiguous:
+                resolved = model_strategy.resolve_ambiguous_model(model_ref, candidates)
+                if resolved:
+                    models_to_add.append(resolved)
+                    logger.info(f"Resolved ambiguous model: {resolved.filename}")
+                else:
+                    remaining_models_ambiguous.append((model_ref, candidates))
+        else:
+            remaining_models_ambiguous = list(resolution.models_ambiguous)
+
+        # Handle missing models using strategy
+        if model_strategy:
+            for model_ref in resolution.models_unresolved:
+                resolved = model_strategy.resolve_ambiguous_model(model_ref, [])
+                if resolved:
+                    models_to_add.append(resolved)
+                    logger.info(f"Resolved unresolved model: {resolved.filename}")
+                else:
+                    remaining_models_unresolved.append(model_ref)
+        else:
+            remaining_models_unresolved = list(resolution.models_unresolved)
+
+        return ResolutionResult(
+            nodes_resolved=nodes_to_add,
+            nodes_unresolved=remaining_nodes_unresolved,
+            nodes_ambiguous=remaining_nodes_ambiguous,
+            models_resolved=models_to_add,
+            models_unresolved=remaining_models_unresolved,
+            models_ambiguous=remaining_models_ambiguous,
+        )
+
+    def apply_resolution(self, resolution: ResolutionResult) -> None:
+        """Phase 3b: Apply resolution to pyproject.toml.
+
+        Takes a ResolutionResult (from resolve_workflow or fix_workflow)
+        and persists resolved nodes and models to pyproject.toml.
+
+        Args:
+            resolution: Result with resolved dependencies to apply
+        """
+        if not resolution.nodes_resolved and not resolution.models_resolved:
+            logger.info("No resolved dependencies to apply")
+            return
+
+        self._apply_resolution_to_pyproject(
+            resolution.nodes_resolved,
+            resolution.models_resolved
         )
 
     def _apply_resolution_to_pyproject(
         self,
-        nodes_added: list[ResolvedNodePackage],
-        models_resolved: list,
-        external_models_added: list[str],
+        nodes_to_add: list[ResolvedNodePackage],
+        models_to_add: list[ModelWithLocation],
     ) -> None:
-        """Apply resolution results to pyproject.toml."""
+        """Apply resolved dependencies to pyproject.toml.
+
+        Args:
+            nodes_to_add: Node packages to add
+            models_to_add: Model files to track
+        """
         # Add resolved models to manifest
-        for model in models_resolved:
+        for model in models_to_add:
             self.pyproject.models.add_model(
                 model_hash=model.hash,
                 filename=model.filename,
@@ -433,9 +514,7 @@ class WorkflowManager:
                 category="required",
             )
 
-        # Add external models as URLs
-        for url in external_models_added:
-            # This would need to be implemented in pyproject manager
-            logger.info(f"Would add external model URL: {url}")
-
-        logger.info(f"Applied {len(models_resolved)} models to pyproject.toml")
+        logger.info(
+            f"Applied {len(models_to_add)} models, "
+            f"{len(nodes_to_add)} nodes to pyproject.toml"
+        )

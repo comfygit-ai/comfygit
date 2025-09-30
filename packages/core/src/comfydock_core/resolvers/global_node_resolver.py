@@ -242,6 +242,7 @@ class GlobalNodeResolver:
                         ResolvedNodePackage(
                             package_id=mapping.package_id,
                             package_data=packages[mapping.package_id],
+                            node_type=node_type,
                             versions=mapping.versions,
                             match_type="exact",
                             match_confidence=1.0,
@@ -257,6 +258,7 @@ class GlobalNodeResolver:
                 ResolvedNodePackage(
                     package_id=mapping.package_id,
                     package_data=packages[mapping.package_id],
+                    node_type=node_type,
                     versions=mapping.versions,
                     match_type="type_only",
                     match_confidence=0.9,
@@ -279,6 +281,7 @@ class GlobalNodeResolver:
                     ResolvedNodePackage(
                         package_id=mapping.package_id,
                         package_data=packages[mapping.package_id],
+                        node_type=node_type,
                         versions=mapping.versions,
                         match_type="fuzzy",
                         match_confidence=0.8,

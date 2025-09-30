@@ -357,6 +357,7 @@ class ResolvedNodePackage:
 
     package_id: str
     package_data: GlobalNodePackage
+    node_type: str
     versions: list[str]
     match_type: str  # "exact", "type_only", "fuzzy"
     match_confidence: float = 1.0
@@ -428,27 +429,42 @@ class WorkflowAnalysisResult:
 
 @dataclass
 class ResolutionResult:
-    """Result of applying resolution strategies."""
-    nodes_added: List[ResolvedNodePackage] = field(default_factory=list)  # Package IDs added
-    models_resolved: List["ModelWithLocation"] = field(default_factory=list)  # Models resolved
-    models_unresolved: List["WorkflowNodeWidgetRef"] = field(default_factory=list)  # Models unresolved
-    external_models_added: List[str] = field(default_factory=list)  # URLs added as external
-    changes_made: bool = False
+    """Result of resolution check or application."""
+    nodes_resolved: List[ResolvedNodePackage] = field(default_factory=list)  # Nodes resolved/added
+    nodes_unresolved: List[WorkflowNode] = field(default_factory=list)  # Nodes not found
+    nodes_ambiguous: List[List[ResolvedNodePackage]] = field(default_factory=list)  # Nodes with multiple matches
+    models_resolved: List["ModelWithLocation"] = field(default_factory=list)  # Models cleanly resolved
+    models_unresolved: List["WorkflowNodeWidgetRef"] = field(default_factory=list)  # Models not found
+    models_ambiguous: List[tuple["WorkflowNodeWidgetRef", List["ModelWithLocation"]]] = field(default_factory=list)  # Models with multiple matches
+
+    @property
+    def has_issues(self) -> bool:
+        """Check if there are any unresolved issues."""
+        return bool(self.models_unresolved or self.models_ambiguous)
 
     @property
     def summary(self) -> str:
-        """Generate summary of changes."""
+        """Generate summary of resolution."""
         parts = []
-        if self.nodes_added:
-            parts.append(f"{len(self.nodes_added)} nodes")
+        if self.nodes_resolved:
+            parts.append(f"{len(self.nodes_resolved)} nodes")
+        if self.nodes_unresolved:
+            parts.append(f"{len(self.nodes_unresolved)} unresolved nodes")
+        if self.nodes_ambiguous:
+            parts.append(f"{len(self.nodes_ambiguous)} ambiguous nodes")
         if self.models_resolved:
             parts.append(f"{len(self.models_resolved)} models")
-        if self.external_models_added:
-            parts.append(f"{len(self.external_models_added)} external models")
+        if self.models_unresolved:
+            parts.append(f"{len(self.models_unresolved)} unresolved models")
+        if self.models_ambiguous:
+            parts.append(f"{len(self.models_ambiguous)} ambiguous models")
 
         if not parts:
-            return "No changes"
-        return f"Added: {', '.join(parts)}"
+            return "No resolutions"
+
+        result = f"Resolutions: {', '.join(parts)}"
+
+        return result
 
 
 @dataclass
