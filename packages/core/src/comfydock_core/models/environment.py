@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import List
 
 from .workflow import DetailedWorkflowStatus
@@ -33,6 +34,15 @@ class GitStatus:
     constraints_added: list[str] = field(default_factory=list)
     constraints_removed: list[str] = field(default_factory=list)
 
+@dataclass
+class GitInfo:
+    commit: str | None = None
+    branch: str | None = None
+    tag: str | None = None
+    is_dirty: bool = False
+    remote_url: str | None = None
+    github_owner: str | None = None
+    github_repo: str | None = None
 
 @dataclass
 class EnvironmentComparison:
@@ -55,6 +65,28 @@ class EnvironmentComparison:
             and not self.version_mismatches
             and self.packages_in_sync
         )
+
+@dataclass
+class NodeState:
+    """State of an installed custom node."""
+
+    name: str
+    path: Path
+    disabled: bool = False
+    git_commit: str | None = None
+    git_branch: str | None = None
+    version: str | None = None  # From git tag or pyproject
+    is_dirty: bool = False
+    source: str | None = None  # 'registry', 'git', 'development', etc.
+
+
+@dataclass
+class EnvironmentState:
+    """Current state of an environment."""
+
+    custom_nodes: dict[str, NodeState]  # name -> state
+    packages: dict[str, str]  # name -> version
+    python_version: str
 
 
 # === Semantic Value Objects ===

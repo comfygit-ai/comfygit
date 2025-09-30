@@ -106,6 +106,12 @@ class NodeManager:
         no_test: bool = False,
     ) -> NodeInfo:
         """Add a custom node to the environment.
+        
+        Args:
+            identifier: Registry ID or GitHub URL of the node
+            is_local: If the node is installed locally
+            is_development: If the node is a development node
+            no_test: Skip testing the node
 
         Raises:
             CDNodeNotFoundError: If node not found
@@ -139,7 +145,7 @@ class NodeManager:
                         source=existing_info.get('source', 'unknown')
                     )
             else:
-                # No match
+                # TODO: Do we require all nodes to be published on the Registry? Even if they're on Github?
                 logger.warning(f"Could not resolve GitHub URL to registry ID: {identifier}")
                 raise CDNodeNotFoundError(identifier)
         else:
@@ -271,7 +277,7 @@ class NodeManager:
                 )
 
         # Add as development node
-        self.pyproject.nodes.add_development(identifier, identifier)
+        self.pyproject.nodes.add_development(identifier)
 
         print(f"✓ Added development node '{identifier}' for tracking")
 

@@ -132,16 +132,60 @@ class WorkflowManager:
             return False
 
         try:
-            # Compare file contents
+            # Compare file contents, ignoring volatile metadata fields
             with open(comfyui_file) as f:
                 comfyui_content = json.load(f)
             with open(cec_file) as f:
                 cec_content = json.load(f)
 
-            return comfyui_content != cec_content
+            # Normalize by removing volatile fields that change between saves
+            comfyui_normalized = self._normalize_workflow_for_comparison(comfyui_content)
+            cec_normalized = self._normalize_workflow_for_comparison(cec_content)
+
+            return comfyui_normalized != cec_normalized
         except (json.JSONDecodeError, IOError) as e:
             logger.warning(f"Error comparing workflows '{name}': {e}")
             return True
+
+    def _normalize_workflow_for_comparison(self, workflow: dict) -> dict:
+        """Remove volatile fields that change between saves but don't affect functionality.
+
+        Args:
+            workflow: Workflow JSON dict
+
+        Returns:
+            Normalized workflow dict with volatile fields removed
+        """
+        import copy
+        normalized = copy.deepcopy(workflow)
+
+        # Remove UI state fields that change with pan/zoom
+        if 'extra' in normalized:
+            # Remove volatile UI state
+            normalized['extra'].pop('ds', None)  # Pan/zoom state
+            normalized['extra'].pop('frontendVersion', None)  # Frontend version
+
+        # Increment counters don't affect workflow logic if structure is same
+        normalized.pop('revision', None)
+
+        # Normalize nodes - remove auto-generated seed values when "randomize" is set
+        if 'nodes' in normalized:
+            for node in normalized['nodes']:
+                if isinstance(node, dict):
+                    node_type = node.get('type', '')
+                    # For sampler nodes with "randomize" mode, normalize seed to a fixed value
+                    if node_type in ('KSampler', 'KSamplerAdvanced', 'SamplerCustom'):
+                        widgets_values = node.get('widgets_values', [])
+                        # widgets_values format: [seed, control_after_generate, steps, cfg, sampler_name, scheduler, denoise]
+                        # If control_after_generate is "randomize" or "increment", seed is auto-generated
+                        if len(widgets_values) >= 2 and widgets_values[1] in ('randomize', 'increment'):
+                            widgets_values[0] = 0  # Normalize to fixed value
+
+                        api_widget_values = node.get('api_widget_values', [])
+                        if len(api_widget_values) >= 2 and api_widget_values[1] in ('randomize', 'increment'):
+                            api_widget_values[0] = 0  # Normalize to fixed value
+
+        return normalized
 
     def copy_all_workflows(self) -> dict[str, Path | None]:
         """Copy ALL workflows from ComfyUI to .cec for commit.

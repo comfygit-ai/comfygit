@@ -15,7 +15,7 @@ from comfydock_core.models.exceptions import (
     CDRegistryError,
     CDRegistryServerError,
 )
-from comfydock_core.models.shared import RegistryNodeInfo, RegistryNodeVersion
+from comfydock_core.models.registry import RegistryNodeInfo, RegistryNodeVersion
 from comfydock_core.utils.retry import (
     RateLimitManager,
     RetryConfig,

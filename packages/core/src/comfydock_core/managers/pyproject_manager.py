@@ -522,7 +522,7 @@ class NodeHandler(BaseHandler):
         logger.info(f"Added custom node: {identifier}")
         self.save(config)
 
-    def add_development(self, identifier: str, name: str) -> None:
+    def add_development(self, name: str) -> None:
         """Add a development node (version='dev')."""
         from ..models.shared import NodeInfo
         node_info = NodeInfo(
@@ -530,7 +530,7 @@ class NodeHandler(BaseHandler):
             version='dev',
             source='development'
         )
-        self.add(node_info, identifier)
+        self.add(node_info, name)
 
     def is_development(self, identifier: str) -> bool:
         """Check if a node is a development node."""

@@ -13,76 +13,79 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from comfydock_core.models.registry import RegistryNodeInfo
 
 from .exceptions import ComfyDockError
 
 
 @dataclass
-class RegistryNodeVersion:
-    """Version information for a node."""
-    changelog: str
-    dependencies: list[str]
-    deprecated: bool
-    id: str
-    version: str
-    download_url: str
-
-    @classmethod
-    def from_api_data(cls, api_data: dict) -> "RegistryNodeVersion | None":
-        if not api_data:
-            return None
-        return cls(
-            changelog=api_data.get("changelog", ""),
-            dependencies=api_data.get("dependencies", []),
-            deprecated=api_data.get("deprecated", False),
-            id=api_data.get("id", ""),
-            version=api_data.get("version", ""),
-            download_url=api_data.get("downloadUrl", ""),
-        )
-
-@dataclass
-class RegistryNodeInfo:
-    """Information about a custom node."""
-    id: str
-    name: str
-    description: str
-    author: str | None = None
-    license: str | None = None
-    icon: str | None = None
-    repository: str | None = None
-    tags: list[str] = field(default_factory=list)
-    latest_version: RegistryNodeVersion | None = None
-
-    @classmethod
-    def from_api_data(cls, api_data: dict) -> "RegistryNodeInfo | None":
-        # Ensure dict has id, name and description keys:
-        id = api_data.get("id")
-        name = api_data.get("name")
-        description = api_data.get("description")
-        if not id or not name or not description:
-            return None
-        return cls(
-            id=id,
-            name=name,
-            description=description,
-            author=api_data.get("author"),
-            license=api_data.get("license"),
-            icon=api_data.get("icon"),
-            repository=api_data.get("repository"),
-            tags=api_data.get("tags", []),
-            latest_version=RegistryNodeVersion.from_api_data(api_data.get("latest_version", {})),
-        )
-
-@dataclass
 class NodeInfo:
-    """Information about a custom node."""
-    name: str
-    repository: str | None = None
-    download_url: str | None = None
-    registry_id: str | None = None
-    version: str | None = None
-    source: str = "unknown"  # registry, git, or local
-    dependency_sources: list[str] | None = None
+    """Complete information about a custom node across its lifecycle.
+
+    This dataclass represents a custom node from initial user input through resolution,
+    persistence in pyproject.toml, and final installation to the filesystem. Since custom
+    nodes have no cross-dependencies, all version/URL information is pinned directly in
+    pyproject.toml (no separate lock file needed).
+
+    Lifecycle phases:
+
+    1. User Input → Resolution:
+       - User provides: registry_id OR repository URL OR local directory name
+       - System resolves to complete NodeInfo with all applicable fields populated
+
+    2. Persistence (pyproject.toml):
+       - All resolved fields stored in [tool.comfydock.nodes.<identifier>]
+       - Explicitly pins version and download location for reproducibility
+
+    3. Installation (filesystem sync):
+       - Uses download_url (registry) or repository+version (git) to fetch code
+       - Installs to custom_nodes/<name>/
+
+    Field usage by source type:
+
+    Registry nodes:
+        name: Directory name from registry metadata
+        registry_id: Comfy Registry package ID (required for re-resolution)
+        version: Registry version string (e.g., "2.50")
+        download_url: Direct download URL from registry API
+        source: "registry"
+        dependency_sources: UV sources added for node's Python deps
+
+    GitHub nodes:
+        name: Repository name from GitHub API
+        repository: Full git clone URL (https://github.com/user/repo)
+        version: Git commit hash for pinning exact version
+        registry_id: Optional, if node also exists in registry (for dual-source)
+        source: "git"
+        dependency_sources: UV sources added for node's Python deps
+
+    Development nodes (local):
+        name: Directory name from filesystem
+        version: Always "dev"
+        source: "development"
+        dependency_sources: UV sources added for node's Python deps
+        (All other fields None - code already exists locally)
+    """
+
+    # Core identification (always present)
+    name: str  # Directory name in custom_nodes/
+
+    # Source-specific identifiers (mutually exclusive by source type)
+    registry_id: str | None = None      # Comfy Registry package ID
+    repository: str | None = None       # Git clone URL
+
+    # Resolution data (populated during node resolution)
+    version: str | None = None          # Registry version, git commit hash, or "dev"
+    download_url: str | None = None     # Direct download URL (registry nodes only)
+
+    # Metadata
+    source: str = "unknown"             # "registry", "git", "development", or "unknown"
+    dependency_sources: list[str] | None = None  # UV source names added for this node's deps
+    
+    @property
+    def identifier(self) -> str:
+        """Get the best identifier for this node."""
+        return self.name
 
     @classmethod
     def from_registry_node(cls, registry_node_info: RegistryNodeInfo):

@@ -6,8 +6,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from comfydock_core.constants import CUSTOM_NODES_BLACKLIST
+
 from ..logging.logging_config import get_logger
-from ..models.environment import EnvironmentComparison, PackageSyncStatus
+from ..models.environment import (
+    EnvironmentComparison,
+    PackageSyncStatus,
+    NodeState,
+    EnvironmentState,
+)
 from ..models.exceptions import UVCommandError
 from ..managers.git_manager import GitManager
 
@@ -16,35 +23,6 @@ if TYPE_CHECKING:
     from ..managers.uv_project_manager import UVProjectManager
 
 logger = get_logger(__name__)
-
-
-def get_python_path(venv: Path) -> Path:
-    python_path = venv / "bin" / "python"
-    if not python_path.exists():
-        python_path = venv / "Scripts" / "python.exe"
-    return python_path
-
-
-@dataclass
-class NodeState:
-    """State of an installed custom node."""
-
-    name: str
-    path: Path
-    git_commit: str | None = None
-    git_branch: str | None = None
-    version: str | None = None  # From git tag or pyproject
-    is_dirty: bool = False
-    source: str | None = None  # 'registry', 'git', 'development', etc.
-
-
-@dataclass
-class EnvironmentState:
-    """Current state of an environment."""
-
-    custom_nodes: dict[str, NodeState]  # name -> state
-    packages: dict[str, str]  # name -> version
-    python_version: str
 
 
 class StatusScanner:
@@ -62,7 +40,33 @@ class StatusScanner:
         self._venv_path = venv_path
         self._comfyui_path = comfyui_path
 
-    def scan(self) -> EnvironmentState:
+    def get_full_comparison(self) -> EnvironmentComparison:
+        """Get complete environment comparison with all details.
+
+        Args:
+            comfyui_path: Path to ComfyUI directory
+            venv_path: Path to virtual environment
+            uv: UV interface for package operations
+            pyproject: PyprojectManager instance
+
+        Returns:
+            Complete environment comparison
+        """
+        # Scan current and expected states
+        current = self.scan_environment()
+        expected = self.scan_manifest()
+
+        # Get basic comparison
+        comparison = self.compare_states(current, expected)
+
+        # Add package sync status
+        package_status = self.check_packages_sync()
+        comparison.packages_in_sync = package_status.in_sync
+        comparison.package_sync_message = package_status.message
+
+        return comparison
+
+    def scan_environment(self) -> EnvironmentState:
         """Scan the environment for its current state.
 
         Args:
@@ -92,11 +96,13 @@ class StatusScanner:
         custom_nodes_path = self._comfyui_path / "custom_nodes"
 
         if not custom_nodes_path.exists():
+            logger.debug("custom_nodes directory not found")
             return nodes
 
         # Skip these directories
-        skip_dirs = {"__pycache__", ".git", "example_node.py.example"}
+        skip_dirs = CUSTOM_NODES_BLACKLIST
 
+        # TODO: Support .comfydock_ignore
         for node_dir in custom_nodes_path.iterdir():
             if not node_dir.is_dir() or node_dir.name in skip_dirs:
                 continue
@@ -111,7 +117,11 @@ class StatusScanner:
             except Exception as e:
                 logger.debug(f"Error scanning node {node_dir.name}: {e}")
                 # Still record it as present but with minimal info
-                nodes[node_dir.name] = NodeState(name=node_dir.name, path=node_dir)
+                nodes[node_dir.name] = NodeState(
+                    name=node_dir.name,
+                    path=node_dir,
+                    disabled=node_dir.name.endswith(".disabled"),
+                )
 
         return nodes
 
@@ -119,14 +129,18 @@ class StatusScanner:
         """Scan a single custom node directory."""
         state = NodeState(name=node_dir.name, path=node_dir)
 
+        # Check if is disabled (has .disabled appended to dir name)
+        if node_dir.name.endswith(".disabled"):
+            state.disabled = True
+
         # Check for git info
         if (node_dir / ".git").exists():
             git_info = GitManager.get_custom_node_git_info(node_dir)
             if git_info:
-                state.git_commit = git_info.get("commit")
-                state.git_branch = git_info.get("branch")
-                state.version = git_info.get("tag")  # Use git tag as version
-                state.is_dirty = git_info.get("is_dirty", False)
+                state.git_commit = git_info.commit
+                state.git_branch = git_info.branch
+                state.version = git_info.tag  # Use git tag as version
+                state.is_dirty = git_info.is_dirty
 
         # If no version from git, check pyproject.toml
         if not state.version:
@@ -162,12 +176,13 @@ class StatusScanner:
         """Get installed packages using UV."""
         packages = {}
 
-        python_path = get_python_path(self._venv_path)
+        python_path = self._uv.python_executable
 
         if not python_path.exists():
             logger.warning(f"Python not found in venv: {self._venv_path}")
             return packages
 
+        # TODO: Make this more robust
         try:
             output = self._uv.freeze_packages(python=python_path)
             if output:
@@ -185,7 +200,7 @@ class StatusScanner:
 
     def _get_python_version(self) -> str:
         """Get Python version from venv."""
-        python_path = get_python_path(self._venv_path)
+        python_path = self._uv.python_executable
 
         if not python_path.exists():
             return "unknown"
@@ -205,7 +220,7 @@ class StatusScanner:
 
         return "unknown"
 
-    def scan_expected(self) -> EnvironmentState:
+    def scan_manifest(self) -> EnvironmentState:
         """Scan expected state from pyproject.toml.
 
         Args:
@@ -326,29 +341,3 @@ class StatusScanner:
                 message="Packages out of sync (run 'env sync' to update)",
                 details=str(e),
             )
-
-    def get_full_comparison(self) -> EnvironmentComparison:
-        """Get complete environment comparison with all details.
-
-        Args:
-            comfyui_path: Path to ComfyUI directory
-            venv_path: Path to virtual environment
-            uv: UV interface for package operations
-            pyproject: PyprojectManager instance
-
-        Returns:
-            Complete environment comparison
-        """
-        # Scan current and expected states
-        current = self.scan()
-        expected = self.scan_expected()
-
-        # Get basic comparison
-        comparison = self.compare_states(current, expected)
-
-        # Add package sync status
-        package_status = self.check_packages_sync()
-        comparison.packages_in_sync = package_status.in_sync
-        comparison.package_sync_message = package_status.message
-
-        return comparison

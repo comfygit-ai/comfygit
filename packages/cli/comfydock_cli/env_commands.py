@@ -209,29 +209,57 @@ class EnvironmentCommands:
                 print(f"  {status.comparison.package_sync_message}")
 
             # Show workflow changes
-            if status.workflow.has_changes:
+            if status.workflow.sync_status.has_changes:
                 changes = []
-                if status.workflow.new:
-                    changes.append(f"{len(status.workflow.new)} new")
-                if status.workflow.modified:
-                    changes.append(f"{len(status.workflow.modified)} modified")
-                if status.workflow.deleted:
-                    changes.append(f"{len(status.workflow.deleted)} deleted")
+                if status.workflow.sync_status.new:
+                    changes.append(f"{len(status.workflow.sync_status.new)} new")
+                if status.workflow.sync_status.modified:
+                    changes.append(f"{len(status.workflow.sync_status.modified)} modified")
+                if status.workflow.sync_status.deleted:
+                    changes.append(f"{len(status.workflow.sync_status.deleted)} deleted")
 
                 print(f"  Workflow changes: {', '.join(changes)}")
 
-                if status.workflow.new:
-                    print(f"    New: {', '.join(status.workflow.new[:3])}{'...' if len(status.workflow.new) > 3 else ''}")
-                if status.workflow.modified:
-                    print(f"    Modified: {', '.join(status.workflow.modified[:3])}{'...' if len(status.workflow.modified) > 3 else ''}")
-            elif status.workflow.total_workflows > 0:
-                print(f"  All {status.workflow.total_workflows} workflows are synced")
+                if status.workflow.sync_status.new:
+                    print(f"    New: {', '.join(status.workflow.sync_status.new[:3])}{'...' if len(status.workflow.sync_status.new) > 3 else ''}")
+                if status.workflow.sync_status.modified:
+                    print(f"    Modified: {', '.join(status.workflow.sync_status.modified[:3])}{'...' if len(status.workflow.sync_status.modified) > 3 else ''}")
+            elif status.workflow.sync_status.total_count > 0:
+                print(f"  All {status.workflow.sync_status.total_count} workflows are synced")
 
             print("\n  Run 'comfydock sync' to update tracked files")
         else:
             print('\n===================================================')
             print("🔁 Sync Status: ✓ In sync")
             print('===================================================')
+
+        # Show workflow dependency status
+        if status.workflow.total_issues > 0:
+            print('\n===================================================')
+            print(f"📋 Workflow Issues: ⚠ {status.workflow.total_issues} workflow(s) have issues")
+            print('===================================================')
+
+            for wf in status.workflow.workflows_with_issues:
+                sync_icon = "🆕" if wf.sync_state == "new" else "📝" if wf.sync_state == "modified" else "📋"
+                print(f"\n  {sync_icon} {wf.name} ({wf.sync_state})")
+                print(f"      {wf.issue_summary}")
+
+                # Show breakdown
+                if wf.resolution.models_ambiguous or wf.resolution.models_unresolved:
+                    model_details = []
+                    if wf.resolution.models_ambiguous:
+                        model_details.append(f"{len(wf.resolution.models_ambiguous)} ambiguous")
+                    if wf.resolution.models_unresolved:
+                        model_details.append(f"{len(wf.resolution.models_unresolved)} missing")
+                    print(f"      Models: {', '.join(model_details)}")
+
+                if wf.resolution.nodes_unresolved or wf.resolution.nodes_ambiguous:
+                    node_details = []
+                    if wf.resolution.nodes_unresolved:
+                        node_details.append(f"{len(wf.resolution.nodes_unresolved)} missing")
+                    if wf.resolution.nodes_ambiguous:
+                        node_details.append(f"{len(wf.resolution.nodes_ambiguous)} ambiguous")
+                    print(f"      Nodes: {', '.join(node_details)}")
 
         # Show git status using semantic methods
         if not status.git.has_changes:
@@ -258,6 +286,15 @@ class EnvironmentCommands:
                 print("Full diff:")
                 print("=" * 60)
                 print(status.git.diff)
+
+        # Show suggested actions from workflow analysis
+        suggested_actions = status.workflow.get_suggested_actions()
+        if suggested_actions:
+            print('\n===================================================')
+            print("💡 Suggested Actions:")
+            print('===================================================')
+            for action in suggested_actions:
+                print(f"  → {action}")
 
     def _show_git_changes(self, status: EnvironmentStatus):
         """Helper method to show git changes in a structured way."""
@@ -649,21 +686,20 @@ class EnvironmentCommands:
 
         print("📋 Analyzing workflows...")
 
-        # Single analysis step
+        # Get workflow status (read-only analysis)
         try:
-            analysis = env.prepare_commit()
+            workflow_status = env.workflow_manager.get_workflow_status()
 
             if logger:
-                logger.debug(f"Workflow analysis results: {analysis}")
+                logger.debug(f"Workflow status: {workflow_status.sync_status}")
 
             # Check if no workflows to commit
-            total_workflows = sum(len(analysis.workflows_copied) for _ in [1] if analysis.workflows_copied)
-            if total_workflows == 0:
+            if workflow_status.sync_status.total_count == 0:
                 print("No workflows found to commit")
                 return
 
-            # Check if there are no git changes to commit
-            if not analysis.has_git_changes:
+            # Check if there are no changes to commit
+            if not workflow_status.sync_status.has_changes:
                 print("✓ No changes to commit - workflows are already up to date")
                 return
 
@@ -671,6 +707,17 @@ class EnvironmentCommands:
             if logger:
                 logger.error(f"Workflow analysis failed: {e}", exc_info=True)
             print(f"✗ Failed to analyze workflows: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        # Check commit safety
+        if not workflow_status.is_commit_safe and not getattr(args, 'allow_issues', False):
+            print("\n⚠ Cannot commit - workflows have unresolved issues:\n")
+            for wf in workflow_status.workflows_with_issues:
+                print(f"  • {wf.name}: {wf.issue_summary}")
+
+            print("\n💡 Options:")
+            print("  1. Resolve issues: comfydock workflow resolve <name>")
+            print("  2. Force commit: comfydock commit -m 'msg' --allow-issues")
             sys.exit(1)
 
         # Choose strategy based on --auto flag
@@ -688,8 +735,8 @@ class EnvironmentCommands:
 
         # Execute commit with chosen strategies
         try:
-            result = env.execute_commit(
-                analysis=analysis,
+            env.execute_commit(
+                workflow_status=workflow_status,
                 message=args.message,
                 node_strategy=node_strategy,
                 model_strategy=model_strategy
@@ -702,9 +749,9 @@ class EnvironmentCommands:
 
         # Display results on success
         print(f"✅ Commit successful: {args.message if args.message else 'Update workflows'}")
-        copied_count = len([s for s in result['workflows_copied'].values() if s == "copied"])
-        if copied_count > 0:
-            print(f"  • Processed {copied_count} workflow(s)")
+        changed_count = len(workflow_status.sync_status.new) + len(workflow_status.sync_status.modified)
+        if changed_count > 0:
+            print(f"  • Processed {changed_count} workflow(s)")
 
     @with_env_logging("env reset")
     def reset(self, args):
@@ -732,37 +779,35 @@ class EnvironmentCommands:
         env = self._get_env(args)
 
         workflows = env.list_workflows()
-        total_workflows = sum(len(workflows[key]) for key in workflows)
 
-        if total_workflows == 0:
+        if workflows.total_count == 0:
             print("No workflows found")
             return
 
         print(f"Workflows in '{env.name}':")
 
-        if workflows['synced']:
+        if workflows.synced:
             print("\n✓ Synced (up to date):")
-            for name in workflows['synced']:
+            for name in workflows.synced:
                 print(f"  📋 {name}")
 
-        if workflows['modified']:
+        if workflows.modified:
             print("\n⚠ Modified (changed since last commit):")
-            for name in workflows['modified']:
+            for name in workflows.modified:
                 print(f"  📝 {name}")
 
-        if workflows['new']:
+        if workflows.new:
             print("\n🆕 New (not committed yet):")
-            for name in workflows['new']:
+            for name in workflows.new:
                 print(f"  ➕ {name}")
 
-        if workflows['deleted']:
+        if workflows.deleted:
             print("\n🗑 Deleted (removed from ComfyUI):")
-            for name in workflows['deleted']:
+            for name in workflows.deleted:
                 print(f"  ➖ {name}")
 
         # Show commit suggestion if there are changes
-        has_changes = workflows['new'] or workflows['modified'] or workflows['deleted']
-        if has_changes:
+        if workflows.has_changes:
             print("\nRun 'comfydock commit' to save current state")
 
     @with_env_logging("workflow resolve")
@@ -800,11 +845,23 @@ class EnvironmentCommands:
             sys.exit(1)
 
         # Display results
-        if result.changes_made:
+        if result.models_resolved or result.nodes_resolved:
             print(f"✅ {result.summary}")
+            if result.models_resolved:
+                print(f"  • Resolved {len(result.models_resolved)} models")
+            if result.nodes_resolved:
+                print(f"  • Resolved {len(result.nodes_resolved)} nodes")
             print("\nRun 'comfydock sync' to apply changes to environment")
+        elif result.has_issues:
+            print("⚠ Remaining unresolved issues:")
+            if result.models_ambiguous:
+                print(f"  • {len(result.models_ambiguous)} ambiguous models")
+            if result.models_unresolved:
+                print(f"  • {len(result.models_unresolved)} unresolved models")
+            if result.nodes_unresolved:
+                print(f"  • {len(result.nodes_unresolved)} missing nodes")
         else:
-            print("No changes made")
+            print("✓ No changes needed - all dependencies already resolved")
 
     @with_env_logging("workflow restore")
     def workflow_restore(self, args, logger=None):
