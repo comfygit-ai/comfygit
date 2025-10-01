@@ -230,6 +230,13 @@ def _add_env_commands(subparsers):
     node_list_parser = node_subparsers.add_parser("list", help="List custom nodes")
     node_list_parser.set_defaults(func=env_cmds.node_list)
 
+    # node update
+    node_update_parser = node_subparsers.add_parser("update", help="Update custom node")
+    node_update_parser.add_argument("node_name", help="Node identifier or name to update")
+    node_update_parser.add_argument("-y", "--yes", action="store_true", help="Auto-confirm updates (skip prompts)")
+    node_update_parser.add_argument("--no-test", action="store_true", help="Don't test resolution")
+    node_update_parser.set_defaults(func=env_cmds.node_update)
+
     # Workflow management subcommands
     workflow_parser = subparsers.add_parser("workflow", help="Manage workflows")
     workflow_subparsers = workflow_parser.add_subparsers(dest="workflow_command", help="Workflow commands")

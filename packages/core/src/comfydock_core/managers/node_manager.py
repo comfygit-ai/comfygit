@@ -13,9 +13,11 @@ from ..models.exceptions import (
     CDNodeConflictError,
     CDNodeNotFoundError,
 )
-from ..models.shared import NodePackage
+from ..models.shared import NodePackage, UpdateResult
 from ..resolvers.global_node_resolver import GlobalNodeResolver
 from ..services.node_registry import NodeInfo, NodeRegistry
+from ..strategies.confirmation import ConfirmationStrategy, AutoConfirmStrategy
+from ..utils.dependency_parser import parse_dependency_string
 
 if TYPE_CHECKING:
     from ..services.registry_data_manager import RegistryDataManager
@@ -276,14 +278,271 @@ class NodeManager:
                     f"Remove it first: comfydock node remove {existing_id}"
                 )
 
-        # Add as development node
-        self.pyproject.nodes.add_development(identifier)
+        # Scan for requirements on initial add
+        deps = self.node_registry.scanner.scan_node(node_path)
+        requirements = deps.requirements or []
 
-        print(f"✓ Added development node '{identifier}' for tracking")
+        # Create NodePackage to use existing add flow
+        node_info = NodeInfo(name=identifier, version='dev', source='development')
+        node_package = NodePackage(node_info=node_info, requirements=requirements)
 
-        # Return a simple NodeInfo
-        return NodeInfo(
-            name=identifier,
-            version='dev',
-            source='development'
-        )
+        # Add to pyproject (handles requirements + sources)
+        self.add_node_package(node_package)
+
+        return node_info
+
+    def update_node(
+        self,
+        identifier: str,
+        confirmation_strategy: ConfirmationStrategy | None = None,
+        no_test: bool = False
+    ) -> UpdateResult:
+        """Update a node based on its source type.
+
+        Args:
+            identifier: Node identifier or name
+            confirmation_strategy: Strategy for confirming updates (None = auto-confirm)
+            no_test: Skip resolution testing (dev nodes only)
+
+        Returns:
+            UpdateResult with details of what changed
+
+        Raises:
+            CDNodeNotFoundError: If node not found
+            CDEnvironmentError: If node cannot be updated
+        """
+        # Default to auto-confirm if no strategy provided
+        if confirmation_strategy is None:
+            confirmation_strategy = AutoConfirmStrategy()
+
+        # Get current node info
+        nodes = self.pyproject.nodes.get_existing()
+        node_info = None
+        actual_identifier = None
+
+        # Try direct identifier lookup first
+        if identifier in nodes:
+            node_info = nodes[identifier]
+            actual_identifier = identifier
+        else:
+            # Try name-based lookup
+            found = self._find_node_by_name(identifier)
+            if found:
+                actual_identifier, node_info = found
+
+        if not node_info or not actual_identifier:
+            raise CDNodeNotFoundError(f"Node '{identifier}' not found")
+
+        # Dispatch based on source type
+        if node_info.source == 'development':
+            return self._update_development_node(actual_identifier, node_info, no_test)
+        elif node_info.source == 'registry':
+            return self._update_registry_node(actual_identifier, node_info, confirmation_strategy, no_test)
+        elif node_info.source == 'git':
+            return self._update_git_node(actual_identifier, node_info, confirmation_strategy, no_test)
+        else:
+            raise CDEnvironmentError(f"Unknown node source: {node_info.source}")
+
+    def _update_development_node(self, identifier: str, node_info: NodeInfo, no_test: bool) -> UpdateResult:
+        """Update dev node by re-scanning requirements."""
+        result = UpdateResult(node_name=node_info.name, source='development')
+
+        # Scan current requirements
+        node_path = self.custom_nodes_path / node_info.name
+        if not node_path.exists():
+            raise CDNodeNotFoundError(f"Dev node directory not found: {node_path}")
+
+        deps = self.node_registry.scanner.scan_node(node_path)
+        current_reqs = deps.requirements or []
+
+        # Get stored requirements from dependency group
+        group_name = self.pyproject.nodes.generate_group_name(node_info, identifier)
+        stored_groups = self.pyproject.dependencies.get_groups()
+        stored_reqs = stored_groups.get(group_name, [])
+
+        # Normalize for comparison (compare package names only)
+        current_names = {parse_dependency_string(r)[0] for r in current_reqs}
+        stored_names = {parse_dependency_string(r)[0] for r in stored_reqs}
+
+        added = current_names - stored_names
+        removed = stored_names - current_names
+
+        if not added and not removed:
+            result.message = "No requirement changes detected"
+            return result
+
+        # Update requirements
+        existing_sources = self.pyproject.uv_config.get_source_names()
+
+        if current_reqs:
+            self.uv.add_requirements_with_sources(
+                current_reqs, group=group_name, no_sync=True, raw=True
+            )
+        else:
+            # No requirements - remove group
+            self.pyproject.dependencies.remove_group(group_name)
+
+        # Detect new sources
+        new_sources = self.pyproject.uv_config.get_source_names() - existing_sources
+        if new_sources:
+            node_info.dependency_sources = sorted(new_sources)
+            self.pyproject.nodes.add(node_info, identifier)
+
+        # Test resolution if requested
+        if not no_test:
+            resolution_result = self.resolution_tester.test_resolution(self.pyproject.path)
+            if not resolution_result.success:
+                raise CDNodeConflictError(
+                    f"Updated requirements for '{node_info.name}' have conflicts: "
+                    f"{self.resolution_tester.format_conflicts(resolution_result)}"
+                )
+
+        result.requirements_added = list(added)
+        result.requirements_removed = list(removed)
+        result.changed = True
+        result.message = f"Updated requirements: +{len(added)} -{len(removed)}"
+
+        logger.info(f"Updated dev node '{node_info.name}': {result.message}")
+        return result
+
+    def _update_registry_node(
+        self,
+        identifier: str,
+        node_info: NodeInfo,
+        confirmation_strategy: ConfirmationStrategy,
+        no_test: bool
+    ) -> UpdateResult:
+        """Update registry node to latest version."""
+        result = UpdateResult(node_name=node_info.name, source='registry')
+
+        if not node_info.registry_id:
+            raise CDEnvironmentError(f"Node '{node_info.name}' has no registry_id")
+
+        # Query registry for latest version
+        try:
+            registry_node = self.node_registry.registry_client.get_node(node_info.registry_id)
+        except Exception as e:
+            result.message = f"Failed to check for updates: {e}"
+            return result
+
+        if not registry_node or not registry_node.latest_version:
+            result.message = "No updates available (registry unavailable)"
+            return result
+
+        latest_version = registry_node.latest_version.version
+        current_version = node_info.version or "unknown"
+
+        if latest_version == current_version:
+            result.message = f"Already at latest version ({current_version})"
+            return result
+
+        # Confirm update using strategy
+        if not confirmation_strategy.confirm_update(node_info.name, current_version, latest_version):
+            result.message = "Update cancelled by user"
+            return result
+
+        # Remove old node
+        self.remove_node(identifier)
+
+        # Add new version
+        self.add_node(node_info.registry_id, no_test=no_test)
+
+        result.old_version = current_version
+        result.new_version = latest_version
+        result.changed = True
+        result.message = f"Updated from {current_version} → {latest_version}"
+
+        logger.info(f"Updated registry node '{node_info.name}': {result.message}")
+        return result
+
+    def _update_git_node(
+        self,
+        identifier: str,
+        node_info: NodeInfo,
+        confirmation_strategy: ConfirmationStrategy,
+        no_test: bool
+    ) -> UpdateResult:
+        """Update git node to latest commit."""
+        result = UpdateResult(node_name=node_info.name, source='git')
+
+        if not node_info.repository:
+            raise CDEnvironmentError(f"Node '{node_info.name}' has no repository URL")
+
+        # Query GitHub for latest commit
+        try:
+            repo_info = self.node_registry.github_client.get_repository_info(node_info.repository)
+        except Exception as e:
+            result.message = f"Failed to check for updates: {e}"
+            return result
+
+        if not repo_info:
+            result.message = "Failed to get repository information"
+            return result
+
+        latest_commit = repo_info.latest_commit
+        current_commit = node_info.version or "unknown"
+
+        # Format for display
+        current_display = current_commit[:8] if current_commit != "unknown" else "unknown"
+        latest_display = latest_commit[:8]
+
+        if latest_commit == current_commit:
+            result.message = f"Already at latest commit ({current_display})"
+            return result
+
+        # Confirm update using strategy (pass formatted versions for display)
+        if not confirmation_strategy.confirm_update(node_info.name, current_display, latest_display):
+            result.message = "Update cancelled by user"
+            return result
+
+        # Remove old node
+        self.remove_node(identifier)
+
+        # Add new version
+        self.add_node(node_info.repository, no_test=no_test)
+
+        result.old_version = current_display
+        result.new_version = latest_display
+        result.changed = True
+        result.message = f"Updated to latest commit ({latest_display})"
+
+        logger.info(f"Updated git node '{node_info.name}': {result.message}")
+        return result
+
+    def check_development_node_drift(self) -> dict[str, tuple[set[str], set[str]]]:
+        """Check if dev nodes have requirements drift.
+
+        Returns:
+            Dict mapping node_name -> (added_deps, removed_deps)
+        """
+        drift = {}
+        nodes = self.pyproject.nodes.get_existing()
+
+        for identifier, node_info in nodes.items():
+            if node_info.source != 'development':
+                continue
+
+            node_path = self.custom_nodes_path / node_info.name
+            if not node_path.exists():
+                continue
+
+            # Scan current requirements
+            deps = self.node_registry.scanner.scan_node(node_path)
+            current_reqs = deps.requirements or []
+
+            # Get stored requirements from dependency group
+            group_name = self.pyproject.nodes.generate_group_name(node_info, identifier)
+            stored_groups = self.pyproject.dependencies.get_groups()
+            stored_reqs = stored_groups.get(group_name, [])
+
+            # Compare package names
+            current_names = {parse_dependency_string(r)[0] for r in current_reqs}
+            stored_names = {parse_dependency_string(r)[0] for r in stored_reqs}
+
+            added = current_names - stored_names
+            removed = stored_names - current_names
+
+            if added or removed:
+                drift[node_info.name] = (added, removed)
+
+        return drift

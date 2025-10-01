@@ -294,6 +294,32 @@ class Environment:
         """
         self.node_manager.remove_node(identifier)
 
+    def update_node(self, identifier: str, confirmation_strategy=None, no_test: bool = False):
+        """Update a node based on its source type.
+
+        - Development nodes: Re-scan requirements.txt
+        - Registry nodes: Update to latest version
+        - Git nodes: Update to latest commit
+
+        Args:
+            identifier: Node identifier or name
+            confirmation_strategy: Strategy for confirming updates (None = auto-confirm)
+            no_test: Skip resolution testing
+
+        Raises:
+            CDNodeNotFoundError: If node not found
+            CDEnvironmentError: If node cannot be updated
+        """
+        return self.node_manager.update_node(identifier, confirmation_strategy, no_test)
+
+    def check_development_node_drift(self) -> dict[str, tuple[set[str], set[str]]]:
+        """Check if development nodes have requirements drift.
+
+        Returns:
+            Dict mapping node_name -> (added_deps, removed_deps)
+        """
+        return self.node_manager.check_development_node_drift()
+
     # =====================================================
     # Workflow Management
     # =====================================================

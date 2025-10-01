@@ -287,6 +287,22 @@ class EnvironmentCommands:
                 print("=" * 60)
                 print(status.git.diff)
 
+        # Show dev node drift (requirements changed)
+        dev_drift = env.check_development_node_drift()
+        if dev_drift:
+            print('\n===================================================')
+            print(f"🔧 Development Node Updates Available:")
+            print('===================================================')
+            for node_name, (added, removed) in dev_drift.items():
+                changes = []
+                if added:
+                    changes.append(f"+{len(added)} new")
+                if removed:
+                    changes.append(f"-{len(removed)} removed")
+                print(f"  • {node_name}: {', '.join(changes)} dependencies")
+
+            print("\n  Run 'comfydock node update <name>' to update")
+
         # Show suggested actions from workflow analysis
         suggested_actions = status.workflow.get_suggested_actions()
         if suggested_actions:
@@ -489,6 +505,59 @@ class EnvironmentCommands:
         dev_nodes = nodes.get('development', {})
         for dev_name, _dev_info in dev_nodes.items():
             print(f"  • {dev_name} (development)")
+
+    @with_env_logging("env node update")
+    def node_update(self, args, logger=None):
+        """Update a custom node."""
+        from comfydock_core.strategies.confirmation import InteractiveConfirmStrategy, AutoConfirmStrategy
+
+        env = self._get_env(args)
+
+        print(f"🔄 Updating node: {args.node_name}")
+
+        # Choose confirmation strategy
+        strategy = AutoConfirmStrategy() if args.yes else InteractiveConfirmStrategy()
+
+        try:
+            result = env.update_node(
+                args.node_name,
+                confirmation_strategy=strategy,
+                no_test=args.no_test
+            )
+
+            if result.changed:
+                print(f"✓ {result.message}")
+
+                if result.source == 'development':
+                    if result.requirements_added:
+                        print(f"  Added dependencies:")
+                        for dep in result.requirements_added:
+                            print(f"    + {dep}")
+                    if result.requirements_removed:
+                        print(f"  Removed dependencies:")
+                        for dep in result.requirements_removed:
+                            print(f"    - {dep}")
+
+                    # Sync environment after dev node update
+                    if not env.status().is_synced:
+                        print("\n🔁 Syncing environment...")
+                        env.sync()
+
+                else:
+                    # Registry or git node - files changed, need sync
+                    print("\n🔁 Syncing environment...")
+                    env.sync()
+
+                print(f"\nRun 'comfydock status' to review changes")
+            else:
+                print(f"ℹ️  {result.message}")
+
+        except Exception as e:
+            if logger:
+                logger.error(f"Node update failed for '{args.node_name}': {e}", exc_info=True)
+            print(f"✗ Failed to update node '{args.node_name}'", file=sys.stderr)
+            print(f"   {e}", file=sys.stderr)
+            sys.exit(1)
 
     # === Constraint management ===
 

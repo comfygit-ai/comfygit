@@ -132,6 +132,23 @@ class NodePackage:
         """Get the best identifier for this node."""
         return self.node_info.registry_id or self.node_info.name
 
+
+@dataclass
+class UpdateResult:
+    """Result from updating a node."""
+    node_name: str
+    source: str  # 'development', 'registry', 'git'
+    changed: bool = False
+    message: str = ""
+
+    # For development nodes
+    requirements_added: list[str] = field(default_factory=list)
+    requirements_removed: list[str] = field(default_factory=list)
+
+    # For registry/git nodes
+    old_version: str | None = None
+    new_version: str | None = None
+
 @dataclass
 class Package:
     """Represents an installed Python package."""
