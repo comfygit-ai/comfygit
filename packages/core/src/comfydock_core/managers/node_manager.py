@@ -588,7 +588,7 @@ class NodeManager:
 
         # Format for display
         current_display = current_commit[:8] if current_commit != "unknown" else "unknown"
-        latest_display = latest_commit[:8]
+        latest_display = latest_commit[:8] if latest_commit else "unknown"
 
         if latest_commit == current_commit:
             result.message = f"Already at latest commit ({current_display})"
