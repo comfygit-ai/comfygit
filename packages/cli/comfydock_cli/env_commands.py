@@ -283,11 +283,6 @@ class EnvironmentCommands:
             # Show detailed changes with consistent formatting
             self._show_git_changes(status)
 
-            # Show recommended action
-            action = status.get_recommended_action()
-            if action == UserAction.COMMIT_REQUIRED:
-                print("\n  Run 'comfydock commit -m \"message\"' to save changes")
-
             # Show full diff if verbose
             if hasattr(args, 'verbose') and args.verbose and status.git.diff:
                 print("\n" + "=" * 60)
@@ -309,18 +304,22 @@ class EnvironmentCommands:
                     changes.append(f"-{len(removed)} removed")
                 print(f"  • {node_name}: {', '.join(changes)} dependencies")
 
-            print("\n  Run 'comfydock node update <name>' to update")
-
         # Show suggested actions
         workflow_actions = status.workflow.get_suggested_actions()
 
         # Add git-based commit suggestion
         git_actions = []
         if status.git.has_changes and status.workflow.is_commit_safe:
-            git_actions.append("Ready to commit changes")
+            git_actions.append("Commit changes: comfydock commit -m \"<message>\"")
+
+        # Add dev node update suggestions
+        dev_actions = []
+        if dev_drift:
+            for node_name in dev_drift.keys():
+                dev_actions.append(f"Update dev node: comfydock node update {node_name}")
 
         # Combine all suggestions
-        all_actions = workflow_actions + git_actions
+        all_actions = workflow_actions + git_actions + dev_actions
 
         if all_actions:
             print('\n===================================================')
@@ -466,11 +465,6 @@ class EnvironmentCommands:
             print(f"✓ Development node '{node_info.name}' added and tracked")
         else:
             print(f"✓ Node '{node_info.name}' added to pyproject.toml")
-
-        # Now try to sync environment:
-        if not env.status().is_synced:
-            print("🔁 Syncing environment...")
-            sync_result = env.sync()
 
         print(f"\nRun 'comfydock -e {env.name} env status' to review changes")
 

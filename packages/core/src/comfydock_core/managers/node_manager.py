@@ -216,6 +216,9 @@ class NodeManager:
                     f"{self.resolution_tester.format_conflicts(resolution_result)}"
                 )
 
+        # Sync Python environment to install new dependencies (matches remove behavior)
+        self.uv.sync_project(all_groups=True)
+
         logger.info(f"Successfully added node '{node_package.name}'")
         return node_package.node_info
 
