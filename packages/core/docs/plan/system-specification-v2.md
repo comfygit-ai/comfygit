@@ -391,8 +391,8 @@ $ comfydock sync
 
 **Node Reconciliation during sync**:
 - **Install missing registry/git nodes** (if in pyproject but not on disk)
-- **Disable extra development nodes** (if on disk but not in pyproject)
-- **Never delete without user confirmation**
+- **Remove extra registry/git nodes** (if on disk but not in pyproject - cached, can reinstall)
+- **Disable extra development nodes** (if on disk but not in pyproject - preserve with .disabled suffix)
 
 **Reconciliation logic**:
 ```python

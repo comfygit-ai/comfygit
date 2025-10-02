@@ -7,7 +7,7 @@ import pytest
 import tomlkit
 
 from comfydock_core.managers.pyproject_manager import PyprojectManager
-from comfydock_core.services.node_registry import NodeInfo
+from comfydock_core.models.shared import NodeInfo
 
 
 @pytest.fixture

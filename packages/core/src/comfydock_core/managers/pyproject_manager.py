@@ -17,7 +17,7 @@ from ..logging.logging_config import get_logger
 from ..models.exceptions import CDPyprojectError, CDPyprojectInvalidError, CDPyprojectNotFoundError
 
 if TYPE_CHECKING:
-    from ..services.node_registry import NodeInfo
+    from ..models.shared import NodeInfo
 
 from ..utils.dependency_parser import parse_dependency_string
 
@@ -540,7 +540,7 @@ class NodeHandler(BaseHandler):
 
     def get_existing(self) -> dict[str, NodeInfo]:
         """Get all existing custom nodes from pyproject.toml."""
-        from ..services.node_registry import NodeInfo
+        from ..models.shared import NodeInfo
         config = self.load()
         nodes_data = config.get('tool', {}).get('comfydock', {}).get('nodes', {})
 

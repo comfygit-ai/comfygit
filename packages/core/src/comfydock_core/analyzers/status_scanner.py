@@ -231,18 +231,16 @@ class StatusScanner:
         """
         config = self._pyproject.load()
 
-        # Get expected custom nodes using shared method
-        from ..services.node_registry import NodeRegistry
-
-        node_infos = NodeRegistry.parse_expected_nodes(config)
+        # Get expected custom nodes from pyproject
+        node_infos = self._pyproject.nodes.get_existing()
 
         expected_nodes = {}
-        for name, node_info in node_infos.items():
-            expected_nodes[name] = NodeState(
-                name=name,
-                path=Path("custom_nodes") / name,  # Placeholder path
+        for _, node_info in node_infos.items():
+            expected_nodes[node_info.name] = NodeState(
+                name=node_info.name,
+                path=Path("custom_nodes") / node_info.name,
                 version=node_info.version,
-                source=node_info.source,  # Preserve source type
+                source=node_info.source,
             )
 
         # Get expected packages from dependency groups

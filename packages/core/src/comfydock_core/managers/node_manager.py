@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 from typing import TYPE_CHECKING
 
 from ..logging.logging_config import get_logger
@@ -15,9 +16,10 @@ from ..models.exceptions import (
     NodeAction,
     NodeConflictContext,
 )
-from ..models.shared import NodePackage, UpdateResult
+from ..models.shared import NodePackage, UpdateResult, NodeRemovalResult
 from ..resolvers.global_node_resolver import GlobalNodeResolver
-from ..services.node_registry import NodeInfo, NodeRegistry
+from ..services.node_lookup_service import NodeLookupService
+from ..models.shared import NodeInfo
 from ..strategies.confirmation import ConfirmationStrategy, AutoConfirmStrategy
 from ..utils.dependency_parser import parse_dependency_string
 
@@ -34,14 +36,14 @@ class NodeManager:
         self,
         pyproject: PyprojectManager,
         uv: UVProjectManager,
-        node_registry: NodeRegistry,
+        node_lookup: NodeLookupService,
         resolution_tester: ResolutionTester,
         custom_nodes_path: Path,
         registry_data_manager: RegistryDataManager
     ):
         self.pyproject = pyproject
         self.uv = uv
-        self.node_registry = node_registry
+        self.node_lookup = node_lookup
         self.resolution_tester = resolution_tester
         self.custom_nodes_path = custom_nodes_path
         self.registry_data_manager = registry_data_manager
@@ -173,30 +175,45 @@ class NodeManager:
             # Check for existing installation by registry ID
             registry_id = identifier
 
-        # Get complete node package from NodeRegistry
-        node_package = self.node_registry.prepare_node(identifier, is_local)
+        # Get node info from lookup service
+        node_info = self.node_lookup.get_node(identifier)
 
         # Enhance with dual-source information if available
         if github_url and registry_id:
-            node_package.node_info.registry_id = registry_id
-            node_package.node_info.repository = github_url
+            node_info.registry_id = registry_id
+            node_info.repository = github_url
             logger.info(f"Enhanced node info with dual sources: registry_id={registry_id}, github_url={github_url}")
 
         # Check for filesystem conflicts before proceeding
         if not force:
             has_conflict, conflict_msg, conflict_context = self._check_filesystem_conflict(
-                node_package.name,
-                expected_repo_url=node_package.node_info.repository
+                node_info.name,
+                expected_repo_url=node_info.repository
             )
             if has_conflict:
                 raise CDNodeConflictError(conflict_msg, context=conflict_context)
 
         # Check for .disabled version of this node and clean it up
-        disabled_path = self.custom_nodes_path / f"{node_package.name}.disabled"
+        disabled_path = self.custom_nodes_path / f"{node_info.name}.disabled"
         if disabled_path.exists():
-            import shutil
-            logger.info(f"Removing old disabled version of {node_package.name}")
+            logger.info(f"Removing old disabled version of {node_info.name}")
             shutil.rmtree(disabled_path)
+
+        # Download to cache and copy to custom_nodes
+        cache_path = self.node_lookup.download_to_cache(node_info)
+        if not cache_path:
+            raise CDEnvironmentError(f"Failed to download node '{node_info.name}'")
+
+        # Copy from cache to custom_nodes
+        target_path = self.custom_nodes_path / node_info.name
+        shutil.copytree(cache_path, target_path, dirs_exist_ok=True)
+        logger.info(f"Installed node '{node_info.name}' to {target_path}")
+
+        # Scan requirements from installed directory
+        requirements = self.node_lookup.scan_requirements(target_path)
+
+        # Create node package
+        node_package = NodePackage(node_info=node_info, requirements=requirements)
 
         # Add to pyproject with all complexity handled internally
         try:
@@ -235,9 +252,6 @@ class NodeManager:
         Raises:
             CDNodeNotFoundError: If node not found
         """
-        import shutil
-        from comfydock_core.models.shared import NodeRemovalResult
-
         existing_nodes = self.pyproject.nodes.get_existing()
         identifier_lower = identifier.lower()
 
@@ -313,13 +327,113 @@ class NodeManager:
         )
 
     def sync_nodes_to_filesystem(self):
-        """Sync custom nodes directory to match expected state from pyproject.toml."""
-        # Get expected nodes from pyproject.toml
-        pyproject_config = self.pyproject.load()
-        expected_nodes = self.node_registry.parse_expected_nodes(pyproject_config)
+        """Sync custom nodes directory to match expected state from pyproject.toml.
 
-        # Always sync to filesystem, even with empty dict (to remove unwanted nodes)
-        self.node_registry.sync_nodes_to_filesystem(expected_nodes, self.custom_nodes_path)
+        Strategy:
+        - Install missing registry/git nodes
+        - Remove extra registry/git nodes (can re-download from cache)
+        - Disable extra dev nodes (preserve user data with .disabled suffix)
+        - Warn about missing dev nodes
+        """
+        import shutil
+        import time
+
+        logger.info("Syncing custom nodes to filesystem...")
+
+        # Ensure directory exists
+        self.custom_nodes_path.mkdir(exist_ok=True)
+
+        # Get expected nodes from pyproject.toml
+        expected_nodes = self.pyproject.nodes.get_existing()
+
+        # Get existing active nodes (not .disabled)
+        existing_nodes = {
+            d.name: d for d in self.custom_nodes_path.iterdir()
+            if d.is_dir() and not d.name.endswith('.disabled')
+        }
+
+        expected_names = {info.name for info in expected_nodes.values()}
+        untracked = set(existing_nodes.keys()) - expected_names
+
+        # Remove/disable extra nodes (reconciliation for rollback)
+        for node_name in untracked:
+            node_path = self.custom_nodes_path / node_name
+
+            # Check if this was a dev node from git history
+            is_dev_node = self._was_dev_node_in_history(node_name)
+
+            if is_dev_node:
+                # Preserve dev nodes with .disabled suffix
+                disabled_path = self.custom_nodes_path / f"{node_name}.disabled"
+
+                # Handle existing .disabled directory (backup with timestamp)
+                if disabled_path.exists():
+                    backup_path = self.custom_nodes_path / f"{node_name}.{int(time.time())}.disabled"
+                    shutil.move(disabled_path, backup_path)
+                    logger.info(f"Backed up old .disabled to {backup_path.name}")
+
+                shutil.move(node_path, disabled_path)
+                logger.info(f"Disabled dev node: {node_name}")
+            else:
+                # Delete registry/git nodes (cached globally, can re-download)
+                shutil.rmtree(node_path)
+                logger.info(f"Removed extra node '{node_name}' (cached, can reinstall)")
+
+        # Install missing registry/git nodes
+        for node_info in expected_nodes.values():
+            # Skip development nodes - they're already on disk
+            if node_info.source == 'development':
+                node_path = self.custom_nodes_path / node_info.name
+                if not node_path.exists():
+                    logger.warning(f"Dev node '{node_info.name}' expected but missing from filesystem")
+                continue
+
+            node_path = self.custom_nodes_path / node_info.name
+            if not node_path.exists():
+                logger.info(f"Installing missing node: {node_info.name}")
+                try:
+                    # Download to cache
+                    cache_path = self.node_lookup.download_to_cache(node_info)
+                    if cache_path:
+                        shutil.copytree(cache_path, node_path, dirs_exist_ok=True)
+                        logger.info(f"Successfully installed node: {node_info.name}")
+                    else:
+                        logger.warning(f"Could not download node '{node_info.name}'")
+                except Exception as e:
+                    logger.warning(f"Could not download node '{node_info.name}': {e}")
+
+        logger.info("Finished syncing custom nodes")
+
+    def _was_dev_node_in_history(self, node_name: str) -> bool:
+        """Check if node was ever tracked as a development node in git history.
+
+        Looks through git log to see if this node was previously a dev node.
+        Used to decide whether to disable (dev) or delete (registry/git) during sync.
+        """
+        try:
+            import subprocess
+            # Check git log for this node with source="development"
+            result = subprocess.run(
+                ['git', 'log', '--all', '-S', f'"{node_name}"', '--', 'pyproject.toml'],
+                cwd=self.pyproject.path.parent,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            # Simple heuristic: if we find the node name in git history, check for dev marker
+            if result.returncode == 0 and node_name in result.stdout:
+                # Check if any historical version had source="development"
+                log_result = subprocess.run(
+                    ['git', 'log', '--all', '-S', 'source = "development"', '-S', f'"{node_name}"', '--', 'pyproject.toml'],
+                    cwd=self.pyproject.path.parent,
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                return log_result.returncode == 0 and node_name in log_result.stdout
+        except Exception as e:
+            logger.debug(f"Could not check git history for {node_name}: {e}")
+        return False
 
     def _is_github_url(self, identifier: str) -> bool:
         """Check if identifier is a GitHub URL."""
@@ -515,9 +629,9 @@ class NodeManager:
         if not node_path:
             logger.info(f"Node not found locally, downloading: {identifier}")
 
-            # Prepare node (gets info + requirements from registry/GitHub)
+            # Get node info from lookup service
             try:
-                node_package = self.node_registry.prepare_node(identifier, is_local=False)
+                node_info = self.node_lookup.get_node(identifier)
             except CDNodeNotFoundError:
                 # Not in registry either - provide helpful error
                 if self._is_github_url(identifier):
@@ -531,12 +645,15 @@ class NodeManager:
                         f"Provide a GitHub URL or ensure the directory exists in custom_nodes/"
                     )
 
-            node_name = node_package.node_info.name
+            node_name = node_info.name
             node_path = self.custom_nodes_path / node_name
 
-            # Download to filesystem
+            # Download to cache and copy to filesystem 
             logger.info(f"Downloading node '{node_name}' to {node_path}")
-            self.node_registry.download_node(node_package.node_info, node_path)
+            cache_path = self.node_lookup.download_to_cache(node_info)
+            if not cache_path:
+                raise CDEnvironmentError(f"Failed to download node '{node_name}'")
+            shutil.copytree(cache_path, node_path, dirs_exist_ok=True)
 
         # At this point node_name and node_path must be set
         assert node_name is not None, "node_name should be set by now"
@@ -569,8 +686,7 @@ class NodeManager:
                 )
 
         # Scan for requirements
-        deps = self.node_registry.scanner.scan_node(node_path)
-        requirements = deps.requirements or []
+        requirements = self.node_lookup.scan_requirements(node_path)
 
         # Create as development node
         node_info = NodeInfo(name=node_name, version='dev', source='development')
@@ -643,8 +759,7 @@ class NodeManager:
         if not node_path.exists():
             raise CDNodeNotFoundError(f"Dev node directory not found: {node_path}")
 
-        deps = self.node_registry.scanner.scan_node(node_path)
-        current_reqs = deps.requirements or []
+        current_reqs = self.node_lookup.scan_requirements(node_path)
 
         # Get stored requirements from dependency group
         group_name = self.pyproject.nodes.generate_group_name(node_info, identifier)
@@ -714,7 +829,7 @@ class NodeManager:
 
         # Query registry for latest version
         try:
-            registry_node = self.node_registry.registry_client.get_node(node_info.registry_id)
+            registry_node = self.node_lookup.registry_client.get_node(node_info.registry_id)
         except Exception as e:
             result.message = f"Failed to check for updates: {e}"
             return result
@@ -764,7 +879,7 @@ class NodeManager:
 
         # Query GitHub for latest commit
         try:
-            repo_info = self.node_registry.github_client.get_repository_info(node_info.repository)
+            repo_info = self.node_lookup.github_client.get_repository_info(node_info.repository)
         except Exception as e:
             result.message = f"Failed to check for updates: {e}"
             return result
@@ -821,8 +936,7 @@ class NodeManager:
                 continue
 
             # Scan current requirements
-            deps = self.node_registry.scanner.scan_node(node_path)
-            current_reqs = deps.requirements or []
+            current_reqs = self.node_lookup.scan_requirements(node_path)
 
             # Get stored requirements from dependency group
             group_name = self.pyproject.nodes.generate_group_name(node_info, identifier)

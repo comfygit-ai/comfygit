@@ -6,6 +6,7 @@ import tempfile
 import shutil
 
 from comfydock_core.managers.node_manager import NodeManager
+from comfydock_core.models.shared import NodeInfo
 
 
 class TestNodeManager:
@@ -103,25 +104,27 @@ class TestNodeManager:
         disabled_dir.mkdir()
         (disabled_dir / "old_file.py").write_text("old content")
 
+        # Create a cache directory for the node
+        cache_dir = tmp_path / "cache" / "test-node"
+        cache_dir.mkdir(parents=True)
+        (cache_dir / "node.py").write_text("node content")
+
         mock_pyproject = Mock()
-        mock_node_registry = Mock()
+        mock_node_lookup = Mock()
 
-        # Mock the node package
-        mock_node_info = Mock()
-        mock_node_info.name = "test-node"
-        mock_node_info.registry_id = "test-node"
-        mock_node_info.source = "registry"
+        # Mock node info
+        mock_node_info = NodeInfo(
+            name="test-node",
+            registry_id="test-node",
+            source="registry"
+        )
 
-        mock_node_package = Mock()
-        mock_node_package.name = "test-node"
-        mock_node_package.node_info = mock_node_info
-        mock_node_package.identifier = "test-node"
-        mock_node_package.requirements = []
-
-        mock_node_registry.prepare_node.return_value = mock_node_package
+        mock_node_lookup.get_node.return_value = mock_node_info
+        mock_node_lookup.download_to_cache.return_value = cache_dir
+        mock_node_lookup.scan_requirements.return_value = []
 
         node_manager = NodeManager(
-            mock_pyproject, Mock(), mock_node_registry, Mock(), custom_nodes_dir, Mock()
+            mock_pyproject, Mock(), mock_node_lookup, Mock(), custom_nodes_dir, Mock()
         )
 
         # Mock add_node_package to avoid full flow

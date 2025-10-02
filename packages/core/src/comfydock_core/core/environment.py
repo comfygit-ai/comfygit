@@ -18,7 +18,7 @@ from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
 from ..models.sync import SyncResult
-from ..services.node_registry import NodeInfo, NodeRegistry
+from ..models.shared import NodeInfo
 from ..utils.common import run_command
 
 if TYPE_CHECKING:
@@ -90,8 +90,9 @@ class Environment:
         return PyprojectManager(self.pyproject_path)
 
     @cached_property
-    def node_registry(self) -> NodeRegistry:
-        return NodeRegistry(
+    def node_lookup(self):
+        from ..services.node_lookup_service import NodeLookupService
+        return NodeLookupService(
             workspace_path=self.workspace_paths.root,
             cache_path=self.workspace_paths.cache,
         )
@@ -105,7 +106,7 @@ class Environment:
         return NodeManager(
             self.pyproject,
             self.uv_manager,
-            self.node_registry,
+            self.node_lookup,
             self.resolution_tester,
             self.custom_nodes_path,
             self.registry_data_manager
