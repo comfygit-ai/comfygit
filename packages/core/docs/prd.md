@@ -87,9 +87,9 @@ A workspace-wide SQLite database tracking all model files across a configured di
 Lightweight registration of workflows to monitor. No analysis occurs during tracking - just name registration in pyproject.toml.
 
 ### Model Resolution
-The process of mapping workflow model references to actual files in the model index. Happens only at commit/export time.
+The process of mapping workflow model references to actual files in the model index. Happens at resolve/commit/export time.
 
-**Key Design Choice**: During local resolution, workflow JSON files are **never modified**. Instead, mappings are stored in pyproject.toml using content-addressable hashes. This preserves shareability - workflows can be distributed with their original references intact. Only during import are workflow files rewritten to use local model paths.
+**Key Design Choice**: During local resolution, workflow JSON files are updated based on user's resolution choice(s). Mappings are stored in pyproject.toml using content-addressable hashes (i.e. model hash -> workflow json node location). This ensures shareability - workflows can be distributed with the user's original model/node paths intact. Then during import are workflow files rewritten to use local model paths.
 
 See [Model Resolution Logic](#model-resolution-logic) for detailed strategy.
 

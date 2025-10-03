@@ -635,14 +635,13 @@ class WorkflowHandler(BaseHandler):
         self.save(config)
 
     def set_model_resolutions(self, name: str, model_resolutions: dict) -> None:
-        """Set model resolutions for a workflow.
+        """Set model resolutions for a workflow using PRD schema.
 
         Args:
             name: Workflow name
-            model_resolutions: Dict mapping workflow reference to {hash, nodes}
+            model_resolutions: Dict mapping hash to node locations
                 Format: {
-                    "original/workflow/ref.safetensors": {
-                        "hash": "abc123...",
+                    "abc123hash...": {
                         "nodes": [{"node_id": "4", "widget_idx": 0}]
                     }
                 }
@@ -650,12 +649,15 @@ class WorkflowHandler(BaseHandler):
         config = self.load()
         self.ensure_section(config, 'tool', 'comfydock', 'workflows', name)
 
-        # Create models table
-        models_table = tomlkit.table()
+        # Set workflow path
+        config['tool']['comfydock']['workflows'][name]['path'] = f"workflows/{name}.json"
 
-        for workflow_ref, resolution_data in model_resolutions.items():
-            model_entry = tomlkit.table()
-            model_entry['hash'] = resolution_data['hash']
+        # Create models table with hash as key (PRD schema)
+        models_table = tomlkit.inline_table()
+
+        for model_hash, resolution_data in model_resolutions.items():
+            # Create inline table for this hash's data
+            hash_entry = tomlkit.inline_table()
 
             # Nodes as array of inline tables
             nodes_list = []
@@ -665,8 +667,8 @@ class WorkflowHandler(BaseHandler):
                 node_inline['widget_idx'] = int(node_ref['widget_idx'])
                 nodes_list.append(node_inline)
 
-            model_entry['nodes'] = nodes_list
-            models_table[workflow_ref] = model_entry
+            hash_entry['nodes'] = nodes_list
+            models_table[model_hash] = hash_entry
 
         config['tool']['comfydock']['workflows'][name]['models'] = models_table
         self.save(config)

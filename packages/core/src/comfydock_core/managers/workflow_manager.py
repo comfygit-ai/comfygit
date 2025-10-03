@@ -591,16 +591,64 @@ class WorkflowManager:
                 model_refs=workflow.dependencies.found_models
             )
 
+    def update_workflow_model_paths(
+        self,
+        workflow_name: str,
+        resolution: ResolutionResult,
+        model_refs: list[WorkflowNodeWidgetRef]
+    ) -> None:
+        """Update workflow JSON files with resolved model paths.
+
+        Args:
+            workflow_name: Name of workflow to update
+            resolution: Resolution result with resolved models
+            model_refs: Original model references from workflow analysis
+        """
+        from ..repositories.workflow_repository import WorkflowRepository
+
+        # Load workflow from ComfyUI directory
+        workflow_path = self.comfyui_workflows / f"{workflow_name}.json"
+        if not workflow_path.exists():
+            logger.warning(f"Workflow {workflow_name} not found at {workflow_path}")
+            return
+
+        workflow = WorkflowRepository.load(workflow_path)
+
+        # Update each resolved model's path in the workflow
+        for i, model in enumerate(resolution.models_resolved):
+            if i < len(model_refs):
+                ref = model_refs[i]
+                node_id = ref.node_id
+                widget_idx = ref.widget_index
+
+                # Update the node's widget value with resolved path
+                if node_id in workflow.nodes:
+                    node = workflow.nodes[node_id]
+                    if widget_idx < len(node.widgets_values):
+                        old_path = node.widgets_values[widget_idx]
+                        node.widgets_values[widget_idx] = model.relative_path
+                        logger.debug(f"Updated node {node_id} widget {widget_idx}: {old_path} → {model.relative_path}")
+
+        # Save updated workflow back to ComfyUI
+        WorkflowRepository.save(workflow, workflow_path)
+        logger.info(f"Updated workflow JSON: {workflow_path}")
+
+        # Also update .cec copy (will be committed later)
+        cec_workflow_path = self.cec_workflows / f"{workflow_name}.json"
+        WorkflowRepository.save(workflow, cec_workflow_path)
+        logger.info(f"Updated .cec workflow: {cec_workflow_path}")
+
     def apply_resolution(
         self,
         resolution: ResolutionResult,
         workflow_name: str | None = None,
         model_refs: list[WorkflowNodeWidgetRef] | None = None
     ) -> None:
-        """Phase 3b: Apply resolution to pyproject.toml.
+        """Phase 3b: Apply resolution to pyproject.toml and update workflow JSON.
 
         Takes a ResolutionResult (from resolve_workflow or fix_workflow)
-        and persists resolved nodes and models to pyproject.toml.
+        and persists resolved nodes and models to pyproject.toml, then
+        updates workflow JSON files with resolved paths.
 
         Args:
             resolution: Result with resolved dependencies to apply
@@ -611,12 +659,21 @@ class WorkflowManager:
             logger.info("No resolved dependencies to apply")
             return
 
+        # Step 1: Update pyproject.toml with model metadata and mappings
         self._apply_resolution_to_pyproject(
             resolution.nodes_resolved,
             resolution.models_resolved,
             workflow_name=workflow_name,
             model_refs=model_refs
         )
+
+        # Step 2: Update workflow JSON with resolved paths
+        if workflow_name and model_refs and resolution.models_resolved:
+            self.update_workflow_model_paths(
+                workflow_name=workflow_name,
+                resolution=resolution,
+                model_refs=model_refs
+            )
 
     def _apply_resolution_to_pyproject(
         self,
@@ -736,36 +793,35 @@ class WorkflowManager:
         node_id: str,
         widget_idx: int
     ) -> None:
-        """Add or update workflow model mapping in pyproject.
+        """Add or update workflow model mapping in pyproject using PRD schema.
 
         Args:
             workflow_name: Name of the workflow
-            workflow_reference: Original reference from workflow JSON
-            model_hash: Hash of the resolved model
+            workflow_reference: Original reference from workflow JSON (unused in PRD schema)
+            model_hash: Hash of the resolved model (used as key)
             node_id: Node ID that uses this model
             widget_idx: Widget index containing the model path
         """
-        # Get existing mappings
+        # Get existing mappings (now hash-based)
         current_mappings = self.pyproject.workflows.get_model_resolutions(workflow_name)
 
-        # Build/update mapping
-        if workflow_reference in current_mappings:
+        # Build/update mapping using hash as key (PRD schema)
+        if model_hash in current_mappings:
             # Update existing - add node if not already there
-            mapping = current_mappings[workflow_reference]
+            mapping = current_mappings[model_hash]
             nodes = mapping.get("nodes", [])
 
             node_ref = {"node_id": str(node_id), "widget_idx": int(widget_idx)}
             if node_ref not in nodes:
                 nodes.append(node_ref)
 
-            current_mappings[workflow_reference]["nodes"] = nodes
+            current_mappings[model_hash]["nodes"] = nodes
         else:
-            # Create new mapping
-            current_mappings[workflow_reference] = {
-                "hash": model_hash,
+            # Create new mapping with hash as key
+            current_mappings[model_hash] = {
                 "nodes": [{"node_id": str(node_id), "widget_idx": int(widget_idx)}]
             }
 
         # Save updated mappings
         self.pyproject.workflows.set_model_resolutions(workflow_name, current_mappings)
-        logger.info(f"Mapped: {workflow_reference} → hash {model_hash[:8]}...")
+        logger.info(f"Mapped hash {model_hash[:8]}... to workflow {workflow_name}")

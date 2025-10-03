@@ -178,24 +178,33 @@ class TestFuzzySearchResolution:
         assert len(models_required) > 0, \
             "WILL FAIL: Model should be in registry (not implemented)"
 
-        # EXPECTED: Workflow has mapping
+        # EXPECTED: Workflow has mapping (hash-based in PRD schema)
         workflow_models = pyproject.get("tool", {}).get("comfydock", {}).get("workflows", {}).get("test_wf", {}).get("models", {})
-        assert "sd15-missing.safetensors" in workflow_models, \
-            "WILL FAIL: Workflow should have model mapping (not implemented)"
 
-        # Mapping should point to hash
-        mapping = workflow_models["sd15-missing.safetensors"]
-        assert "hash" in mapping, \
-            "Mapping should include model hash"
+        # Find the model hash that was resolved (should be sd15_v1.safetensors, the actual resolved file)
+        model_hash = None
+        for hash_key in models_required.keys():
+            if models_required[hash_key]["filename"] == "sd15_v1.safetensors":
+                model_hash = hash_key
+                break
 
-        # EXPECTED: Workflow JSON unchanged
+        assert model_hash, "Model hash for sd15_v1.safetensors should be found in models.required"
+        assert model_hash in workflow_models, \
+            f"Workflow should have model mapping for hash {model_hash}"
+
+        # Mapping should point to node locations
+        mapping = workflow_models[model_hash]
+        assert "nodes" in mapping, \
+            "Mapping should include node locations"
+
+        # EXPECTED: Workflow JSON updated with resolved path (NEW PRD behavior)
         workflow_path = env.comfyui_path / "user/default/workflows/test_wf.json"
         with open(workflow_path) as f:
             workflow_data = json.load(f)
 
-        # Original reference should be preserved
-        assert workflow_data["nodes"][0]["widgets_values"][0] == "sd15-missing.safetensors", \
-            "Workflow JSON should be unchanged (preserves shareability)"
+        # Path should be updated to resolved model
+        assert workflow_data["nodes"][0]["widgets_values"][0] == "checkpoints/sd15_v1.safetensors", \
+            "Workflow JSON should be updated with resolved path (PRD v2 behavior)"
 
 
 class TestManualPathResolution:
@@ -618,17 +627,18 @@ class TestMultipleWorkflowsSameModel:
         assert len(models_required) == 1, \
             "WILL FAIL: Same model should be stored once (not implemented)"
 
-        # Should have 2 workflow mappings
+        # Should have 2 workflow mappings (both using hash as key in PRD schema)
         workflow_a_models = pyproject.get("tool", {}).get("comfydock", {}).get("workflows", {}).get("workflow_a", {}).get("models", {})
         workflow_b_models = pyproject.get("tool", {}).get("comfydock", {}).get("workflows", {}).get("workflow_b", {}).get("models", {})
 
-        assert "ref_a.safetensors" in workflow_a_models, \
-            "Workflow A should have its mapping"
-        assert "ref_b.safetensors" in workflow_b_models, \
-            "Workflow B should have its mapping"
+        # Get the one model hash from models.required
+        model_hash = list(models_required.keys())[0]
 
-        # Both should point to same hash
-        hash_a = workflow_a_models["ref_a.safetensors"]["hash"]
-        hash_b = workflow_b_models["ref_b.safetensors"]["hash"]
-        assert hash_a == hash_b, \
+        assert model_hash in workflow_a_models, \
+            f"Workflow A should have mapping for hash {model_hash}"
+        assert model_hash in workflow_b_models, \
+            f"Workflow B should have mapping for hash {model_hash}"
+
+        # Both should reference the same hash (deduplication working)
+        assert len(set(workflow_a_models.keys()) & set(workflow_b_models.keys())) == 1, \
             "Both workflows should reference same model hash"
