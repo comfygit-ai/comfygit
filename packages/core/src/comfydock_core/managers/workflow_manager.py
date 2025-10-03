@@ -591,6 +591,9 @@ class WorkflowManager:
                 model_refs=workflow.dependencies.found_models
             )
 
+        # Clean up orphaned models after all workflows processed
+        self._cleanup_orphaned_models()
+
     def update_workflow_model_paths(
         self,
         workflow_name: str,
@@ -682,7 +685,7 @@ class WorkflowManager:
         workflow_name: str | None = None,
         model_refs: list[WorkflowNodeWidgetRef] | None = None
     ) -> None:
-        """Apply resolved dependencies to pyproject.toml.
+        """Apply resolved dependencies to pyproject.toml with replacement semantics.
 
         Args:
             nodes_to_add: Node packages to add
@@ -693,8 +696,10 @@ class WorkflowManager:
         Raises:
             RuntimeError: If no configuration to save or write fails
         """
-        # Add resolved models to manifest
+        # Add resolved models to manifest and build FRESH mappings
         try:
+            fresh_mappings = {}
+
             for i, model in enumerate(models_to_add):
                 self.pyproject.models.add_model(
                     model_hash=model.hash,
@@ -704,16 +709,22 @@ class WorkflowManager:
                     category="required",
                 )
 
-                # Add workflow mapping if we have context
+                # Build fresh mapping (replacement, not merge)
                 if workflow_name and model_refs and i < len(model_refs):
                     ref = model_refs[i]
-                    self._add_workflow_model_mapping(
-                        workflow_name=workflow_name,
-                        workflow_reference=ref.widget_value,  # Original reference
-                        model_hash=model.hash,
-                        node_id=ref.node_id,
-                        widget_idx=ref.widget_index
-                    )
+
+                    if model.hash not in fresh_mappings:
+                        fresh_mappings[model.hash] = {"nodes": []}
+
+                    fresh_mappings[model.hash]["nodes"].append({
+                        "node_id": str(ref.node_id),
+                        "widget_idx": int(ref.widget_index)
+                    })
+
+            # Replace workflow mappings (not merge!)
+            if workflow_name and fresh_mappings:
+                self.pyproject.workflows.set_model_resolutions(workflow_name, fresh_mappings)
+
         except CDPyprojectError as e:
             raise RuntimeError("Failed to save model to pyproject.toml") from e
 
@@ -825,3 +836,22 @@ class WorkflowManager:
         # Save updated mappings
         self.pyproject.workflows.set_model_resolutions(workflow_name, current_mappings)
         logger.info(f"Mapped hash {model_hash[:8]}... to workflow {workflow_name}")
+
+    def _cleanup_orphaned_models(self) -> None:
+        """Remove models from models.required that no workflow references."""
+        # Collect all hashes referenced by ANY workflow
+        referenced_hashes = set()
+        all_workflows = self.pyproject.workflows.get_all_with_resolutions()
+
+        for workflow_name in all_workflows:
+            mappings = self.pyproject.workflows.get_model_resolutions(workflow_name)
+            referenced_hashes.update(mappings.keys())
+
+        # Get all models in models.required
+        all_model_hashes = self.pyproject.models.get_all_model_hashes()
+
+        # Remove unreferenced models
+        orphaned = all_model_hashes - referenced_hashes
+        for hash_val in orphaned:
+            self.pyproject.models.remove_model(hash_val, category="required")
+            logger.info(f"Removed orphaned model: {hash_val[:8]}...")
