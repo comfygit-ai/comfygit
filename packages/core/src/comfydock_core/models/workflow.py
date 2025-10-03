@@ -14,6 +14,14 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class ScoredMatch:
+    """Model match with similarity score."""
+    model: ModelWithLocation
+    score: float
+    confidence: str  # "high", "good", "possible"
+
+
+@dataclass
 class Link:
     """Represents a connection between nodes."""
     id: int

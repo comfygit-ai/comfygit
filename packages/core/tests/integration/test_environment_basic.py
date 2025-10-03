@@ -34,6 +34,11 @@ def test_environment_lifecycle_with_subprocess_mock(tmp_path):
     workspace_path = tmp_path / "test_workspace"
     workspace = WorkspaceFactory.create(workspace_path)
 
+    # Set models directory (required for environment creation)
+    models_dir = workspace_path / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    workspace.set_models_directory(models_dir)
+
     # Mock subprocess.run to prevent any real external calls
     with patch('subprocess.run') as mock_subprocess_run:
 
@@ -130,7 +135,7 @@ def test_environment_errors(tmp_path):
     """Test error handling without environment creation."""
 
     workspace_path = tmp_path / "test_workspace"
-    workspace = WorkspaceManager.create(workspace_path)
+    workspace = WorkspaceFactory.create(workspace_path)
 
     # Test that we can't delete non-existent environment
     with pytest.raises(CDEnvironmentNotFoundError):

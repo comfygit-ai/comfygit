@@ -623,3 +623,118 @@ class ModelRepository:
                 sha256_hash.update(byte_block)
 
         return sha256_hash.hexdigest()
+
+    def get_by_category(self, category: str) -> list[ModelWithLocation]:
+        """Get all models in a specific category by filtering relative_path.
+
+        Args:
+            category: Category name (e.g., "checkpoints", "loras", "vae")
+
+        Returns:
+            List of ModelWithLocation objects in that category
+        """
+        query = """
+        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+               l.relative_path, l.filename, l.mtime, l.last_seen
+        FROM models m
+        JOIN model_locations l ON m.hash = l.model_hash
+        WHERE l.relative_path LIKE ?
+        ORDER BY l.filename
+        """
+
+        search_pattern = f"{category}/%"
+        results = self.sqlite.execute_query(query, (search_pattern,))
+
+        models = []
+        for row in results:
+            metadata = json.loads(row['metadata']) if row['metadata'] else {}
+            model = ModelWithLocation(
+                hash=row['hash'],
+                file_size=row['file_size'],
+                blake3_hash=row['blake3_hash'],
+                sha256_hash=row['sha256_hash'],
+                relative_path=row['relative_path'],
+                filename=row['filename'],
+                mtime=row['mtime'],
+                last_seen=row['last_seen'],
+                metadata=metadata
+            )
+            models.append(model)
+
+        return models
+
+    def find_by_exact_path(self, relative_path: str) -> ModelWithLocation | None:
+        """Find model by exact relative path.
+
+        Args:
+            relative_path: Exact relative path to match
+
+        Returns:
+            ModelWithLocation or None if not found
+        """
+        query = """
+        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+               l.relative_path, l.filename, l.mtime, l.last_seen
+        FROM models m
+        JOIN model_locations l ON m.hash = l.model_hash
+        WHERE l.relative_path = ?
+        LIMIT 1
+        """
+
+        results = self.sqlite.execute_query(query, (relative_path,))
+        if not results:
+            return None
+
+        row = results[0]
+        metadata = json.loads(row['metadata']) if row['metadata'] else {}
+
+        return ModelWithLocation(
+            hash=row['hash'],
+            file_size=row['file_size'],
+            blake3_hash=row['blake3_hash'],
+            sha256_hash=row['sha256_hash'],
+            relative_path=row['relative_path'],
+            filename=row['filename'],
+            mtime=row['mtime'],
+            last_seen=row['last_seen'],
+            metadata=metadata
+        )
+
+    def search(self, term: str) -> list[ModelWithLocation]:
+        """Search for models by filename or path.
+
+        Args:
+            term: Search term to match against filename or path
+
+        Returns:
+            List of matching ModelWithLocation objects
+        """
+        query = """
+        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+               l.relative_path, l.filename, l.mtime, l.last_seen
+        FROM models m
+        JOIN model_locations l ON m.hash = l.model_hash
+        WHERE l.filename LIKE ? OR l.relative_path LIKE ?
+        ORDER BY l.filename
+        """
+
+        search_pattern = f"%{term}%"
+        results = self.sqlite.execute_query(query, (search_pattern, search_pattern))
+
+        models = []
+        for row in results:
+            metadata = json.loads(row['metadata']) if row['metadata'] else {}
+            model = ModelWithLocation(
+                hash=row['hash'],
+                file_size=row['file_size'],
+                blake3_hash=row['blake3_hash'],
+                sha256_hash=row['sha256_hash'],
+                relative_path=row['relative_path'],
+                filename=row['filename'],
+                mtime=row['mtime'],
+                last_seen=row['last_seen'],
+                metadata=metadata
+            )
+            models.append(model)
+
+        return models

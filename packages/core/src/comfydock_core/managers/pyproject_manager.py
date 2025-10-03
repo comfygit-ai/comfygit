@@ -639,33 +639,36 @@ class WorkflowHandler(BaseHandler):
 
         Args:
             name: Workflow name
-            model_resolutions: Dict mapping model hash to node references
+            model_resolutions: Dict mapping workflow reference to {hash, nodes}
                 Format: {
-                    "model_hash": {
-                        "nodes": [{"node_id": "3", "widget_idx": 0}]
+                    "original/workflow/ref.safetensors": {
+                        "hash": "abc123...",
+                        "nodes": [{"node_id": "4", "widget_idx": 0}]
                     }
                 }
         """
         config = self.load()
-        self.ensure_section(config, 'tool', 'comfydock', 'workflows')
+        self.ensure_section(config, 'tool', 'comfydock', 'workflows', name)
 
-        workflow_entry = tomlkit.table()
-        workflow_entry['models'] = tomlkit.table()
+        # Create models table
+        models_table = tomlkit.table()
 
-        for model_hash, resolution_data in model_resolutions.items():
-            model_table = tomlkit.table()
-            nodes_list = tomlkit.aot()  # Array of tables
+        for workflow_ref, resolution_data in model_resolutions.items():
+            model_entry = tomlkit.table()
+            model_entry['hash'] = resolution_data['hash']
 
+            # Nodes as array of inline tables
+            nodes_list = []
             for node_ref in resolution_data.get('nodes', []):
-                node_table = tomlkit.table()
-                node_table['node_id'] = str(node_ref['node_id'])
-                node_table['widget_idx'] = int(node_ref['widget_idx'])
-                nodes_list.append(node_table)
+                node_inline = tomlkit.inline_table()
+                node_inline['node_id'] = str(node_ref['node_id'])
+                node_inline['widget_idx'] = int(node_ref['widget_idx'])
+                nodes_list.append(node_inline)
 
-            model_table['nodes'] = nodes_list
-            workflow_entry['models'][model_hash] = model_table
+            model_entry['nodes'] = nodes_list
+            models_table[workflow_ref] = model_entry
 
-        config['tool']['comfydock']['workflows'][name] = workflow_entry
+        config['tool']['comfydock']['workflows'][name]['models'] = models_table
         self.save(config)
         logger.info(f"Set model resolutions for workflow: {name}")
 

@@ -89,11 +89,7 @@ class ModelScanner:
         existing_locations = {loc['relative_path']: loc for loc in self.index_manager.get_all_locations()}
 
         # Find all potential model files
-        model_files = self._find_model_files(models_dir)
-
-        if not model_files:
-            logger.info(f"No valid model files found in {models_dir}")
-            return ScanResult(0, 0, 0, 0, 0, [])
+        model_files = self._find_model_files(models_dir) or []
 
         result = ScanResult(len(model_files), 0, 0, 0, 0, [])
 

@@ -56,13 +56,16 @@ class ModelResolutionStrategy(Protocol):
         """
         ...
 
-    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> Optional[str]:
+    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> tuple[str, str] | None:
         """Handle completely missing model.
 
         Args:
             reference: The model reference that couldn't be found
 
         Returns:
-            Download URL or None to skip
+            Tuple of ("action", "data") or None to skip
+            - ("select", "path/to/model.safetensors"): User selected from index
+            - ("skip", ""): User chose to skip
+            - None: Cancelled (Ctrl+C)
         """
         ...

@@ -160,35 +160,34 @@ class ModelResolver:
             if not models_section:
                 return None
 
-            # Search through all model entries for matching node_id and widget_idx
-            for model_hash, model_data in models_section.items():
-                nodes = model_data.get('nodes', [])
+            # Check if this widget_value (workflow reference) has a saved mapping
+            workflow_ref = ref.widget_value
+            if workflow_ref not in models_section:
+                return None
 
-                # Check if this node_id and widget_index combination exists
-                for node_entry in nodes:
-                    if (node_entry.get('node_id') == ref.node_id and
-                        node_entry.get('widget_idx') == ref.widget_index):
+            # Get the mapping for this workflow reference
+            mapping = models_section[workflow_ref]
+            model_hash = mapping.get('hash')
+            if not model_hash:
+                return None
 
-                        # Found a match! Now verify the model still exists in the index
-                        models = self.model_repository.find_model_by_hash(model_hash)
-                        if models and len(models) > 0:
-                            # Valid existing resolution - use it
-                            model = models[0]
-                            logger.debug(f"Resolved from pyproject: {ref.widget_value} -> {model_hash[:8]}...")
-                            return ModelResolutionResult(
-                                reference=ref,
-                                candidates=models,
-                                resolution_type="pyproject",
-                                resolved_model=model,
-                                resolution_confidence=1.0,
-                            )
-                        else:
-                            # Hash no longer valid in index, need fresh resolution
-                            logger.debug(f"Pyproject hash {model_hash[:8]}... no longer in index for {ref.widget_value}")
-                            return None
-
-            # No matching node_id/widget_idx combination found
-            return None
+            # Verify the model still exists in the index
+            models = self.model_repository.find_model_by_hash(model_hash)
+            if models and len(models) > 0:
+                # Valid existing resolution - use it
+                model = models[0]
+                logger.debug(f"Resolved from pyproject: {ref.widget_value} -> {model_hash[:8]}...")
+                return ModelResolutionResult(
+                    reference=ref,
+                    candidates=models,
+                    resolution_type="pyproject",
+                    resolved_model=model,
+                    resolution_confidence=1.0,
+                )
+            else:
+                # Hash no longer valid in index, need fresh resolution
+                logger.debug(f"Pyproject hash {model_hash[:8]}... no longer in index for {ref.widget_value}")
+                return None
 
         except Exception as e:
             logger.debug(f"Error checking pyproject resolution: {e}")

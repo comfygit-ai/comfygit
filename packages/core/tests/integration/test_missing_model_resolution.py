@@ -49,12 +49,12 @@ class TestFuzzySearchResolution:
         test_models
     ):
         """
-        WILL FAIL: Fuzzy search should find models with similar names.
+        Fuzzy search should find models with similar names.
 
         Workflow asks for: "sd15-missing.safetensors"
-        Index has: "photon_v1.safetensors" (in SD1.5 category)
+        Index has: "sd15_v1.safetensors" (in checkpoints category)
 
-        Expected: fuzzy search returns photon_v1 as potential match
+        Expected: fuzzy search returns sd15_v1 as potential match
         """
         env = workflow_with_missing_checkpoint
 
@@ -75,14 +75,14 @@ class TestFuzzySearchResolution:
             limit=5
         )
 
-        # EXPECTED: Should find photon_v1 as a potential match
+        # EXPECTED: Should find sd15_v1 as a potential match
         assert len(similar) > 0, \
-            "WILL FAIL: Fuzzy search should find similar models (not implemented)"
+            "Fuzzy search should find similar models"
 
-        # Check that photon is in results
+        # Check that sd15_v1 is in results
         filenames = [m.model.filename for m in similar]
-        assert "photon_v1.safetensors" in filenames, \
-            "Should find photon_v1.safetensors as similar to sd15-missing"
+        assert "sd15_v1.safetensors" in filenames, \
+            "Should find sd15_v1.safetensors as similar to sd15-missing"
 
     def test_user_selects_from_fuzzy_results(
         self,
@@ -103,8 +103,8 @@ class TestFuzzySearchResolution:
         # Mock strategy that selects first result
         class AutoSelectStrategy:
             def handle_missing_model(self, reference):
-                # Simulate user selecting photon_v1
-                return ("select", "SD1.5/photon_v1.safetensors")
+                # Simulate user selecting sd15_v1
+                return ("select", "checkpoints/sd15_v1.safetensors")
 
             def resolve_ambiguous_model(self, reference, candidates):
                 return None
@@ -145,7 +145,7 @@ class TestFuzzySearchResolution:
 
         class AutoSelectStrategy:
             def handle_missing_model(self, reference):
-                return ("select", "SD1.5/photon_v1.safetensors")
+                return ("select", "checkpoints/sd15_v1.safetensors")
 
             def resolve_ambiguous_model(self, reference, candidates):
                 return None
@@ -160,8 +160,12 @@ class TestFuzzySearchResolution:
             model_strategy=AutoSelectStrategy()
         )
 
-        # Apply resolution to pyproject
-        env.workflow_manager.apply_resolution(fixed)
+        # Apply resolution to pyproject with workflow context
+        env.workflow_manager.apply_resolution(
+            fixed,
+            workflow_name="test_wf",
+            model_refs=resolution.models_unresolved
+        )
 
         # Load pyproject.toml
         import tomllib
@@ -220,7 +224,7 @@ class TestManualPathResolution:
         """
         WILL FAIL: User can manually enter path from index.
 
-        User enters: "SD1.5/photon_v1.safetensors"
+        User enters: "checkpoints/sd15_v1.safetensors"
         System finds in index, creates mapping.
         """
         env = workflow_with_missing_model
@@ -228,7 +232,7 @@ class TestManualPathResolution:
         class ManualPathStrategy:
             def handle_missing_model(self, reference):
                 # User manually enters path
-                return ("select", "SD1.5/photon_v1.safetensors")
+                return ("select", "checkpoints/sd15_v1.safetensors")
 
             def resolve_ambiguous_model(self, reference, candidates):
                 return None
@@ -371,7 +375,7 @@ class TestResolutionPersistence:
 
         class AutoSelectStrategy:
             def handle_missing_model(self, reference):
-                return ("select", "SD1.5/photon_v1.safetensors")
+                return ("select", "checkpoints/sd15_v1.safetensors")
 
             def resolve_ambiguous_model(self, reference, candidates):
                 return None
@@ -387,7 +391,11 @@ class TestResolutionPersistence:
             node_strategy=None,
             model_strategy=AutoSelectStrategy()
         )
-        env.workflow_manager.apply_resolution(fixed)
+        env.workflow_manager.apply_resolution(
+            fixed,
+            workflow_name="persist_test",
+            model_refs=resolution1.models_unresolved
+        )
 
         # Second status check - should be resolved now
         status2 = env.workflow_manager.get_workflow_status()
@@ -402,7 +410,8 @@ class TestResolutionPersistence:
     def test_model_deleted_after_resolution_detected(
         self,
         workflow_with_missing_model,
-        test_models
+        test_models,
+        test_workspace
     ):
         """
         WILL FAIL: If model file is deleted after resolution, next status
@@ -414,19 +423,24 @@ class TestResolutionPersistence:
 
         class AutoSelectStrategy:
             def handle_missing_model(self, reference):
-                return ("select", "SD1.5/photon_v1.safetensors")
+                return ("select", "checkpoints/sd15_v1.safetensors")
 
             def resolve_ambiguous_model(self, reference, candidates):
                 return None
 
         # Resolve model
         status1 = env.workflow_manager.get_workflow_status()
+        resolution1 = status1.analyzed_workflows[0].resolution
         fixed = env.workflow_manager.fix_resolution(
-            resolution=status1.analyzed_workflows[0].resolution,
+            resolution=resolution1,
             node_strategy=None,
             model_strategy=AutoSelectStrategy()
         )
-        env.workflow_manager.apply_resolution(fixed)
+        env.workflow_manager.apply_resolution(
+            fixed,
+            workflow_name="persist_test",
+            model_refs=resolution1.models_unresolved
+        )
 
         # Verify resolved
         status2 = env.workflow_manager.get_workflow_status()
@@ -434,11 +448,11 @@ class TestResolutionPersistence:
 
         # Delete the model file
         models_dir = env.workspace_config_manager.get_models_directory()
-        model_path = models_dir / "SD1.5" / "photon_v1.safetensors"
+        model_path = models_dir / "checkpoints" / "sd15_v1.safetensors"
         model_path.unlink()
 
         # Re-index (removes deleted model from index)
-        env.workspace.sync_model_directory()
+        test_workspace.sync_model_directory()
 
         # Check status again
         status3 = env.workflow_manager.get_workflow_status()
@@ -497,7 +511,7 @@ class TestPartialResolutions:
                 call_count[0] += 1
                 if call_count[0] <= 2:
                     # Resolve first 2
-                    return ("select", "SD1.5/photon_v1.safetensors")
+                    return ("select", "checkpoints/sd15_v1.safetensors")
                 else:
                     # Skip third
                     return None
@@ -517,7 +531,11 @@ class TestPartialResolutions:
             node_strategy=None,
             model_strategy=PartialStrategy()
         )
-        env.workflow_manager.apply_resolution(fixed)
+        env.workflow_manager.apply_resolution(
+            fixed,
+            workflow_name="partial_test",
+            model_refs=resolution1.models_unresolved
+        )
 
         # Check status again
         status2 = env.workflow_manager.get_workflow_status()
@@ -571,7 +589,7 @@ class TestMultipleWorkflowsSameModel:
         class AutoSelectStrategy:
             def handle_missing_model(self, reference):
                 # Both resolve to photon
-                return ("select", "SD1.5/photon_v1.safetensors")
+                return ("select", "checkpoints/sd15_v1.safetensors")
 
             def resolve_ambiguous_model(self, reference, candidates):
                 return None
@@ -584,7 +602,11 @@ class TestMultipleWorkflowsSameModel:
                 node_strategy=None,
                 model_strategy=AutoSelectStrategy()
             )
-            env.workflow_manager.apply_resolution(fixed)
+            env.workflow_manager.apply_resolution(
+                fixed,
+                workflow_name=analyzed.name,
+                model_refs=analyzed.resolution.models_unresolved
+            )
 
         # Check pyproject
         import tomllib

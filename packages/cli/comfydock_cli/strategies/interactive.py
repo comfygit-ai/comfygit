@@ -90,32 +90,28 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
                     return selected
             print("  Invalid choice, try again")
 
-    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> Optional[str]:
+    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> tuple[str, str] | None:
         """Prompt user for missing model."""
         print(f"\n⚠️  Model not found: {reference.widget_value}")
         print("  in node #{} ({})".format(reference.node_id, reference.node_type))
         print("Options:")
-        print("  1. Mark as external (skip for now)")
-        print("  2. Provide download URL")
-        print("  3. Search manually")
+        print("  1. Search model index")
+        print("  2. Enter path manually")
+        print("  3. Skip (resolve later)")
 
         while True:
-            choice = input("Choice [1]: ").strip() or "1"
+            choice = input("\nChoice [1]: ").strip() or "1"
 
             if choice == "1":
-                return None  # Skip
+                # Trigger fuzzy search
+                return ("search", "")
             elif choice == "2":
-                url = input("Enter download URL: ").strip()
-                if url:
-                    return url
-                print("  No URL provided, skipping")
-                return None
+                path = input("Enter model path: ").strip()
+                if path:
+                    return ("select", path)
+                return ("skip", "")
             elif choice == "3":
-                search_term = input("Enter search term: ").strip()
-                if search_term:
-                    print(f"  Search functionality not implemented yet")
-                    print(f"  Would search for: {search_term}")
-                return None
+                return ("skip", "")
             else:
                 print("  Invalid choice, try again")
 
