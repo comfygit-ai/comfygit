@@ -6,7 +6,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from comfydock_core.models.environment import UserAction
-from comfydock_core.models.exceptions import CDNodeConflictError
+from comfydock_core.models.exceptions import CDNodeConflictError, CDEnvironmentError
 from .strategies.interactive import InteractiveNodeStrategy, InteractiveModelStrategy
 from .formatters.error_formatter import NodeErrorFormatter
 
@@ -154,16 +154,6 @@ class EnvironmentCommands:
         """Run ComfyUI in the specified environment."""
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
-
-        # Handle sync if needed
-        if not args.no_sync:
-            print("🔁 Syncing environment...")
-            # from comfydock_cli.interactive.model_resolver import SilentResolver
-            # Use silent resolver for run command to avoid interrupting startup
-            sync_result = env.sync()
-            if not sync_result.success:
-                for error in sync_result.errors:
-                    print(f"⚠️  {error}", file=sys.stderr)
 
         print(f"🎮 Starting ComfyUI in environment: {env.name}")
         if comfyui_args:
@@ -665,7 +655,7 @@ class EnvironmentCommands:
 
     # === Git-based operations ===
 
-    @with_env_logging("env sync")
+    @with_env_logging("env repair")
     def repair(self, args, logger=None):
         """Repair environment to match pyproject.toml (for manual edits or git operations)."""
         env = self._get_env(args)
@@ -757,7 +747,7 @@ class EnvironmentCommands:
             else:
                 print(f"⏮ Discarding uncommitted changes in environment '{env.name}'")
 
-            env.rollback(target=args.target)
+            env.rollback(target=args.target, force=getattr(args, 'force', False))
             print("✓ Rollback complete")
 
             if args.target:
@@ -772,6 +762,9 @@ class EnvironmentCommands:
         except ValueError as e:
             print(f"✗ {e}", file=sys.stderr)
             print("\nTip: Run 'comfydock log' to see available versions")
+            sys.exit(1)
+        except CDEnvironmentError as e:
+            print(f"✗ {e}", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
             if logger:
@@ -976,18 +969,6 @@ class EnvironmentCommands:
         else:
             print("✓ No changes needed - all dependencies already resolved")
 
-    @with_env_logging("workflow restore")
-    def workflow_restore(self, args, logger=None):
-        """Restore a workflow from .cec to ComfyUI."""
-        env = self._get_env(args)
-
-        if env.restore_workflow(args.name):
-            print(f"✓ Restored workflow '{args.name}' to ComfyUI")
-            print("⚠️ Please reload the workflow in your ComfyUI browser tab")
-        else:
-            print(f"✗ Workflow '{args.name}' not found in .cec directory", file=sys.stderr)
-            sys.exit(1)
-
     # === Environment Model Commands ===
 
     @with_env_logging("model add")
@@ -999,18 +980,6 @@ class EnvironmentCommands:
         identifier = args.identifier
         category = 'optional' if args.optional else 'required'
 
-        # if identifier.startswith('http'):
-        #     # Download from URL
-        #     print(f"📥 Downloading model from {identifier}...")
-        #     try:
-        #         from ..managers.model_download_manager import ModelDownloadManager
-        #         download_manager = ModelDownloadManager(workspace.model_manager)
-        #         model = download_manager.download_from_url(identifier)
-        #     except Exception as e:
-        #         print(f"✗ Failed to download model: {e}", file=sys.stderr)
-        #         sys.exit(1)
-        # else:
-        # Look up in workspace index by hash or filename
         print(f"🔍 Searching for model: {identifier}")
         matches = workspace.search_models(identifier)
 

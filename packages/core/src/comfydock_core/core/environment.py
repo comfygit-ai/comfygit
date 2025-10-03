@@ -217,7 +217,7 @@ class Environment:
 
         return result
 
-    def rollback(self, target: str | None = None) -> None:
+    def rollback(self, target: str | None = None, force: bool = False) -> None:
         """Rollback environment to a previous state - checkpoint-style instant restoration.
 
         This is an atomic operation that:
@@ -231,16 +231,18 @@ class Environment:
         Design: Checkpoint-style rollback (like video game saves)
         - Rollback = instant teleportation to old state
         - Auto-commits as new version (preserves history)
-        - No "uncommitted changes" after rollback
+        - Requires --force to discard uncommitted changes
         - Full history preserved (v1→v2→v3→v4[rollback to v2]→v5)
 
         Args:
             target: Version identifier (e.g., "v1", "v2") or commit hash
                    If None, discards uncommitted changes
+            force: If True, discard uncommitted changes without error
 
         Raises:
             ValueError: If target version doesn't exist
             OSError: If git commands fail
+            CDEnvironmentError: If uncommitted changes exist and force=False
         """
         # 1. Snapshot old state BEFORE git changes it
         old_nodes = self.pyproject.nodes.get_existing()
@@ -249,9 +251,18 @@ class Environment:
         if target:
             # Get version name for commit message
             target_version = target
-            self.git_manager.rollback_to(target, safe=False)  # Clean state, no unstaged files
+            self.git_manager.rollback_to(target, safe=False, force=force)  # Clean state, no unstaged files
         else:
             # Empty rollback = discard uncommitted changes (rollback to current)
+            if not force and self.git_manager.has_uncommitted_changes():
+                from comfydock_core.models.exceptions import CDEnvironmentError
+                raise CDEnvironmentError(
+                    "Cannot rollback with uncommitted changes.\n"
+                    "Options:\n"
+                    "  • Commit: comfydock commit -m '<message>'\n"
+                    "  • Force discard: comfydock rollback --force\n"
+                    "  • See changes: comfydock status"
+                )
             self.git_manager.discard_uncommitted()
             # Still need to restore workflows even for empty rollback
             self.workflow_manager.restore_all_from_cec()
@@ -384,19 +395,6 @@ class Environment:
         """
         return self.workflow_manager.get_workflow_sync_status()
 
-    def analyze_workflow(self, name: str) -> ResolutionResult:
-        """Analyze workflow dependencies - delegates to WorkflowManager.
-
-        Args:
-            name: Workflow name to analyze
-
-        Returns:
-            ResolutionResult with dependency and conflict analysis
-        """
-        result = self.workflow_manager.analyze_workflow(name)
-
-        return self.workflow_manager.resolve_workflow(result)
-
     def resolve_workflow(self,
                         name: str,
                         resolution: ResolutionResult | None = None,
@@ -526,17 +524,6 @@ class Environment:
             return
 
         logger.error("No changes to commit")
-
-    def restore_workflow(self, name: str) -> bool:
-        """Restore a workflow from .cec to ComfyUI directory.
-
-        Args:
-            name: Workflow name to restore
-
-        Returns:
-            True if successful, False if workflow not found
-        """
-        return self.workflow_manager.restore_from_cec(name)
 
     # =====================================================
     # Constraint Management

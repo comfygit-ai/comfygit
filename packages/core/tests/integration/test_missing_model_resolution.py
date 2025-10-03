@@ -202,9 +202,9 @@ class TestFuzzySearchResolution:
         with open(workflow_path) as f:
             workflow_data = json.load(f)
 
-        # Path should be updated to resolved model
-        assert workflow_data["nodes"][0]["widgets_values"][0] == "checkpoints/sd15_v1.safetensors", \
-            "Workflow JSON should be updated with resolved path (PRD v2 behavior)"
+        # Path should be updated with stripped path (ComfyUI expects no base directory prefix)
+        assert workflow_data["nodes"][0]["widgets_values"][0] == "sd15_v1.safetensors", \
+            "Workflow JSON should have stripped path for ComfyUI (no 'checkpoints/' prefix)"
 
 
 class TestManualPathResolution:

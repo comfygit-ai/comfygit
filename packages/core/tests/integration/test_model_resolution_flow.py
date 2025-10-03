@@ -186,12 +186,12 @@ class TestModelResolutionFlow:
         with open(comfyui_workflow_path) as f:
             updated_workflow = json.load(f)
 
-        # Check the widget value was updated
+        # Check the widget value was updated (ComfyUI expects path without base directory prefix)
         checkpoint_node = next(n for n in updated_workflow["nodes"] if n["id"] == 4)
-        assert checkpoint_node["widgets_values"][0] == "checkpoints/sd15_v1.safetensors", \
-            "Workflow JSON should have resolved path, not original invalid path"
+        assert checkpoint_node["widgets_values"][0] == "sd15_v1.safetensors", \
+            "Workflow JSON should have stripped path for ComfyUI (no 'checkpoints/' prefix)"
 
-        # ASSERT 2: .cec workflow should ALSO have resolved path (after commit)
+        # ASSERT 2: .cec workflow should ALSO have stripped path (after commit)
         test_env.workflow_manager.copy_all_workflows()
         cec_workflow_path = test_env.cec_path / "workflows/test_workflow.json"
 
@@ -199,8 +199,8 @@ class TestModelResolutionFlow:
             cec_workflow = json.load(f)
 
         cec_checkpoint_node = next(n for n in cec_workflow["nodes"] if n["id"] == 4)
-        assert cec_checkpoint_node["widgets_values"][0] == "checkpoints/sd15_v1.safetensors", \
-            ".cec workflow should have resolved path"
+        assert cec_checkpoint_node["widgets_values"][0] == "sd15_v1.safetensors", \
+            ".cec workflow should have stripped path for ComfyUI"
 
     def test_multiple_models_in_workflow(
         self,
@@ -295,9 +295,9 @@ class TestModelResolutionFlow:
         with open(comfyui_workflow_path) as f:
             updated = json.load(f)
 
-        # Both nodes should have resolved paths
+        # Both nodes should have resolved paths (without 'checkpoints/' prefix - stripped for ComfyUI)
         checkpoint = next(n for n in updated["nodes"] if n["id"] == 4)
-        assert "checkpoints/sd15_v1.safetensors" in checkpoint["widgets_values"][0]
+        assert "sd15_v1.safetensors" in checkpoint["widgets_values"][0]
 
     def test_resolution_preserves_other_workflow_data(
         self,
@@ -392,5 +392,5 @@ class TestModelResolutionFlow:
         # Extra data preserved
         assert updated["extra"]["ds"]["scale"] == 1.0
 
-        # But model path updated
-        assert checkpoint["widgets_values"][0] == "checkpoints/sd15_v1.safetensors"
+        # But model path updated (stripped for ComfyUI)
+        assert checkpoint["widgets_values"][0] == "sd15_v1.safetensors"

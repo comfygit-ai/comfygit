@@ -207,6 +207,7 @@ def _add_env_commands(subparsers):
     rollback_parser = subparsers.add_parser("rollback", help="Rollback to a previous version or discard uncommitted changes")
     rollback_parser.add_argument("target", nargs="?", help="Version to rollback to (e.g., 'v1', 'v2') - leave empty to discard uncommitted changes")
     rollback_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+    rollback_parser.add_argument("--force", action="store_true", help="Force rollback, discarding uncommitted changes without error")
     rollback_parser.set_defaults(func=env_cmds.rollback)
 
     # Node management subcommands
@@ -251,11 +252,6 @@ def _add_env_commands(subparsers):
     workflow_resolve_parser.add_argument("name", help="Workflow name to resolve")
     workflow_resolve_parser.add_argument("--auto", action="store_true", help="Auto-resolve without interaction")
     workflow_resolve_parser.set_defaults(func=env_cmds.workflow_resolve)
-
-    # workflow restore
-    workflow_restore_parser = workflow_subparsers.add_parser("restore", help="Restore workflow from .cec to ComfyUI")
-    workflow_restore_parser.add_argument("name", help="Workflow name to restore")
-    workflow_restore_parser.set_defaults(func=env_cmds.workflow_restore)
 
     # Environment Model management subcommands
     env_model_parser = subparsers.add_parser("model", help="Manage environment model requirements")

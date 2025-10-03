@@ -7,7 +7,6 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from comfydock_core.models.exceptions import CDPyprojectError
 from comfydock_core.models.shared import ModelWithLocation
 from comfydock_core.resolvers.global_node_resolver import GlobalNodeResolver
 from comfydock_core.services.registry_data_manager import RegistryDataManager
@@ -592,7 +591,7 @@ class WorkflowManager:
             )
 
         # Clean up orphaned models after all workflows processed
-        self._cleanup_orphaned_models()
+        self.pyproject.models.cleanup_orphans()
 
     def update_workflow_model_paths(
         self,
@@ -629,8 +628,10 @@ class WorkflowManager:
                     node = workflow.nodes[node_id]
                     if widget_idx < len(node.widgets_values):
                         old_path = node.widgets_values[widget_idx]
-                        node.widgets_values[widget_idx] = model.relative_path
-                        logger.debug(f"Updated node {node_id} widget {widget_idx}: {old_path} → {model.relative_path}")
+                        # Strip base directory prefix for ComfyUI node loaders
+                        display_path = self._strip_base_directory_for_node(ref.node_type, model.relative_path)
+                        node.widgets_values[widget_idx] = display_path
+                        logger.debug(f"Updated node {node_id} widget {widget_idx}: {old_path} → {display_path}")
 
         # Save updated workflow back to ComfyUI
         WorkflowRepository.save(workflow, workflow_path)
@@ -662,12 +663,12 @@ class WorkflowManager:
             return
 
         # Step 1: Update pyproject.toml with model metadata and mappings
-        self._apply_resolution_to_pyproject(
-            resolution.nodes_resolved,
-            resolution.models_resolved,
-            workflow_name=workflow_name,
-            model_refs=model_refs
-        )
+        if resolution.models_resolved and workflow_name and model_refs:
+            self.pyproject.workflows.apply_resolution(
+                workflow_name=workflow_name,
+                models=resolution.models_resolved,
+                model_refs=model_refs
+            )
 
         # Step 2: Update workflow JSON with resolved paths
         if workflow_name and model_refs and resolution.models_resolved:
@@ -677,60 +678,31 @@ class WorkflowManager:
                 model_refs=model_refs
             )
 
-    def _apply_resolution_to_pyproject(
-        self,
-        nodes_to_add: list[ResolvedNodePackage],
-        models_to_add: list[ModelWithLocation],
-        workflow_name: str | None = None,
-        model_refs: list[WorkflowNodeWidgetRef] | None = None
-    ) -> None:
-        """Apply resolved dependencies to pyproject.toml with replacement semantics.
+    def _strip_base_directory_for_node(self, node_type: str, relative_path: str) -> str:
+        """Strip base directory prefix from path for ComfyUI node loaders.
+
+        ComfyUI nodes have implicit base directories (e.g., CheckpointLoaderSimple
+        looks in checkpoints/). We store full paths but must strip the base for display.
 
         Args:
-            nodes_to_add: Node packages to add
-            models_to_add: Model files to track
-            workflow_name: Name of workflow (for model mappings)
-            model_refs: Original model references (for mapping preservation)
+            node_type: ComfyUI node type (e.g., "CheckpointLoaderSimple")
+            relative_path: Full path relative to models/ (e.g., "checkpoints/SD1.5/model.safetensors")
 
-        Raises:
-            RuntimeError: If no configuration to save or write fails
+        Returns:
+            Path without base directory prefix (e.g., "SD1.5/model.safetensors")
         """
-        # Add resolved models to manifest and build FRESH mappings
-        try:
-            fresh_mappings = {}
+        from ..configs.model_config import ModelConfig
 
-            for i, model in enumerate(models_to_add):
-                self.pyproject.models.add_model(
-                    model_hash=model.hash,
-                    filename=model.filename,
-                    file_size=model.file_size,
-                    relative_path=model.relative_path,
-                    category="required",
-                )
+        model_config = ModelConfig.load()
+        base_dirs = model_config.get_directories_for_node(node_type)
 
-                # Build fresh mapping (replacement, not merge)
-                if workflow_name and model_refs and i < len(model_refs):
-                    ref = model_refs[i]
+        for base_dir in base_dirs:
+            prefix = base_dir + "/"
+            if relative_path.startswith(prefix):
+                return relative_path[len(prefix):]
 
-                    if model.hash not in fresh_mappings:
-                        fresh_mappings[model.hash] = {"nodes": []}
-
-                    fresh_mappings[model.hash]["nodes"].append({
-                        "node_id": str(ref.node_id),
-                        "widget_idx": int(ref.widget_index)
-                    })
-
-            # Replace workflow mappings (not merge!)
-            if workflow_name and fresh_mappings:
-                self.pyproject.workflows.set_model_resolutions(workflow_name, fresh_mappings)
-
-        except CDPyprojectError as e:
-            raise RuntimeError("Failed to save model to pyproject.toml") from e
-
-        logger.info(
-            f"Applied {len(models_to_add)} models, "
-            f"{len(nodes_to_add)} nodes to pyproject.toml"
-        )
+        # No matching base directory - return as-is
+        return relative_path
 
     def find_similar_models(
         self,
@@ -794,63 +766,3 @@ class WorkflowManager:
         scored.sort(key=lambda x: x.score, reverse=True)
 
         return scored[:limit]
-
-    def _add_workflow_model_mapping(
-        self,
-        workflow_name: str,
-        workflow_reference: str,
-        model_hash: str,
-        node_id: str,
-        widget_idx: int
-    ) -> None:
-        """Add or update workflow model mapping in pyproject using PRD schema.
-
-        Args:
-            workflow_name: Name of the workflow
-            workflow_reference: Original reference from workflow JSON (unused in PRD schema)
-            model_hash: Hash of the resolved model (used as key)
-            node_id: Node ID that uses this model
-            widget_idx: Widget index containing the model path
-        """
-        # Get existing mappings (now hash-based)
-        current_mappings = self.pyproject.workflows.get_model_resolutions(workflow_name)
-
-        # Build/update mapping using hash as key (PRD schema)
-        if model_hash in current_mappings:
-            # Update existing - add node if not already there
-            mapping = current_mappings[model_hash]
-            nodes = mapping.get("nodes", [])
-
-            node_ref = {"node_id": str(node_id), "widget_idx": int(widget_idx)}
-            if node_ref not in nodes:
-                nodes.append(node_ref)
-
-            current_mappings[model_hash]["nodes"] = nodes
-        else:
-            # Create new mapping with hash as key
-            current_mappings[model_hash] = {
-                "nodes": [{"node_id": str(node_id), "widget_idx": int(widget_idx)}]
-            }
-
-        # Save updated mappings
-        self.pyproject.workflows.set_model_resolutions(workflow_name, current_mappings)
-        logger.info(f"Mapped hash {model_hash[:8]}... to workflow {workflow_name}")
-
-    def _cleanup_orphaned_models(self) -> None:
-        """Remove models from models.required that no workflow references."""
-        # Collect all hashes referenced by ANY workflow
-        referenced_hashes = set()
-        all_workflows = self.pyproject.workflows.get_all_with_resolutions()
-
-        for workflow_name in all_workflows:
-            mappings = self.pyproject.workflows.get_model_resolutions(workflow_name)
-            referenced_hashes.update(mappings.keys())
-
-        # Get all models in models.required
-        all_model_hashes = self.pyproject.models.get_all_model_hashes()
-
-        # Remove unreferenced models
-        orphaned = all_model_hashes - referenced_hashes
-        for hash_val in orphaned:
-            self.pyproject.models.remove_model(hash_val, category="required")
-            logger.info(f"Removed orphaned model: {hash_val[:8]}...")

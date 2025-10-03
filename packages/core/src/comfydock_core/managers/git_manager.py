@@ -551,19 +551,31 @@ __pycache__/
             return versions[-1]["version"]
         return "v1"
 
-    def rollback_to(self, version: str, safe: bool = False) -> None:
+    def rollback_to(self, version: str, safe: bool = False, force: bool = False) -> None:
         """Rollback environment to a previous version.
 
         Args:
             version: Version to rollback to
             safe: If True, leaves changes unstaged for review (default: False for clean state)
+            force: If True, discard uncommitted changes without error
 
         Raises:
             ValueError: If version doesn't exist
+            CDEnvironmentError: If uncommitted changes exist and force=False
         """
-        # Discard any uncommitted changes (with warning if they exist)
+        from comfydock_core.models.exceptions import CDEnvironmentError
+
+        # Check for uncommitted changes
         if self.has_uncommitted_changes():
-            logger.warning("Discarding uncommitted changes for rollback")
+            if not force:
+                raise CDEnvironmentError(
+                    "Cannot rollback with uncommitted changes.\n"
+                    "Options:\n"
+                    "  • Commit: comfydock commit -m '<message>'\n"
+                    "  • Force discard: comfydock rollback --force <version>\n"
+                    "  • See changes: comfydock status"
+                )
+            logger.warning("Discarding uncommitted changes (--force flag used)")
             self.discard_uncommitted()
 
         # Apply the target version (clean state by default)

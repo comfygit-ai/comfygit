@@ -624,8 +624,7 @@ class NodeHandler(BaseHandler):
 
 class WorkflowHandler(BaseHandler):
     """Handles workflow model resolutions and tracking."""
-    
-    # TODO: Add support for adding workflows, will want for export
+
     def add_workflow(self, name: str) -> None:
         """Add a new workflow to the pyproject.toml."""
         config = self.load()
@@ -633,6 +632,68 @@ class WorkflowHandler(BaseHandler):
         config['tool']['comfydock']['workflows'][name] = tomlkit.table()
         logger.info(f"Added new workflow: {name}")
         self.save(config)
+
+    def apply_resolution(
+        self,
+        workflow_name: str,
+        models: list,
+        model_refs: list
+    ) -> None:
+        """Apply workflow resolution atomically - adds models and sets mappings in one save.
+
+        Args:
+            workflow_name: Name of workflow
+            models: List of ModelWithLocation objects
+            model_refs: List of WorkflowNodeWidgetRef objects
+
+        Raises:
+            CDPyprojectError: If save fails
+        """
+        if not models:
+            logger.debug("No models to apply for workflow resolution")
+            return
+
+        # Build fresh mappings (encapsulated in this handler)
+        fresh_mappings = self._build_mappings(models, model_refs)
+
+        # Add models via ModelHandler
+        for model in models:
+            self.manager.models.add_model(
+                model_hash=model.hash,
+                filename=model.filename,
+                file_size=model.file_size,
+                relative_path=model.relative_path,
+                category="required",
+            )
+
+        # Set workflow mappings
+        self.set_model_resolutions(workflow_name, fresh_mappings)
+
+        logger.info(f"Applied {len(models)} model(s) for workflow '{workflow_name}'")
+
+    def _build_mappings(self, models: list, model_refs: list) -> dict:
+        """Build mapping structure from models and refs.
+
+        Encapsulates the schema: hash -> {nodes: [{node_id, widget_idx}]}
+
+        Args:
+            models: List of ModelWithLocation objects
+            model_refs: List of WorkflowNodeWidgetRef objects
+
+        Returns:
+            Mapping dict with hash as key
+        """
+        mappings = {}
+        for i, model in enumerate(models):
+            if i < len(model_refs):
+                ref = model_refs[i]
+                if model.hash not in mappings:
+                    mappings[model.hash] = {"nodes": []}
+                mappings[model.hash]["nodes"].append({
+                    "node_id": str(ref.node_id),
+                    "widget_idx": int(ref.widget_index)
+                })
+        return mappings
 
     def set_model_resolutions(self, name: str, model_resolutions: dict) -> None:
         """Set model resolutions for a workflow using PRD schema.
@@ -854,7 +915,7 @@ class ModelHandler(BaseHandler):
 
     def get_model_count(self) -> dict[str, int]:
         """Get count of models by category.
-        
+
         Returns:
             Dictionary with counts for each category
         """
@@ -864,3 +925,34 @@ class ModelHandler(BaseHandler):
             'optional': len(models.get('optional', {})),
             'total': len(models.get('required', {})) + len(models.get('optional', {}))
         }
+
+    def cleanup_orphans(self) -> int:
+        """Remove models from models.required that no workflow references.
+
+        This is a cross-cutting operation that understands the relationship
+        between workflows and models sections in pyproject.toml.
+
+        Returns:
+            Number of orphaned models removed
+        """
+        config = self.load()
+
+        # Collect referenced hashes from all workflows
+        referenced = set()
+        workflows = config.get('tool', {}).get('comfydock', {}).get('workflows', {})
+        for workflow_data in workflows.values():
+            referenced.update(workflow_data.get('models', {}).keys())
+
+        # Find orphans in required models
+        models = config.get('tool', {}).get('comfydock', {}).get('models', {})
+        orphaned = []
+        for hash_val in list(models.get('required', {}).keys()):
+            if hash_val not in referenced:
+                del models['required'][hash_val]
+                orphaned.append(hash_val)
+
+        if orphaned:
+            self.save(config)
+            logger.info(f"Cleaned up {len(orphaned)} orphaned model(s)")
+
+        return len(orphaned)

@@ -98,3 +98,106 @@ def test_workflows_differ_detects_real_changes():
     # This would require more setup with actual files
     # Skipping for now as it's integration-level
     pass
+
+
+class TestStripBaseDirectoryForNode:
+    """Test path stripping logic for ComfyUI node loaders."""
+
+    def test_strip_checkpoint_loader_simple(self, workflow_manager):
+        """CheckpointLoaderSimple expects path without 'checkpoints/' prefix."""
+        node_type = "CheckpointLoaderSimple"
+        relative_path = "checkpoints/SD1.5/helloyoung25d_V15jvae.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "SD1.5/helloyoung25d_V15jvae.safetensors"
+
+    def test_strip_lora_loader(self, workflow_manager):
+        """LoraLoader expects path without 'loras/' prefix."""
+        node_type = "LoraLoader"
+        relative_path = "loras/realistic/detail_tweaker.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "realistic/detail_tweaker.safetensors"
+
+    def test_strip_vae_loader(self, workflow_manager):
+        """VAELoader expects path without 'vae/' prefix."""
+        node_type = "VAELoader"
+        relative_path = "vae/vae-ft-mse-840000.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "vae-ft-mse-840000.safetensors"
+
+    def test_strip_controlnet_loader(self, workflow_manager):
+        """ControlNetLoader expects path without 'controlnet/' prefix."""
+        node_type = "ControlNetLoader"
+        relative_path = "controlnet/depth/control_v11f1p_sd15_depth.pth"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "depth/control_v11f1p_sd15_depth.pth"
+
+    def test_multiple_base_dirs_uses_first_match(self, workflow_manager):
+        """Nodes with multiple base dirs (like CheckpointLoader) strip first match."""
+        node_type = "CheckpointLoader"  # Can load from checkpoints or configs
+        relative_path = "checkpoints/model.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "model.safetensors"
+
+    def test_no_matching_prefix_returns_unchanged(self, workflow_manager):
+        """If path doesn't start with expected base, return as-is."""
+        node_type = "CheckpointLoaderSimple"
+        relative_path = "custom_folder/model.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "custom_folder/model.safetensors"
+
+    def test_unknown_node_type_returns_unchanged(self, workflow_manager):
+        """Unknown node types return path unchanged."""
+        node_type = "CustomUnknownNode"
+        relative_path = "checkpoints/model.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "checkpoints/model.safetensors"
+
+    def test_path_already_stripped_returns_unchanged(self, workflow_manager):
+        """If path is already without base prefix, return as-is."""
+        node_type = "CheckpointLoaderSimple"
+        relative_path = "SD1.5/model.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "SD1.5/model.safetensors"
+
+    def test_nested_subdirectories_preserved(self, workflow_manager):
+        """Nested paths after base are preserved."""
+        node_type = "CheckpointLoaderSimple"
+        relative_path = "checkpoints/SD1.5/special/subfolder/model.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "SD1.5/special/subfolder/model.safetensors"
+
+    def test_filename_only_without_base(self, workflow_manager):
+        """Filename without any directory returns as-is."""
+        node_type = "CheckpointLoaderSimple"
+        relative_path = "model.safetensors"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "model.safetensors"
+
+    def test_upscale_model_loader(self, workflow_manager):
+        """UpscaleModelLoader expects path without 'upscale_models/' prefix."""
+        node_type = "UpscaleModelLoader"
+        relative_path = "upscale_models/4x-UltraSharp.pth"
+
+        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+
+        assert result == "4x-UltraSharp.pth"
