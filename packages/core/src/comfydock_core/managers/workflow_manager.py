@@ -548,26 +548,7 @@ class WorkflowManager:
 
                     action, data = result
 
-                    if action == "search":
-                        # Perform fuzzy search
-                        similar = self.find_similar_models(
-                            missing_ref=model_ref.widget_value,
-                            node_type=model_ref.node_type,
-                            limit=10
-                        )
-
-                        if not similar:
-                            logger.info(f"No similar models found for {model_ref.widget_value}")
-                            remaining_models_unresolved.append(model_ref)
-                            continue
-
-                        # Present fuzzy results (would normally be in UI but tests expect selection)
-                        # For now, auto-select first result for testing
-                        selected_model = similar[0].model
-                        models_to_add.append(selected_model)
-                        logger.info(f"Resolved via fuzzy search: {model_ref.widget_value} → {selected_model.relative_path}")
-
-                    elif action == "select":
+                    if action == "select":
                         # User provided explicit path
                         path = data
 
@@ -602,8 +583,13 @@ class WorkflowManager:
         )
         
     def apply_all_resolution(self, detailed_status: DetailedWorkflowStatus) -> None:
+        """Apply resolutions for all workflows with proper context."""
         for workflow in detailed_status.analyzed_workflows:
-            self.apply_resolution(workflow.resolution)
+            self.apply_resolution(
+                workflow.resolution,
+                workflow_name=workflow.name,
+                model_refs=workflow.dependencies.found_models
+            )
 
     def apply_resolution(
         self,

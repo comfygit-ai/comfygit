@@ -1,8 +1,9 @@
 """Test auto resolution strategies."""
 import pytest
 from comfydock_core.strategies import AutoNodeStrategy, AutoModelStrategy
-from comfydock_core.models.workflow import WorkflowNodeWidgetRef
+from comfydock_core.models.workflow import WorkflowNodeWidgetRef, ResolvedNodePackage
 from comfydock_core.models.shared import ModelWithLocation
+from comfydock_core.models.node_mapping import GlobalNodePackage
 
 
 class TestAutoNodeStrategy:
@@ -12,24 +13,79 @@ class TestAutoNodeStrategy:
         """Should pick highest confidence suggestion."""
         strategy = AutoNodeStrategy()
         suggestions = [
-            {'package_id': 'node-b', 'confidence': 0.5},
-            {'package_id': 'node-a', 'confidence': 0.9},
-            {'package_id': 'node-c', 'confidence': 0.3},
+            ResolvedNodePackage(
+                package_id='node-b',
+                package_data=GlobalNodePackage(
+                    id='node-b', display_name='Node B', author=None, description=None,
+                    repository=None, downloads=None, github_stars=None, rating=None,
+                    license=None, category=None, tags=None, status=None, created_at=None, versions={}
+                ),
+                node_type='SomeNode',
+                versions=[],
+                match_type='exact',
+                match_confidence=0.5
+            ),
+            ResolvedNodePackage(
+                package_id='node-a',
+                package_data=GlobalNodePackage(
+                    id='node-a', display_name='Node A', author=None, description=None,
+                    repository=None, downloads=None, github_stars=None, rating=None,
+                    license=None, category=None, tags=None, status=None, created_at=None, versions={}
+                ),
+                node_type='SomeNode',
+                versions=[],
+                match_type='exact',
+                match_confidence=0.9
+            ),
+            ResolvedNodePackage(
+                package_id='node-c',
+                package_data=GlobalNodePackage(
+                    id='node-c', display_name='Node C', author=None, description=None,
+                    repository=None, downloads=None, github_stars=None, rating=None,
+                    license=None, category=None, tags=None, status=None, created_at=None, versions={}
+                ),
+                node_type='SomeNode',
+                versions=[],
+                match_type='exact',
+                match_confidence=0.3
+            ),
         ]
 
         result = strategy.resolve_unknown_node('SomeNode', suggestions)
-        assert result == 'node-a'
+        assert result.package_id == 'node-a'
 
     def test_resolve_unknown_node_with_tied_confidence(self):
         """Should pick first when confidence is tied."""
         strategy = AutoNodeStrategy()
         suggestions = [
-            {'package_id': 'node-a', 'confidence': 0.5},
-            {'package_id': 'node-b', 'confidence': 0.5},
+            ResolvedNodePackage(
+                package_id='node-a',
+                package_data=GlobalNodePackage(
+                    id='node-a', display_name='Node A', author=None, description=None,
+                    repository=None, downloads=None, github_stars=None, rating=None,
+                    license=None, category=None, tags=None, status=None, created_at=None, versions={}
+                ),
+                node_type='SomeNode',
+                versions=[],
+                match_type='exact',
+                match_confidence=0.5
+            ),
+            ResolvedNodePackage(
+                package_id='node-b',
+                package_data=GlobalNodePackage(
+                    id='node-b', display_name='Node B', author=None, description=None,
+                    repository=None, downloads=None, github_stars=None, rating=None,
+                    license=None, category=None, tags=None, status=None, created_at=None, versions={}
+                ),
+                node_type='SomeNode',
+                versions=[],
+                match_type='exact',
+                match_confidence=0.5
+            ),
         ]
 
         result = strategy.resolve_unknown_node('SomeNode', suggestions)
-        assert result == 'node-a'
+        assert result.package_id == 'node-a'
 
     def test_resolve_unknown_node_empty_suggestions(self):
         """Should return None for empty suggestions."""
@@ -40,7 +96,19 @@ class TestAutoNodeStrategy:
     def test_confirm_node_install_always_true(self):
         """Should always confirm installation."""
         strategy = AutoNodeStrategy()
-        assert strategy.confirm_node_install('some-package', 'SomeNode') is True
+        pkg = ResolvedNodePackage(
+            package_id='test',
+            package_data=GlobalNodePackage(
+                id='test', display_name='Test', author=None, description=None,
+                repository=None, downloads=None, github_stars=None, rating=None,
+                license=None, category=None, tags=None, status=None, created_at=None, versions={}
+            ),
+            node_type='TestNode',
+            versions=[],
+            match_type='exact',
+            match_confidence=1.0
+        )
+        assert strategy.confirm_node_install(pkg) is True
 
 
 class TestAutoModelStrategy:
@@ -91,8 +159,8 @@ class TestAutoModelStrategy:
         result = strategy.resolve_ambiguous_model(ref, [])
         assert result is None
 
-    def test_handle_missing_model_returns_none(self):
-        """Should always return None for missing models."""
+    def test_handle_missing_model_returns_skip(self):
+        """Should return skip action for missing models."""
         strategy = AutoModelStrategy()
         ref = WorkflowNodeWidgetRef(
             node_id='1',
@@ -102,4 +170,4 @@ class TestAutoModelStrategy:
         )
 
         result = strategy.handle_missing_model(ref)
-        assert result is None
+        assert result == ("skip", "")

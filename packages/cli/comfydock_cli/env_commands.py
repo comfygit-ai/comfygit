@@ -932,7 +932,9 @@ class EnvironmentCommands:
             model_strategy = AutoModelStrategy()
         else:
             node_strategy = InteractiveNodeStrategy()
-            model_strategy = InteractiveModelStrategy()
+            model_strategy = InteractiveModelStrategy(
+                fuzzy_search_fn=env.workflow_manager.find_similar_models
+            )
 
         # Resolve
         print("\n🔧 Resolving dependencies...")
@@ -950,12 +952,13 @@ class EnvironmentCommands:
 
         # Display results
         if result.models_resolved or result.nodes_resolved:
-            print(f"✅ {result.summary}")
+            print(f"\n✅ Resolution complete!")
             if result.models_resolved:
                 print(f"  • Resolved {len(result.models_resolved)} models")
             if result.nodes_resolved:
                 print(f"  • Resolved {len(result.nodes_resolved)} nodes")
-            print("\nRun 'comfydock sync' to apply changes to environment")
+            print("\n💡 Next:")
+            print(f"  Commit workflows: comfydock commit -m \"Resolved {args.name}\"")
         elif result.has_issues:
             print("⚠ Remaining unresolved issues:")
             if result.models_ambiguous:

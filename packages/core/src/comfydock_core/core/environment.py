@@ -394,13 +394,20 @@ class Environment:
             # Then do initial resolve
             result = self.workflow_manager.resolve_workflow(analysis)
 
+        # Track original unresolved refs before fixing (needed for workflow mapping)
+        original_unresolved = list(result.models_unresolved)
+
         # Check if there are any unresolved issues
         if result.has_issues and fix:
             # Try to fix issues
             result = self.workflow_manager.fix_resolution(result, node_strategy, model_strategy)
 
-        # Apply resolution to pyproject.toml
-        self.workflow_manager.apply_resolution(result)
+        # Apply resolution to pyproject.toml with workflow context
+        self.workflow_manager.apply_resolution(
+            result,
+            workflow_name=name,
+            model_refs=original_unresolved
+        )
         return result
 
     def commit(self, message: str | None = None):

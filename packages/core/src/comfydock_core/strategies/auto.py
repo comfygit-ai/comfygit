@@ -45,6 +45,6 @@ class AutoModelStrategy(ModelResolutionStrategy):
             return None
         return candidates[0]
 
-    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> str | None:
-        """Skip missing models - return None."""
-        return None
+    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> tuple[str, str] | None:
+        """Skip missing models - return skip action."""
+        return ("skip", "")
