@@ -41,6 +41,7 @@ class PyprojectManager:
         self._uv_config: UVConfigHandler | None = None
         self._workflows: WorkflowHandler | None = None
         self._models: ModelHandler | None = None
+        self._node_mappings: CustomNodeMappingHandler | None = None
 
     @property
     def dependencies(self) -> DependencyHandler:
@@ -78,6 +79,13 @@ class PyprojectManager:
         if self._models is None:
             self._models = ModelHandler(self)
         return self._models
+
+    @property
+    def node_mappings(self) -> CustomNodeMappingHandler:
+        """Get custom node mapping handler."""
+        if self._node_mappings is None:
+            self._node_mappings = CustomNodeMappingHandler(self)
+        return self._node_mappings
 
     # ===== Core Operations =====
 
@@ -975,3 +983,60 @@ class ModelHandler(BaseHandler):
             logger.info(f"Cleaned up {len(orphaned)} orphaned model(s)")
 
         return len(orphaned)
+
+
+class CustomNodeMappingHandler(BaseHandler):
+    """Handles custom node type -> package mappings for user overrides."""
+
+    def add_mapping(self, node_type: str, package_id: str) -> None:
+        """Add a custom mapping for unresolved node.
+
+        Args:
+            node_type: The node type to map (e.g., "Mute / Bypass Repeater (rgthree)")
+            package_id: Package ID or "skip" to ignore this node
+        """
+        config = self.load()
+        self.ensure_section(config, 'tool', 'comfydock', 'node_mappings')
+        config['tool']['comfydock']['node_mappings'][node_type] = package_id
+        self.save(config)
+        logger.debug(f"Added node mapping: {node_type} -> {package_id}")
+
+    def get_mapping(self, node_type: str) -> str | None:
+        """Get custom mapping if exists.
+
+        Args:
+            node_type: The node type to look up
+
+        Returns:
+            Package ID or "skip" if mapped, None if not found
+        """
+        config = self.load()
+        mappings = config.get('tool', {}).get('comfydock', {}).get('node_mappings', {})
+        return mappings.get(node_type)
+
+    def get_all_mappings(self) -> dict[str, str]:
+        """Get all custom mappings.
+
+        Returns:
+            Dictionary of node_type -> package_id (or "skip")
+        """
+        config = self.load()
+        return config.get('tool', {}).get('comfydock', {}).get('node_mappings', {})
+
+    def remove_mapping(self, node_type: str) -> bool:
+        """Remove a custom mapping.
+
+        Args:
+            node_type: The node type to remove
+
+        Returns:
+            True if removed, False if not found
+        """
+        config = self.load()
+        mappings = config.get('tool', {}).get('comfydock', {}).get('node_mappings', {})
+        if node_type in mappings:
+            del mappings[node_type]
+            self.save(config)
+            logger.debug(f"Removed node mapping: {node_type}")
+            return True
+        return False

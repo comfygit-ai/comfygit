@@ -20,7 +20,8 @@ from ..models.workflow import (
     WorkflowAnalysisStatus,
     DetailedWorkflowStatus,
     WorkflowSyncStatus,
-    ScoredMatch
+    ScoredMatch,
+    NodeResolutionContext,
 )
 from ..models.protocols import NodeResolutionStrategy, ModelResolutionStrategy
 from ..analyzers.workflow_dependency_parser import WorkflowDependencyParser
@@ -431,14 +432,39 @@ class WorkflowManager:
 
         workflow_name = analysis.workflow_name
 
-        # Resolve missing nodes
-        for node in analysis.non_builtin_nodes:
-            logger.debug(f"Trying to resolve node: {node}")
-            resolved_packages = self.global_node_resolver.resolve_single_node(node)
+        # Build resolution context
+        context = NodeResolutionContext(
+            installed_packages=self.pyproject.nodes.get_existing(),
+            session_resolved={},
+            custom_mappings=self.pyproject.node_mappings.get_all_mappings(),
+            workflow_name=workflow_name
+        )
 
-            if not resolved_packages:
+        # Deduplicate node types (same type appears multiple times in workflow)
+        # Prefer nodes with properties when deduplicating
+        unique_nodes: dict[str, WorkflowNode] = {}
+        for node in analysis.non_builtin_nodes:
+            if node.type not in unique_nodes:
+                unique_nodes[node.type] = node
+            else:
+                # Prefer node with properties over one without
+                if node.properties.get('cnr_id') and not unique_nodes[node.type].properties.get('cnr_id'):
+                    unique_nodes[node.type] = node
+
+        logger.debug(f"Resolving {len(unique_nodes)} unique node types from {len(analysis.non_builtin_nodes)} total nodes")
+
+        # Resolve each unique node type with context
+        for node_type, node in unique_nodes.items():
+            logger.debug(f"Trying to resolve node: {node}")
+            resolved_packages = self.global_node_resolver.resolve_single_node_with_context(node, context)
+
+            if resolved_packages is None:
+                # Not resolved - trigger strategy
                 logger.debug(f"Node not found: {node}")
                 nodes_unresolved.append(node)
+            elif len(resolved_packages) == 0:
+                # Skip (custom mapping = "skip")
+                logger.debug(f"Skipped node: {node_type}")
             elif len(resolved_packages) == 1:
                 # Single match - cleanly resolved
                 logger.debug(f"Resolved node: {resolved_packages[0]}")

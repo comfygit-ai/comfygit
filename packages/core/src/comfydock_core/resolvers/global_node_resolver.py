@@ -22,6 +22,8 @@ from comfydock_core.models.workflow import (
     WorkflowNode,
     ResolvedNodePackage,
     NodeResolutionResult,
+    NodeResolutionContext,
+    ScoredPackageMatch,
 )
 
 from ..logging.logging_config import get_logger
@@ -293,3 +295,203 @@ class GlobalNodeResolver:
 
         logger.debug(f"No match found for {node_type}")
         return None
+
+    def resolve_single_node_with_context(
+        self,
+        node: WorkflowNode,
+        context: NodeResolutionContext | None = None
+    ) -> List[ResolvedNodePackage] | None:
+        """Enhanced resolution with context awareness.
+
+        Resolution priority:
+        1. Session-resolved mappings (deduplication)
+        2. Custom mappings from pyproject
+        3. Properties field (cnr_id from workflow)
+        4. Global mapping table (existing logic)
+        5. Heuristic matching against installed packages
+        6. None (trigger interactive resolution)
+
+        Args:
+            node: WorkflowNode to resolve
+            context: Optional resolution context for caching and custom mappings
+
+        Returns:
+            List of resolved packages, empty list for skip, or None for unresolved
+        """
+        node_type = node.type
+
+        if not context:
+            # No context - fall back to original method
+            return self.resolve_single_node(node)
+
+        # Priority 1: Session cache (deduplication)
+        if node_type in context.session_resolved:
+            pkg_id = context.session_resolved[node_type]
+            logger.debug(f"Session cache hit for {node_type}: {pkg_id}")
+            return [self._create_resolved_package_from_id(pkg_id, node_type, "session_cache")]
+
+        # Priority 2: Custom mappings
+        if node_type in context.custom_mappings:
+            mapping = context.custom_mappings[node_type]
+            if mapping == "skip":
+                logger.debug(f"Skipping {node_type} (user-configured)")
+                return []  # Empty list = skip
+            logger.debug(f"Custom mapping for {node_type}: {mapping}")
+            result = [self._create_resolved_package_from_id(mapping, node_type, "custom_mapping")]
+            context.session_resolved[node_type] = mapping
+            return result
+
+        # Priority 3: Properties field (cnr_id from ComfyUI)
+        if node.properties:
+            cnr_id = node.properties.get('cnr_id')
+            ver = node.properties.get('ver')  # Git commit hash
+
+            if cnr_id:
+                logger.debug(f"Found cnr_id in properties: {cnr_id} @ {ver}")
+
+                # Validate package exists in global mappings
+                if cnr_id in self.global_mappings.packages:
+                    pkg_data = self.global_mappings.packages[cnr_id]
+
+                    result = [ResolvedNodePackage(
+                        package_id=cnr_id,
+                        package_data=pkg_data,
+                        node_type=node_type,
+                        versions=[ver] if ver else [],
+                        match_type="properties",
+                        match_confidence=1.0
+                    )]
+
+                    context.session_resolved[node_type] = cnr_id
+                    return result
+                else:
+                    logger.warning(f"cnr_id {cnr_id} from properties not in registry")
+
+        # Priority 4: Global table (existing logic)
+        result = self.resolve_single_node(node)
+        if result:
+            # Cache in session
+            context.session_resolved[node_type] = result[0].package_id
+            return result
+
+        # Priority 5: Heuristic match against installed packages
+        for pkg_id in context.installed_packages.keys():
+            if self._likely_provides_node(pkg_id, node_type):
+                logger.debug(f"Heuristic match for {node_type}: {pkg_id}")
+                result = [self._create_resolved_package_from_id(pkg_id, node_type, "heuristic")]
+                context.session_resolved[node_type] = pkg_id
+                return result
+
+        # Priority 6: No match - return None to trigger strategy
+        logger.debug(f"No resolution found for {node_type}")
+        return None
+
+    def _create_resolved_package_from_id(
+        self,
+        pkg_id: str,
+        node_type: str,
+        match_type: str
+    ) -> ResolvedNodePackage:
+        """Create ResolvedNodePackage from package ID.
+
+        Args:
+            pkg_id: Package ID to create package for
+            node_type: Node type being resolved
+            match_type: Type of match (session_cache, custom_mapping, heuristic)
+
+        Returns:
+            ResolvedNodePackage instance
+        """
+        pkg_data = self.global_mappings.packages.get(pkg_id)
+
+        return ResolvedNodePackage(
+            package_id=pkg_id,
+            package_data=pkg_data,
+            node_type=node_type,
+            versions=[],
+            match_type=match_type,
+            match_confidence=1.0 if match_type != "heuristic" else 0.8
+        )
+
+    def _likely_provides_node(self, pkg_id: str, node_type: str) -> bool:
+        """Check if package likely provides this node based on naming heuristics.
+
+        Args:
+            pkg_id: Package ID to check
+            node_type: Node type to match
+
+        Returns:
+            True if package likely provides the node
+        """
+        # Strategy 1: Extract parenthetical hint
+        # e.g., "Mute / Bypass Repeater (rgthree)" -> "rgthree"
+        if "(" in node_type and ")" in node_type:
+            suffix = node_type.split("(")[-1].rstrip(")").strip().lower()
+            if suffix in pkg_id.lower():
+                return True
+
+        # Strategy 2: Check if node type contains package name fragments
+        # e.g., "DepthAnythingV2" matches "comfyui-depthanythingv2"
+        node_lower = node_type.lower()
+        pkg_lower = pkg_id.lower()
+        pkg_parts = re.split(r'[-_]', pkg_lower)
+        for part in pkg_parts:
+            if len(part) > 4 and part in node_lower:
+                return True
+
+        return False
+
+    def fuzzy_search_packages(self, node_type: str, limit: int = 10) -> List[ScoredPackageMatch]:
+        """Fuzzy search for packages that might provide this node.
+
+        Args:
+            node_type: Node type to search for
+            limit: Maximum number of results
+
+        Returns:
+            List of ScoredPackageMatch objects sorted by score (highest first)
+        """
+        from difflib import SequenceMatcher
+
+        scored = []
+        node_type_lower = node_type.lower()
+
+        # Extract keywords from node type
+        keywords = set(re.findall(r'\w+', node_type_lower))
+
+        for pkg_id, pkg_data in self.global_mappings.packages.items():
+            # Compute similarity scores
+            id_score = SequenceMatcher(None, node_type_lower, pkg_id.lower()).ratio()
+
+            name_score = 0
+            if pkg_data.display_name:
+                name_score = SequenceMatcher(
+                    None, node_type_lower, pkg_data.display_name.lower()
+                ).ratio()
+
+            # Keyword matching boost
+            pkg_keywords = set(re.findall(r'\w+', pkg_id.lower()))
+            if pkg_data.display_name:
+                pkg_keywords.update(re.findall(r'\w+', pkg_data.display_name.lower()))
+
+            keyword_overlap = len(keywords & pkg_keywords) / max(len(keywords), 1)
+
+            # Combined score (70% string similarity, 30% keyword overlap)
+            final_score = max(id_score, name_score) * 0.7 + keyword_overlap * 0.3
+
+            if final_score > 0.3:  # Minimum threshold
+                confidence = (
+                    "high" if final_score > 0.7
+                    else "medium" if final_score > 0.5
+                    else "low"
+                )
+                scored.append(ScoredPackageMatch(
+                    package_id=pkg_id,
+                    package_data=pkg_data,
+                    score=final_score,
+                    confidence=confidence
+                ))
+
+        # Sort by score descending
+        scored.sort(key=lambda x: x.score, reverse=True)
+        return scored[:limit]

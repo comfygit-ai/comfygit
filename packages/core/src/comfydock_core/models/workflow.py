@@ -10,7 +10,7 @@ from ..models.node_mapping import (
 )
 
 if TYPE_CHECKING:
-    from .shared import ModelWithLocation
+    from .shared import ModelWithLocation, NodeInfo
 
 
 @dataclass
@@ -19,6 +19,32 @@ class ScoredMatch:
     model: ModelWithLocation
     score: float
     confidence: str  # "high", "good", "possible"
+
+
+@dataclass
+class ScoredPackageMatch:
+    """Node package match with similarity score for fuzzy search."""
+    package_id: str
+    package_data: GlobalNodePackage
+    score: float
+    confidence: str  # "high", "medium", "low"
+
+
+@dataclass
+class NodeResolutionContext:
+    """Context for enhanced node resolution with state tracking."""
+
+    # Existing packages in environment
+    installed_packages: dict[str, NodeInfo] = field(default_factory=dict)
+
+    # Session tracking (for deduplication within single resolve call)
+    session_resolved: dict[str, str] = field(default_factory=dict)  # node_type -> package_id
+
+    # User-defined mappings (persisted in pyproject.toml)
+    custom_mappings: dict[str, str] = field(default_factory=dict)  # node_type -> package_id or "skip"
+
+    # Current workflow context
+    workflow_name: str = ""
 
 
 @dataclass
