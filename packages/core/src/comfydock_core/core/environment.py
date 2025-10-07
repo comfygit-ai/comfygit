@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from comfydock_core.models.protocols import (
         ModelResolutionStrategy,
         NodeResolutionStrategy,
+        RollbackStrategy,
     )
     from ..repositories.model_repository import ModelRepository
     from ..repositories.workspace_config_repository import WorkspaceConfigRepository
@@ -217,77 +218,102 @@ class Environment:
 
         return result
 
-    def rollback(self, target: str | None = None, force: bool = False) -> None:
+    def rollback(
+        self,
+        target: str | None = None,
+        force: bool = False,
+        strategy: RollbackStrategy | None = None
+    ) -> None:
         """Rollback environment to a previous state - checkpoint-style instant restoration.
 
         This is an atomic operation that:
-        1. Snapshots current state
-        2. Restores git files (pyproject.toml, uv.lock, workflows/)
-        3. Reconciles nodes with full context
-        4. Syncs Python packages
-        5. Restores workflows to ComfyUI
-        6. Auto-commits the rollback as a new version
+        1. Checks for uncommitted changes (git + workflows)
+        2. Snapshots current state
+        3. Restores git files (pyproject.toml, uv.lock, workflows/)
+        4. Reconciles nodes with full context
+        5. Syncs Python packages
+        6. Restores workflows to ComfyUI
+        7. Auto-commits the rollback as a new version
 
         Design: Checkpoint-style rollback (like video game saves)
         - Rollback = instant teleportation to old state
         - Auto-commits as new version (preserves history)
-        - Requires --force to discard uncommitted changes
+        - Requires strategy confirmation or --force to discard uncommitted changes
         - Full history preserved (v1→v2→v3→v4[rollback to v2]→v5)
 
         Args:
             target: Version identifier (e.g., "v1", "v2") or commit hash
                    If None, discards uncommitted changes
-            force: If True, discard uncommitted changes without error
+            force: If True, discard uncommitted changes without confirmation
+            strategy: Optional strategy for confirming destructive rollback
+                     If None and changes exist, raises error (safe default)
 
         Raises:
             ValueError: If target version doesn't exist
             OSError: If git commands fail
-            CDEnvironmentError: If uncommitted changes exist and force=False
+            CDEnvironmentError: If uncommitted changes exist and no strategy/force
         """
-        # 1. Snapshot old state BEFORE git changes it
+        from comfydock_core.models.exceptions import CDEnvironmentError
+
+        # 1. Check for ALL uncommitted changes (both git and workflows)
+        if not force:
+            has_git_changes = self.git_manager.has_uncommitted_changes()
+            status = self.status()
+            has_workflow_changes = status.workflow.sync_status.has_changes
+
+            if has_git_changes or has_workflow_changes:
+                # Changes detected - need confirmation or force
+                if strategy is None:
+                    # No strategy provided - strict mode, raise error
+                    raise CDEnvironmentError(
+                        "Cannot rollback with uncommitted changes.\n"
+                        "Uncommitted changes detected:\n"
+                        + (f"  • Git changes in .cec/\n" if has_git_changes else "")
+                        + (f"  • Workflow changes in ComfyUI\n" if has_workflow_changes else "")
+                    )
+
+                # Strategy provided - ask for confirmation
+                if not strategy.confirm_destructive_rollback(
+                    git_changes=has_git_changes,
+                    workflow_changes=has_workflow_changes
+                ):
+                    raise CDEnvironmentError("Rollback cancelled by user")
+
+        # 2. Snapshot old state BEFORE git changes it
         old_nodes = self.pyproject.nodes.get_existing()
 
-        # 2. Git operations (restore pyproject.toml, uv.lock, .cec/workflows/)
+        # 3. Git operations (restore pyproject.toml, uv.lock, .cec/workflows/)
         if target:
             # Get version name for commit message
             target_version = target
-            self.git_manager.rollback_to(target, safe=False, force=force)  # Clean state, no unstaged files
+            self.git_manager.rollback_to(target, safe=False, force=True)  # Always force after confirmation
         else:
             # Empty rollback = discard uncommitted changes (rollback to current)
-            if not force and self.git_manager.has_uncommitted_changes():
-                from comfydock_core.models.exceptions import CDEnvironmentError
-                raise CDEnvironmentError(
-                    "Cannot rollback with uncommitted changes.\n"
-                    "Options:\n"
-                    "  • Commit: comfydock commit -m '<message>'\n"
-                    "  • Force discard: comfydock rollback --force\n"
-                    "  • See changes: comfydock status"
-                )
             self.git_manager.discard_uncommitted()
             # Still need to restore workflows even for empty rollback
             self.workflow_manager.restore_all_from_cec()
             logger.info("Discarded uncommitted changes")
             return  # No further processing for empty rollback
 
-        # 3. Check if there were any changes BEFORE doing expensive operations
+        # 4. Check if there were any changes BEFORE doing expensive operations
         # This handles "rollback to current version" case
         had_changes = self.git_manager.has_uncommitted_changes()
 
-        # 4. Force reload pyproject after git changed it (reset lazy handlers)
+        # 5. Force reload pyproject after git changed it (reset lazy handlers)
         self.pyproject.reset_lazy_handlers()
         new_nodes = self.pyproject.nodes.get_existing()
 
-        # 5. Reconcile nodes with full context (no git history needed!)
+        # 6. Reconcile nodes with full context (no git history needed!)
         self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
 
-        # 6. Sync Python environment to match restored uv.lock
+        # 7. Sync Python environment to match restored uv.lock
         # Note: This may create/modify files (uv.lock updates, cache, etc.)
         self.uv_manager.sync_project(all_groups=True)
 
-        # 7. Restore workflows from .cec to ComfyUI (overwrite active with tracked)
+        # 8. Restore workflows from .cec to ComfyUI (overwrite active with tracked)
         self.workflow_manager.restore_all_from_cec()
 
-        # 8. Auto-commit only if there were changes initially (checkpoint-style)
+        # 9. Auto-commit only if there were changes initially (checkpoint-style)
         # We check had_changes (before uv sync) not current changes (after uv sync)
         # This prevents committing when rolling back to current version
         if had_changes:

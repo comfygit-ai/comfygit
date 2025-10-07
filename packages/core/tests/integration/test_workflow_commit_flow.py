@@ -828,7 +828,7 @@ class TestWorkflowRollback:
         version_count_before = len(versions_before)
 
         # Rollback to current version (v2) - should discard changes
-        test_env.rollback("v2")
+        test_env.rollback("v2", force=True)
 
         # Should NOT create new commit
         versions_after = test_env.get_versions()
@@ -906,7 +906,7 @@ class TestWorkflowRollback:
         version_count_before = len(versions_before)
 
         # Rollback with NO target - should discard changes
-        test_env.rollback(target=None)
+        test_env.rollback(target=None, force=True)
 
         # Should NOT create new commit
         versions_after = test_env.get_versions()

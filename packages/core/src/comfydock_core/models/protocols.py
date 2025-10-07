@@ -69,3 +69,23 @@ class ModelResolutionStrategy(Protocol):
             - None: Cancelled (Ctrl+C)
         """
         ...
+
+
+class RollbackStrategy(Protocol):
+    """Protocol for confirming destructive rollback operations."""
+
+    def confirm_destructive_rollback(
+        self,
+        git_changes: bool,
+        workflow_changes: bool,
+    ) -> bool:
+        """Confirm rollback that will discard uncommitted changes.
+
+        Args:
+            git_changes: Whether there are uncommitted git changes in .cec/
+            workflow_changes: Whether there are modified/new/deleted workflows
+
+        Returns:
+            True to proceed with rollback, False to cancel
+        """
+        ...

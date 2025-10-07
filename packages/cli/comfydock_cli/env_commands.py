@@ -291,15 +291,16 @@ class EnvironmentCommands:
         installed_packages = env.pyproject.nodes.get_existing()
         packages_needed = resolved_packages - set(installed_packages.keys())
 
-        # Count unresolved nodes
-        unresolved_count = len(wf_analysis.resolution.nodes_unresolved)
-
         # Build compact summary
         parts = []
         if packages_needed:
             parts.append(f"{len(packages_needed)} packages needed for installation")
-        if unresolved_count:
-            parts.append(f"{unresolved_count} nodes couldn't be resolved")
+        if wf_analysis.resolution.nodes_unresolved:
+            parts.append(f"{len(wf_analysis.resolution.nodes_unresolved)} nodes couldn't be resolved")
+        if wf_analysis.resolution.models_unresolved:
+            parts.append(f"{len(wf_analysis.resolution.models_unresolved)} models not found")
+        if wf_analysis.resolution.models_ambiguous:
+            parts.append(f"{len(wf_analysis.resolution.models_ambiguous)} ambiguous models")
 
         # Print compact issue line
         if parts:
@@ -716,36 +717,29 @@ class EnvironmentCommands:
     @with_env_logging("env rollback")
     def rollback(self, args, logger=None):
         """Rollback to previous state or discard uncommitted changes."""
+        from .strategies.rollback import InteractiveRollbackStrategy, AutoRollbackStrategy
+
         env = self._get_env(args)
 
         try:
-            # Discard uncommitted changes (with confirmation)
-            from comfydock_core.utils.git import get_uncommitted_changes
-            uncommitted_files = get_uncommitted_changes(env.cec_path)
-
-            if not args.target and not uncommitted_files:
-                print("✓ No uncommitted changes to rollback")
-                return
-
-            if uncommitted_files:
-                print(f"⚠️  This will discard all uncommitted changes in environment '{env.name}':")
-                for file in uncommitted_files[:5]:  # Show first 5 files
-                    print(f"    • {file}")
-                if len(uncommitted_files) > 5:
-                    print(f"    ... and {len(uncommitted_files) - 5} more files")
-
-                if not getattr(args, 'yes', False):
-                    response = input("\nAre you sure? This cannot be undone. (y/N): ")
-                    if response.lower() != 'y':
-                        print("Rollback cancelled")
-                        return
-
             if args.target:
                 print(f"⏮ Rolling back environment '{env.name}' to {args.target}")
             else:
                 print(f"⏮ Discarding uncommitted changes in environment '{env.name}'")
 
-            env.rollback(target=args.target, force=getattr(args, 'force', False))
+            # Choose strategy based on --yes flag
+            if getattr(args, 'yes', False) or getattr(args, 'force', False):
+                strategy = AutoRollbackStrategy()
+            else:
+                strategy = InteractiveRollbackStrategy()
+
+            # Execute rollback with strategy
+            env.rollback(
+                target=args.target,
+                force=getattr(args, 'force', False),
+                strategy=strategy
+            )
+
             print("✓ Rollback complete")
 
             if args.target:
