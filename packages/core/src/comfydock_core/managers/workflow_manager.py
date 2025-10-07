@@ -692,10 +692,13 @@ class WorkflowManager:
     ) -> None:
         """Update workflow JSON files with resolved and stripped model paths.
 
-        This strips the base directory prefix (e.g., 'checkpoints/') from model paths
-        because ComfyUI node loaders automatically prepend their base directories.
+        IMPORTANT: Only updates paths for BUILTIN ComfyUI nodes. Custom nodes are
+        skipped to preserve their original widget values and avoid breaking validation.
 
-        See: docs/context/comfyui-node-loader-base-directories.md for detailed explanation.
+        This strips the base directory prefix (e.g., 'checkpoints/') from model paths
+        because ComfyUI builtin node loaders automatically prepend their base directories.
+
+        See: docs/knowledge/comfyui-node-loader-base-directories.md for detailed explanation.
 
         Args:
             workflow_name: Name of workflow to update
@@ -712,6 +715,9 @@ class WorkflowManager:
 
         workflow = WorkflowRepository.load(workflow_path)
 
+        updated_count = 0
+        skipped_count = 0
+
         # Update each resolved model's path in the workflow
         for i, model in enumerate(resolution.models_resolved):
             if i < len(model_refs):
@@ -719,39 +725,56 @@ class WorkflowManager:
                 node_id = ref.node_id
                 widget_idx = ref.widget_index
 
+                # Skip custom nodes - they have undefined path behavior
+                if not self.model_resolver.model_config.is_model_loader_node(ref.node_type):
+                    logger.debug(
+                        f"Skipping path update for custom node '{ref.node_type}' "
+                        f"(node_id={node_id}, widget={widget_idx}). "
+                        f"Custom nodes manage their own model paths."
+                    )
+                    skipped_count += 1
+                    continue
+
                 # Update the node's widget value with resolved path
                 if node_id in workflow.nodes:
                     node = workflow.nodes[node_id]
                     if widget_idx < len(node.widgets_values):
                         old_path = node.widgets_values[widget_idx]
-                        # Strip base directory prefix for ComfyUI node loaders
+                        # Strip base directory prefix for ComfyUI BUILTIN node loaders
                         # e.g., "checkpoints/sd15/model.ckpt" → "sd15/model.ckpt"
                         display_path = self._strip_base_directory_for_node(ref.node_type, model.relative_path)
                         node.widgets_values[widget_idx] = display_path
                         logger.debug(f"Updated node {node_id} widget {widget_idx}: {old_path} → {display_path}")
+                        updated_count += 1
 
         # Save updated workflow back to ComfyUI
         WorkflowRepository.save(workflow, workflow_path)
-        logger.info(f"Updated workflow JSON with stripped paths: {workflow_path}")
+        logger.info(
+            f"Updated workflow JSON: {workflow_path} "
+            f"({updated_count} builtin nodes updated, {skipped_count} custom nodes preserved)"
+        )
 
         # Note: We intentionally do NOT update .cec here
         # The .cec copy represents "committed state" and should only be updated during commit
         # This ensures workflow status correctly shows as "new" or "modified" until committed
 
     def _strip_base_directory_for_node(self, node_type: str, relative_path: str) -> str:
-        """Strip base directory prefix from path for ComfyUI node loaders.
+        """Strip base directory prefix from path for BUILTIN ComfyUI node loaders.
 
-        ComfyUI node loaders automatically prepend their base directories. For example:
+        ⚠️ IMPORTANT: This function should ONLY be called for builtin node types that
+        are in the node_directory_mappings. Custom nodes should skip path updates entirely.
+
+        ComfyUI builtin node loaders automatically prepend their base directories:
         - CheckpointLoaderSimple prepends "checkpoints/"
         - LoraLoader prepends "loras/"
         - VAELoader prepends "vae/"
 
         The widget value should NOT include the base directory to avoid path doubling.
 
-        See: docs/context/comfyui-node-loader-base-directories.md for detailed explanation.
+        See: docs/knowledge/comfyui-node-loader-base-directories.md for detailed explanation.
 
         Args:
-            node_type: ComfyUI node type (e.g., "CheckpointLoaderSimple")
+            node_type: BUILTIN ComfyUI node type (e.g., "CheckpointLoaderSimple")
             relative_path: Full path relative to models/ (e.g., "checkpoints/SD1.5/model.safetensors")
 
         Returns:
@@ -772,14 +795,21 @@ class WorkflowManager:
         model_config = ModelConfig.load()
         base_dirs = model_config.get_directories_for_node(node_type)
 
+        # Warn if called for custom node (should be skipped in caller)
+        if not base_dirs:
+            logger.warning(
+                f"_strip_base_directory_for_node called for unknown/custom node type: {node_type}. "
+                f"Custom nodes should skip path updates entirely. Returning path unchanged."
+            )
+            return relative_path
+
         for base_dir in base_dirs:
             prefix = base_dir + "/"
             if relative_path.startswith(prefix):
                 # Strip the base directory but preserve subdirectories
                 return relative_path[len(prefix):]
 
-        # No matching base directory - return as-is
-        # This handles edge cases or unknown node types
+        # Path doesn't have expected prefix - return unchanged
         return relative_path
 
     def find_similar_models(

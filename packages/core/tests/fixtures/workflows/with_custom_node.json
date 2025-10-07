@@ -1,0 +1,38 @@
+{
+  "id": "custom-node-test",
+  "revision": 0,
+  "last_node_id": 86,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 86,
+      "type": "DownloadAndLoadDepthAnythingV2Model",
+      "pos": [100, 100],
+      "size": [300, 80],
+      "widgets_values": ["depth_anything_v2_vits_fp16.safetensors"],
+      "inputs": [
+        {
+          "name": "model",
+          "type": "COMBO",
+          "widget": {"name": "model"}
+        }
+      ],
+      "outputs": [
+        {
+          "name": "da_v2_model",
+          "type": "DAMODEL",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DownloadAndLoadDepthAnythingV2Model",
+        "cnr_id": "comfyui-depthanythingv2",
+        "ver": "d505cbca"
+      }
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "version": 0.4
+}
