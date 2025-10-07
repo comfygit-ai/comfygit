@@ -122,11 +122,44 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
             choice = input("Choice [1]: ").strip() or "1"
 
             if choice == "0":
-                return self._show_manual_options(node_type)
+                result = self._show_manual_options(node_type)
+                if result == "BACK":
+                    # Re-display main menu
+                    print(f"\nFound {len(results)} potential matches:\n")
+                    display_count = min(5, len(results))
+                    for i, match in enumerate(results[:display_count], 1):
+                        pkg_id = match.package_id
+                        desc = (match.package_data.description or "No description")[:60] if match.package_data else ""
+                        installed_marker = " (installed)" if pkg_id in self.installed_packages else ""
+                        print(f"  {i}. {pkg_id}{installed_marker}")
+                        if desc:
+                            print(f"     {desc}")
+                        print()
+                    if len(results) > 5:
+                        print(f"  6. [Browse all {len(results)} matches...]\n")
+                    print("  0. Other options (manual, skip)\n")
+                    continue
+                return result
 
             elif choice == "6" and len(results) > 5:
                 selected = self._browse_all_packages(results)
-                if selected:
+                if selected == "BACK":
+                    # Re-display the main menu
+                    print(f"\nFound {len(results)} potential matches:\n")
+                    display_count = min(5, len(results))
+                    for i, match in enumerate(results[:display_count], 1):
+                        pkg_id = match.package_id
+                        desc = (match.package_data.description or "No description")[:60] if match.package_data else ""
+                        installed_marker = " (installed)" if pkg_id in self.installed_packages else ""
+                        print(f"  {i}. {pkg_id}{installed_marker}")
+                        if desc:
+                            print(f"     {desc}")
+                        print()
+                    if len(results) > 5:
+                        print(f"  6. [Browse all {len(results)} matches...]\n")
+                    print("  0. Other options (manual, skip)\n")
+                    continue  # Re-show main menu
+                elif selected:
                     print(f"\n✓ Selected: {selected.package_id}")
                     return self._create_resolved_from_match(node_type, selected)
                 return None
@@ -174,22 +207,32 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
                 installed_marker = " (installed)" if pkg_id in self.installed_packages else ""
                 print(f"  {i}. {pkg_id}{installed_marker}")
 
-            print(f"\n[N]ext, [P]rev, or enter number (or [Q]uit):")
+            print(f"\n[N]ext, [P]rev, number, [B]ack, or [Q]uit:")
 
             choice = input("Choice: ").strip().lower()
 
-            if choice == 'n' and page < total_pages - 1:
-                page += 1
-            elif choice == 'p' and page > 0:
-                page -= 1
+            if choice == 'n':
+                if page < total_pages - 1:
+                    page += 1
+                else:
+                    print("  Already on last page")
+            elif choice == 'p':
+                if page > 0:
+                    page -= 1
+                else:
+                    print("  Already on first page")
+            elif choice == 'b':
+                return "BACK"
             elif choice == 'q':
                 return None
             elif choice.isdigit():
                 idx = int(choice) - 1
                 if 0 <= idx < len(results):
                     return results[idx]
+                else:
+                    print("  Invalid number")
             else:
-                print("  Invalid choice, try again")
+                print("  Invalid choice")
 
     def _show_manual_options(self, node_type: str):
         """Show manual entry or skip options."""
@@ -200,21 +243,30 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         choice = input("\nChoice [2]: ").strip() or "2"
 
         if choice == "1":
-            pkg_id = input("Enter package ID: ").strip()
-            if pkg_id:
-                print(f"  Note: Manual package '{pkg_id}' will need to be verified")
-                # Create minimal package without validation
-                from comfydock_core.models.workflow import ResolvedNodePackage
-                return ResolvedNodePackage(
-                    package_id=pkg_id,
-                    package_data=None,
-                    node_type=node_type,
-                    versions=[],
-                    match_type="manual",
-                    match_confidence=1.0
-                )
+            while True:
+                pkg_id = input("Enter package ID: ").strip()
+                if not pkg_id:
+                    print("  Empty input")
+                    return None
 
-        return None  # Skip
+                confirm = input(f"Confirm '{pkg_id}'? [y/N/b]: ").strip().lower() or 'n'
+                if confirm in ('y', 'yes'):
+                    print(f"  Note: Package '{pkg_id}' will be verified during install")
+                    from comfydock_core.models.workflow import ResolvedNodePackage
+                    return ResolvedNodePackage(
+                        package_id=pkg_id,
+                        package_data=None,
+                        node_type=node_type,
+                        versions=[],
+                        match_type="manual",
+                        match_confidence=1.0
+                    )
+                elif confirm in ('b', 'back'):
+                    return "BACK"  # Signal to go back to main menu
+                else:
+                    continue  # Retry package entry
+
+        return None  # Skip (choice 2 or anything else)
 
     def confirm_node_install(self, package: ResolvedNodePackage) -> bool:
         """Always confirm since user already made the choice."""
@@ -328,7 +380,21 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
             elif choice == "6" and len(results) > 5:
                 # Browse all results
                 selected = self._browse_all_models(results)
-                if selected:
+                if selected == "BACK":
+                    # Re-display the main menu
+                    print(f"\nFound {len(results)} potential matches:\n")
+                    display_count = min(5, len(results))
+                    for i, match in enumerate(results[:display_count], 1):
+                        model = match.model
+                        size_gb = model.file_size / (1024 * 1024 * 1024)
+                        confidence = match.confidence.capitalize()
+                        print(f"  {i}. {model.relative_path} ({size_gb:.2f} GB)")
+                        print(f"     Hash: {model.hash[:12]}... | {confidence} confidence match\n")
+                    if len(results) > 5:
+                        print(f"  6. [Browse all {len(results)} matches...]\n")
+                    print("  0. Other options (manual path, skip)\n")
+                    continue  # Re-show main menu
+                elif selected:
                     return ("select", selected.relative_path)
                 return ("skip", "")
 
@@ -359,21 +425,31 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
                 size_gb = model.file_size / (1024 * 1024 * 1024)
                 print(f"  {i}. {model.relative_path} ({size_gb:.2f} GB)")
 
-            print(f"\n[N]ext, [P]rev, or enter number (or [Q]uit):")
+            print(f"\n[N]ext, [P]rev, number, [B]ack, or [Q]uit:")
 
             choice = input("Choice: ").strip().lower()
 
-            if choice == 'n' and page < total_pages - 1:
-                page += 1
-            elif choice == 'p' and page > 0:
-                page -= 1
+            if choice == 'n':
+                if page < total_pages - 1:
+                    page += 1
+                else:
+                    print("  Already on last page")
+            elif choice == 'p':
+                if page > 0:
+                    page -= 1
+                else:
+                    print("  Already on first page")
+            elif choice == 'b':
+                return "BACK"
             elif choice == 'q':
                 return None
             elif choice.isdigit():
                 idx = int(choice) - 1
                 if 0 <= idx < len(results):
                     return results[idx].model
+                else:
+                    print("  Invalid number")
             else:
-                print("  Invalid choice, try again")
+                print("  Invalid choice")
 
 

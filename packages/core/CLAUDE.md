@@ -21,9 +21,10 @@
 
 ### Testing
 
-- Always put new unit tests under tests/unit directory!
+- New tests should go under tests/ under their respective category.
+- Read tests/README.md for info on how to create new integration tests.
 - Try to add new tests to existing test files rather than creating new files (unless necessary)
-- `uv run pytest tests/` - Run all tests
+- `uv run pytest tests/ -v` - Run all tests (full info)
 - `uv run pytest <filename>` - Run specific test file
 
 #### Testing comfydock cli

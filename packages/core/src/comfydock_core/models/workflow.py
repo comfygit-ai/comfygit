@@ -99,6 +99,14 @@ class Workflow:
     config: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
+    def __repr__(self) -> str:
+        """Concise representation showing node count and types."""
+        node_count = len(self.nodes)
+        type_summary = ", ".join(sorted(set(n.type for n in self.nodes.values()))[:5])
+        if len(self.node_types) > 5:
+            type_summary += f", ... ({len(self.node_types) - 5} more types)"
+        return f"Workflow(nodes={node_count}, types=[{type_summary}])"
+
     @cached_property
     def node_types(self) -> set[str]:
         return {node.type for node in self.nodes.values()}
@@ -228,6 +236,10 @@ class WorkflowNode:
 
     # Extended properties
     properties: dict[str, Any] = field(default_factory=dict)
+
+    def __repr__(self) -> str:
+        """Concise representation showing only id and type."""
+        return f"WorkflowNode(id={self.id!r}, type={self.type!r})"
 
     @property
     def class_type(self) -> str:
@@ -395,6 +407,11 @@ class ResolvedNodePackage:
     versions: list[str]
     match_type: str  # "exact", "type_only", "fuzzy"
     match_confidence: float = 1.0
+
+    def __repr__(self) -> str:
+        """Concise representation showing resolution details."""
+        version_str = f"{len(self.versions)} version(s)" if self.versions else "no versions"
+        return f"ResolvedNodePackage(package={self.package_id!r}, node={self.node_type!r}, match={self.match_type}, confidence={self.match_confidence:.2f}, {version_str})"
 
 @dataclass
 class NodeResolutionResult:

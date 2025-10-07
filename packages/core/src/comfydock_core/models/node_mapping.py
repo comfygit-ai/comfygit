@@ -87,6 +87,15 @@ class GlobalNodePackageVersion:
     supported_comfyui_version: str | None  # Supported ComfyUI version
     supported_os: list[str] | None  # Supported OS
 
+    def __repr__(self) -> str:
+        """Concise representation showing version and key flags."""
+        parts = [f"v{self.version}"]
+        if self.deprecated:
+            parts.append("deprecated")
+        if self.dependencies:
+            parts.append(f"{len(self.dependencies)} deps")
+        return f"GlobalNodePackageVersion({', '.join(parts)})"
+
 @dataclass
 class GlobalNodePackage:
     """Global standard package data."""
@@ -107,6 +116,24 @@ class GlobalNodePackage:
     versions: dict[str, GlobalNodePackageVersion] | None  # Versions
     synthetic: bool = False  # Whether this is a synthetic package from Manager
     source: str | None = None  # Source of the package (e.g. "manager")
+
+    def __repr__(self) -> str:
+        """Concise representation showing key package info and version list."""
+        version_str = ""
+        if self.versions:
+            version_list = list(self.versions.keys())
+            if len(version_list) <= 3:
+                version_str = f", versions=[{', '.join(version_list)}]"
+            else:
+                version_str = f", versions=[{', '.join(version_list[:3])}, ... +{len(version_list) - 3} more]"
+
+        repo_short = ""
+        if self.repository:
+            # Extract just the repo name from URL
+            repo_parts = self.repository.rstrip('/').split('/')
+            repo_short = f", repo={repo_parts[-1] if repo_parts else self.repository}"
+
+        return f"GlobalNodePackage(id={self.id!r}{repo_short}{version_str})"
 
 
 """ example full mappings file:

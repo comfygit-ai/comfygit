@@ -203,7 +203,7 @@ class EnvironmentCommands:
                 if name in all_workflows and all_workflows[name]['has_issues']:
                     wf = all_workflows[name]['analysis']
                     print(f"  ⚠️  {name} (synced)")
-                    self._print_workflow_issues(wf)
+                    self._print_workflow_issues(wf, env)
                 elif name in all_workflows:
                     print(f"  ✓ {name}")
 
@@ -211,7 +211,7 @@ class EnvironmentCommands:
                 if name in all_workflows and all_workflows[name]['has_issues']:
                     wf = all_workflows[name]['analysis']
                     print(f"  ⚠️  {name} (new)")
-                    self._print_workflow_issues(wf)
+                    self._print_workflow_issues(wf, env)
                 else:
                     print(f"  🆕 {name} (new, ready to commit)")
 
@@ -219,7 +219,7 @@ class EnvironmentCommands:
                 if name in all_workflows and all_workflows[name]['has_issues']:
                     wf = all_workflows[name]['analysis']
                     print(f"  ⚠️  {name} (modified)")
-                    self._print_workflow_issues(wf)
+                    self._print_workflow_issues(wf, env)
                 else:
                     print(f"  📝 {name} (modified)")
 
@@ -281,32 +281,29 @@ class EnvironmentCommands:
         # Suggested actions - smart and contextual
         self._show_smart_suggestions(status, dev_drift)
 
-    def _print_workflow_issues(self, wf_analysis: WorkflowAnalysisStatus):
-        """Print inline workflow issues."""
-        issues = []
+    def _print_workflow_issues(self, wf_analysis: WorkflowAnalysisStatus, env):
+        """Print compact workflow issues summary."""
+        # Get unique packages from resolved nodes that need installation
+        resolved_packages = {
+            pkg.package_id
+            for pkg in wf_analysis.resolution.nodes_resolved
+        }
+        installed_packages = env.pyproject.nodes.get_existing()
+        packages_needed = resolved_packages - set(installed_packages.keys())
 
-        # Models
-        if wf_analysis.resolution.models_unresolved:
-            for ref in wf_analysis.resolution.models_unresolved[:2]:
-                issues.append(f"Missing model: {ref.widget_value}")
-            if len(wf_analysis.resolution.models_unresolved) > 2:
-                issues.append(f"... and {len(wf_analysis.resolution.models_unresolved) - 2} more models")
+        # Count unresolved nodes
+        unresolved_count = len(wf_analysis.resolution.nodes_unresolved)
 
-        if wf_analysis.resolution.models_ambiguous:
-            for ref, candidates in wf_analysis.resolution.models_ambiguous[:2]:
-                issues.append(f"Ambiguous model: {ref.widget_value} ({len(candidates)} matches)")
-            if len(wf_analysis.resolution.models_ambiguous) > 2:
-                issues.append(f"... and {len(wf_analysis.resolution.models_ambiguous) - 2} more models")
+        # Build compact summary
+        parts = []
+        if packages_needed:
+            parts.append(f"{len(packages_needed)} packages needed for installation")
+        if unresolved_count:
+            parts.append(f"{unresolved_count} nodes couldn't be resolved")
 
-        # Nodes
-        if wf_analysis.resolution.nodes_unresolved:
-            for ref in wf_analysis.resolution.nodes_unresolved[:2]:
-                issues.append(f"Missing node: {ref.type}")
-            if len(wf_analysis.resolution.nodes_unresolved) > 2:
-                issues.append(f"... and {len(wf_analysis.resolution.nodes_unresolved) - 2} more nodes")
-
-        for issue in issues:
-            print(f"      {issue}")
+        # Print compact issue line
+        if parts:
+            print(f"      {', '.join(parts)}")
 
     def _show_smart_suggestions(self, status, dev_drift):
         """Show contextual suggestions based on current state."""
@@ -1015,23 +1012,41 @@ class EnvironmentCommands:
                 print("  • Install all: comfydock env repair")
                 print("  • Install individually: comfydock node add <node-id>")
 
-        # Display final results
-        if result.models_resolved or result.nodes_resolved:
-            print(f"\n✅ Resolution complete!")
+        # Display final results - check issues first
+        uninstalled = env.get_uninstalled_nodes()
+
+        if result.has_issues or uninstalled:
+            print("\n⚠️  Partial resolution - issues remain:")
+
+            # Show what was resolved
+            if result.models_resolved:
+                print(f"  ✓ Resolved {len(result.models_resolved)} models")
+            if result.nodes_resolved:
+                print(f"  ✓ Resolved {len(result.nodes_resolved)} nodes")
+
+            # Show what's still broken
+            if result.nodes_unresolved:
+                print(f"  ✗ {len(result.nodes_unresolved)} nodes couldn't be resolved")
+            if result.models_unresolved:
+                print(f"  ✗ {len(result.models_unresolved)} models not found")
+            if result.models_ambiguous:
+                print(f"  ✗ {len(result.models_ambiguous)} ambiguous models")
+            if uninstalled:
+                print(f"  ✗ {len(uninstalled)} packages need installation")
+
+            print("\n💡 Next:")
+            print(f"  Try again: comfydock workflow resolve {args.name}")
+            print("  Or install packages: comfydock env repair")
+            print("  Or commit with issues: comfydock commit -m \"...\" --allow-issues")
+
+        elif result.models_resolved or result.nodes_resolved:
+            print("\n✅ Resolution complete!")
             if result.models_resolved:
                 print(f"  • Resolved {len(result.models_resolved)} models")
             if result.nodes_resolved:
                 print(f"  • Resolved {len(result.nodes_resolved)} nodes")
             print("\n💡 Next:")
             print(f"  Commit workflows: comfydock commit -m \"Resolved {args.name}\"")
-        elif result.has_issues:
-            print("⚠ Remaining unresolved issues:")
-            if result.models_ambiguous:
-                print(f"  • {len(result.models_ambiguous)} ambiguous models")
-            if result.models_unresolved:
-                print(f"  • {len(result.models_unresolved)} unresolved models")
-            if result.nodes_unresolved:
-                print(f"  • {len(result.nodes_unresolved)} missing nodes")
         else:
             print("✓ No changes needed - all dependencies already resolved")
 

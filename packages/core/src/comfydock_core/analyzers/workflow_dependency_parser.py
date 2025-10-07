@@ -30,7 +30,7 @@ class WorkflowDependencyParser:
 
         # Load workflow
         self.workflow = WorkflowRepository.load(workflow_path)
-        logger.debug(f"Loaded workflow {self.workflow}")
+        logger.debug(f"Loaded workflow '{workflow_path.stem}' with {len(self.workflow.nodes)} nodes")
 
         # Store workflow name for pyproject lookup
         self.workflow_name = workflow_path.stem
