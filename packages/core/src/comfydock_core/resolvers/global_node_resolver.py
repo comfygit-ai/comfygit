@@ -374,16 +374,8 @@ class GlobalNodeResolver:
             context.session_resolved[node_type] = result[0].package_id
             return result
 
-        # Priority 5: Heuristic match against installed packages
-        for pkg_id in context.installed_packages.keys():
-            if self._likely_provides_node(pkg_id, node_type):
-                logger.debug(f"Heuristic match for {node_type}: {pkg_id}")
-                result = [self._create_resolved_package_from_id(pkg_id, node_type, "heuristic")]
-                context.session_resolved[node_type] = pkg_id
-                return result
-
-        # Priority 6: No match - return None to trigger strategy
-        logger.debug(f"No resolution found for {node_type}")
+        # Priority 5: No match - return None to trigger interactive strategy with unified search
+        logger.debug(f"No resolution found for {node_type} - will use interactive strategy")
         return None
 
     def _create_resolved_package_from_id(
@@ -397,7 +389,7 @@ class GlobalNodeResolver:
         Args:
             pkg_id: Package ID to create package for
             node_type: Node type being resolved
-            match_type: Type of match (session_cache, custom_mapping, heuristic)
+            match_type: Type of match (session_cache, custom_mapping, properties, etc.)
 
         Returns:
             ResolvedNodePackage instance
@@ -410,88 +402,185 @@ class GlobalNodeResolver:
             node_type=node_type,
             versions=[],
             match_type=match_type,
-            match_confidence=1.0 if match_type != "heuristic" else 0.8
+            match_confidence=1.0
         )
 
-    def _likely_provides_node(self, pkg_id: str, node_type: str) -> bool:
-        """Check if package likely provides this node based on naming heuristics.
+    def search_packages(
+        self,
+        node_type: str,
+        installed_packages: dict = None,
+        include_registry: bool = True,
+        limit: int = 10
+    ) -> List[ScoredPackageMatch]:
+        """Unified search with heuristic boosting.
 
-        Args:
-            pkg_id: Package ID to check
-            node_type: Node type to match
-
-        Returns:
-            True if package likely provides the node
-        """
-        # Strategy 1: Extract parenthetical hint
-        # e.g., "Mute / Bypass Repeater (rgthree)" -> "rgthree"
-        if "(" in node_type and ")" in node_type:
-            suffix = node_type.split("(")[-1].rstrip(")").strip().lower()
-            if suffix in pkg_id.lower():
-                return True
-
-        # Strategy 2: Check if node type contains package name fragments
-        # e.g., "DepthAnythingV2" matches "comfyui-depthanythingv2"
-        node_lower = node_type.lower()
-        pkg_lower = pkg_id.lower()
-        pkg_parts = re.split(r'[-_]', pkg_lower)
-        for part in pkg_parts:
-            if len(part) > 4 and part in node_lower:
-                return True
-
-        return False
-
-    def fuzzy_search_packages(self, node_type: str, limit: int = 10) -> List[ScoredPackageMatch]:
-        """Fuzzy search for packages that might provide this node.
+        Combines fuzzy matching with hint pattern detection to rank packages.
+        Installed packages receive priority boosting.
 
         Args:
             node_type: Node type to search for
-            limit: Maximum number of results
+            installed_packages: Already installed packages (prioritized)
+            include_registry: Also search full registry
+            limit: Maximum results
 
         Returns:
-            List of ScoredPackageMatch objects sorted by score (highest first)
+            Scored matches sorted by relevance (highest first)
         """
         from difflib import SequenceMatcher
 
+        if not node_type:
+            return []
+
         scored = []
         node_type_lower = node_type.lower()
+        installed_packages = installed_packages or {}
 
-        # Extract keywords from node type
-        keywords = set(re.findall(r'\w+', node_type_lower))
+        # Build candidate pool
+        candidates = {}
 
-        for pkg_id, pkg_data in self.global_mappings.packages.items():
-            # Compute similarity scores
-            id_score = SequenceMatcher(None, node_type_lower, pkg_id.lower()).ratio()
+        # Phase 1: Installed packages (always checked first)
+        for pkg_id in installed_packages.keys():
+            pkg_data = self.global_mappings.packages.get(pkg_id)
+            if pkg_data:
+                candidates[pkg_id] = (pkg_data, True)  # True = installed
 
-            name_score = 0
-            if pkg_data.display_name:
-                name_score = SequenceMatcher(
-                    None, node_type_lower, pkg_data.display_name.lower()
-                ).ratio()
+        # Phase 2: Registry packages
+        if include_registry:
+            for pkg_id, pkg_data in self.global_mappings.packages.items():
+                if pkg_id not in candidates:
+                    candidates[pkg_id] = (pkg_data, False)  # False = not installed
 
-            # Keyword matching boost
-            pkg_keywords = set(re.findall(r'\w+', pkg_id.lower()))
-            if pkg_data.display_name:
-                pkg_keywords.update(re.findall(r'\w+', pkg_data.display_name.lower()))
+        # Score each candidate
+        for pkg_id, (pkg_data, is_installed) in candidates.items():
+            score = self._calculate_match_score(
+                node_type=node_type,
+                node_type_lower=node_type_lower,
+                pkg_id=pkg_id,
+                pkg_data=pkg_data,
+                is_installed=is_installed
+            )
 
-            keyword_overlap = len(keywords & pkg_keywords) / max(len(keywords), 1)
-
-            # Combined score (70% string similarity, 30% keyword overlap)
-            final_score = max(id_score, name_score) * 0.7 + keyword_overlap * 0.3
-
-            if final_score > 0.3:  # Minimum threshold
-                confidence = (
-                    "high" if final_score > 0.7
-                    else "medium" if final_score > 0.5
-                    else "low"
-                )
+            if score > 0.3:  # Minimum threshold
+                confidence = self._score_to_confidence(score)
                 scored.append(ScoredPackageMatch(
                     package_id=pkg_id,
                     package_data=pkg_data,
-                    score=final_score,
+                    score=score,
                     confidence=confidence
                 ))
 
         # Sort by score descending
         scored.sort(key=lambda x: x.score, reverse=True)
         return scored[:limit]
+
+    def _calculate_match_score(
+        self,
+        node_type: str,
+        node_type_lower: str,
+        pkg_id: str,
+        pkg_data,
+        is_installed: bool
+    ) -> float:
+        """Calculate comprehensive match score with bonuses.
+
+        Scoring pipeline:
+        1. Base fuzzy score (SequenceMatcher)
+        2. Keyword overlap bonus
+        3. Hint pattern bonuses (heuristics!)
+        4. Installed package bonus
+        """
+        from difflib import SequenceMatcher
+
+        pkg_id_lower = pkg_id.lower()
+
+        # 1. Base fuzzy score
+        base_score = SequenceMatcher(None, node_type_lower, pkg_id_lower).ratio()
+
+        # Also check display name
+        if pkg_data.display_name:
+            name_score = SequenceMatcher(
+                None, node_type_lower, pkg_data.display_name.lower()
+            ).ratio()
+            base_score = max(base_score, name_score)
+
+        # 2. Keyword overlap bonus
+        node_keywords = set(re.findall(r'\w+', node_type_lower))
+        pkg_keywords = set(re.findall(r'\w+', pkg_id_lower))
+        if pkg_data.display_name:
+            pkg_keywords.update(re.findall(r'\w+', pkg_data.display_name.lower()))
+
+        keyword_overlap = len(node_keywords & pkg_keywords) / max(len(node_keywords), 1)
+        keyword_bonus = keyword_overlap * 0.20
+
+        # 3. Hint pattern bonuses (THE HEURISTICS!)
+        hint_bonus = self._detect_hint_patterns(node_type, node_type_lower, pkg_id_lower)
+
+        # 4. Installed package bonus
+        installed_bonus = 0.10 if is_installed else 0.0
+
+        # Combine and cap at 1.0
+        final_score = base_score + keyword_bonus + hint_bonus + installed_bonus
+        return min(1.0, final_score)
+
+    def _detect_hint_patterns(
+        self,
+        node_type: str,
+        node_type_lower: str,
+        pkg_id_lower: str
+    ) -> float:
+        """Detect hint patterns and return bonus score.
+
+        This is where heuristics live - as score boosters!
+        """
+        max_bonus = 0.0
+
+        # Pattern 1: Parenthetical hint
+        # "Node Name (package)" → "package"
+        if "(" in node_type and ")" in node_type:
+            hint = node_type.split("(")[-1].rstrip(")").strip().lower()
+            if len(hint) >= 3:  # Minimum length to avoid false positives
+                if hint == pkg_id_lower:
+                    max_bonus = max(max_bonus, 0.70)  # Exact match
+                elif hint in pkg_id_lower:
+                    max_bonus = max(max_bonus, 0.60)  # Substring match
+
+        # Pattern 2: Pipe separator
+        # "Node Name | PackageName" → "PackageName"
+        if "|" in node_type:
+            parts = node_type.split("|")
+            if len(parts) == 2:
+                hint = parts[1].strip().lower()
+                if hint in pkg_id_lower:
+                    max_bonus = max(max_bonus, 0.55)
+
+        # Pattern 3: Dash/Colon separator
+        # "Node Name - Package" or "Node: Package"
+        for sep in [" - ", ": "]:
+            if sep in node_type:
+                parts = node_type.split(sep)
+                if len(parts) >= 2:
+                    hint = parts[-1].strip().lower()
+                    if len(hint) >= 3 and hint in pkg_id_lower:
+                        max_bonus = max(max_bonus, 0.50)
+                        break
+
+        # Pattern 4: Fragment match (weakest)
+        # "DepthAnythingV2" → "depthanythingv2" in package
+        pkg_parts = re.split(r'[-_]', pkg_id_lower)
+        for part in pkg_parts:
+            if len(part) > 4 and part in node_type_lower:
+                max_bonus = max(max_bonus, 0.40)
+                break
+
+        return max_bonus
+
+    def _score_to_confidence(self, score: float) -> str:
+        """Convert numeric score to confidence label."""
+        if score >= 0.85:
+            return "high"
+        elif score >= 0.65:
+            return "good"
+        elif score >= 0.45:
+            return "possible"
+        else:
+            return "low"

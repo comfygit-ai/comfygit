@@ -534,7 +534,8 @@ class WorkflowManager:
                 selected = node_strategy.resolve_unknown_node(packages[0].node_type, packages)
                 if selected:
                     nodes_to_add.append(selected)
-                    logger.info(f"Resolved ambiguous node: {selected.package_data.id}")
+                    node_id = selected.package_data.id if selected.package_data else None
+                    logger.info(f"Resolved ambiguous node: {node_id}")
                 else:
                     remaining_nodes_ambiguous.append(packages)
         else:
@@ -546,7 +547,8 @@ class WorkflowManager:
                 selected = node_strategy.resolve_unknown_node(node.type, [])
                 if selected:
                     nodes_to_add.append(selected)
-                    logger.info(f"Resolved unresolved node: {selected.package_data.id}")
+                    node_id = selected.package_data.id if selected.package_data else None
+                    logger.info(f"Resolved unresolved node: {node_id}")
                 else:
                     remaining_nodes_unresolved.append(node)
         else:
@@ -694,6 +696,23 @@ class WorkflowManager:
 
         # Extract node pack IDs from resolved nodes
         node_pack_ids = set([pkg.package_id for pkg in resolution.nodes_resolved])
+
+        # Save custom mappings for user-resolved nodes
+        # Match types that indicate user intervention (should be persisted):
+        # - "user_confirmed": User selected from search results (InteractiveNodeStrategy)
+        # - "manual": User manually entered package ID (InteractiveNodeStrategy)
+        # - "heuristic": Auto-matched from installed packages (GlobalNodeResolver)
+        # This ensures the same node type auto-resolves in future workflows
+        user_intervention_types = ("user_confirmed", "manual", "heuristic")
+        saved_mappings = 0
+        for pkg in resolution.nodes_resolved:
+            if pkg.match_type in user_intervention_types:
+                self.pyproject.node_mappings.add_mapping(pkg.node_type, pkg.package_id)
+                saved_mappings += 1
+                logger.debug(f"Saved custom mapping: {pkg.node_type} -> {pkg.package_id}")
+
+        if saved_mappings > 0:
+            logger.info(f"Saved {saved_mappings} custom node mapping(s) for future resolution")
 
         # Step 1: Update pyproject.toml with model metadata and mappings
         if workflow_name:

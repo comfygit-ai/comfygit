@@ -6,45 +6,78 @@ from comfydock_core.models.protocols import (
     NodeResolutionStrategy,
     ModelResolutionStrategy,
 )
-from comfydock_core.models.workflow import ResolvedNodePackage, WorkflowNodeWidgetRef
+from comfydock_core.models.workflow import ResolvedNodePackage, ScoredMatch, WorkflowNodeWidgetRef
 from comfydock_core.models.shared import ModelWithLocation
 
 
 class InteractiveNodeStrategy(NodeResolutionStrategy):
-    """Interactive node resolution with user prompts."""
+    """Interactive node resolution with unified search."""
+
+    def __init__(self, search_fn=None, installed_packages=None):
+        """Initialize with search function and installed packages.
+
+        Args:
+            search_fn: GlobalNodeResolver.search_packages function
+            installed_packages: Dict of installed packages for prioritization
+        """
+        self.search_fn = search_fn
+        self.installed_packages = installed_packages or {}
 
     def resolve_unknown_node(
         self, node_type: str, possible: List[ResolvedNodePackage]
     ) -> ResolvedNodePackage | None:
         """Prompt user to resolve unknown node."""
-        if not possible:
-            print(f"⚠️  No registry matches found for '{node_type}'")
-            print("  Options:")
-            print("    s. Skip this node")
-            print("    m. Enter package ID manually")
 
-            choice = input("Choice [s]: ").strip().lower() or "s"
-            if choice == "m":
-                manual = input("Enter package ID: ").strip()
-                if manual:
-                    # TODO: Create a manual ResolvedNodePackage
-                    # Note: This would need actual package data in production
-                    print(f"  Note: Manual package '{manual}' will need to be verified")
-                return None
-            return None
-        
+        # Case 1: Ambiguous from global table (multiple matches)
+        if possible and len(possible) > 1:
+            return self._resolve_ambiguous(node_type, possible)
+
+        # Case 2: Single match from global table - confirm
         if len(possible) == 1:
-            return possible[0]
+            pkg = possible[0]
+            print(f"\n✓ Found in registry: {pkg.package_id}")
+            print(f"  For node: {node_type}")
 
+            choice = input("Accept? [Y/n]: ").strip().lower()
+            if choice in ('', 'y', 'yes'):
+                return pkg
+            # User rejected - fall through to search
+
+        # Case 3: No matches or user rejected single match - use unified search
+        print(f"\n⚠️  Node not found in registry: {node_type}")
+
+        if self.search_fn:
+            print("🔍 Searching packages...")
+
+            results = self.search_fn(
+                node_type=node_type,
+                installed_packages=self.installed_packages,
+                include_registry=True,
+                limit=10
+            )
+
+            if results:
+                return self._show_search_results(node_type, results)
+            else:
+                print("  No matches found")
+
+        # No matches - manual or skip
+        return self._show_manual_options(node_type)
+
+    def _resolve_ambiguous(
+        self,
+        node_type: str,
+        possible: List[ResolvedNodePackage]
+    ) -> ResolvedNodePackage | None:
+        """Handle ambiguous matches from global table."""
         print(f"\n🔍 Found {len(possible)} matches for '{node_type}':")
         for i, pkg in enumerate(possible[:5], 1):
-            display_name = pkg.package_data.display_name or pkg.package_id
-            desc = pkg.package_data.description or "No description"
-            confidence = pkg.match_confidence
-            print(f"  {i}. {display_name} (confidence: {confidence:.1f})")
+            display_name = pkg.package_data.display_name if pkg.package_data else pkg.package_id
+            desc = pkg.package_data.description if pkg.package_data else "No description"
+            print(f"  {i}. {display_name or pkg.package_id}")
             if desc and len(desc) > 60:
                 desc = desc[:57] + "..."
-            print(f"      {desc}")
+            print(f"     {desc}")
         print("  s. Skip this node")
 
         while True:
@@ -57,6 +90,132 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
                     return possible[idx]
             print("  Invalid choice, try again")
 
+    def _show_search_results(
+        self,
+        node_type: str,
+        results: List
+    ) -> ResolvedNodePackage | None:
+        """Show unified search results to user."""
+        from comfydock_core.models.workflow import ResolvedNodePackage
+
+        print(f"\nFound {len(results)} potential matches:\n")
+
+        display_count = min(5, len(results))
+        for i, match in enumerate(results[:display_count], 1):
+            pkg_id = match.package_id
+            desc = (match.package_data.description or "No description")[:60] if match.package_data else ""
+
+            # Show if installed (useful context)
+            installed_marker = " (installed)" if pkg_id in self.installed_packages else ""
+
+            print(f"  {i}. {pkg_id}{installed_marker}")
+            if desc:
+                print(f"     {desc}")
+            print()
+
+        if len(results) > 5:
+            print(f"  6. [Browse all {len(results)} matches...]\n")
+
+        print("  0. Other options (manual, skip)\n")
+
+        while True:
+            choice = input("Choice [1]: ").strip() or "1"
+
+            if choice == "0":
+                return self._show_manual_options(node_type)
+
+            elif choice == "6" and len(results) > 5:
+                selected = self._browse_all_packages(results)
+                if selected:
+                    print(f"\n✓ Selected: {selected.package_id}")
+                    return self._create_resolved_from_match(node_type, selected)
+                return None
+
+            elif choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < display_count:
+                    selected = results[idx]
+                    print(f"\n✓ Selected: {selected.package_id}")
+                    return self._create_resolved_from_match(node_type, selected)
+
+            print("  Invalid choice, try again")
+
+    def _create_resolved_from_match(
+        self,
+        node_type: str,
+        match
+    ) -> ResolvedNodePackage:
+        """Create ResolvedNodePackage from user-confirmed match."""
+        from comfydock_core.models.workflow import ResolvedNodePackage
+
+        return ResolvedNodePackage(
+            package_id=match.package_id,
+            package_data=match.package_data,
+            node_type=node_type,
+            versions=[],
+            match_type="user_confirmed",
+            match_confidence=match.score
+        )
+
+    def _browse_all_packages(self, results: List):
+        """Browse all matches with pagination."""
+        page = 0
+        page_size = 10
+        total_pages = (len(results) + page_size - 1) // page_size
+
+        while True:
+            start = page * page_size
+            end = min(start + page_size, len(results))
+
+            print(f"\nAll matches (Page {page + 1}/{total_pages}):\n")
+
+            for i, match in enumerate(results[start:end], start + 1):
+                pkg_id = match.package_id
+                installed_marker = " (installed)" if pkg_id in self.installed_packages else ""
+                print(f"  {i}. {pkg_id}{installed_marker}")
+
+            print(f"\n[N]ext, [P]rev, or enter number (or [Q]uit):")
+
+            choice = input("Choice: ").strip().lower()
+
+            if choice == 'n' and page < total_pages - 1:
+                page += 1
+            elif choice == 'p' and page > 0:
+                page -= 1
+            elif choice == 'q':
+                return None
+            elif choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(results):
+                    return results[idx]
+            else:
+                print("  Invalid choice, try again")
+
+    def _show_manual_options(self, node_type: str):
+        """Show manual entry or skip options."""
+        print("\nOptions:")
+        print("  1. Enter package ID manually")
+        print("  2. Skip (resolve later)")
+
+        choice = input("\nChoice [2]: ").strip() or "2"
+
+        if choice == "1":
+            pkg_id = input("Enter package ID: ").strip()
+            if pkg_id:
+                print(f"  Note: Manual package '{pkg_id}' will need to be verified")
+                # Create minimal package without validation
+                from comfydock_core.models.workflow import ResolvedNodePackage
+                return ResolvedNodePackage(
+                    package_id=pkg_id,
+                    package_data=None,
+                    node_type=node_type,
+                    versions=[],
+                    match_type="manual",
+                    match_confidence=1.0
+                )
+
+        return None  # Skip
+
     def confirm_node_install(self, package: ResolvedNodePackage) -> bool:
         """Always confirm since user already made the choice."""
         return True
@@ -65,9 +224,9 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
 class InteractiveModelStrategy(ModelResolutionStrategy):
     """Interactive model resolution with user prompts."""
 
-    def __init__(self, fuzzy_search_fn=None):
+    def __init__(self, search_fn=None):
         """Initialize with optional fuzzy search function."""
-        self.fuzzy_search_fn = fuzzy_search_fn
+        self.search_fn = search_fn
 
     def resolve_ambiguous_model(
         self, reference: WorkflowNodeWidgetRef, candidates: List[ModelWithLocation]
@@ -100,10 +259,10 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
         print(f"  in node #{reference.node_id} ({reference.node_type})")
 
         # If we have fuzzy search, try it first
-        if self.fuzzy_search_fn:
+        if self.search_fn:
             print("\n🔍 Searching model index...")
 
-            similar = self.fuzzy_search_fn(
+            similar: list[ScoredMatch] | None = self.search_fn(
                 missing_ref=reference.widget_value,
                 node_type=reference.node_type,
                 limit=10
@@ -132,7 +291,7 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
             else:
                 print("  Invalid choice, try again")
 
-    def _show_fuzzy_results(self, reference: WorkflowNodeWidgetRef, results: List) -> tuple[str, str] | None:
+    def _show_fuzzy_results(self, reference: WorkflowNodeWidgetRef, results: list[ScoredMatch]) -> tuple[str, str] | None:
         """Show fuzzy search results and get user selection."""
         print(f"\nFound {len(results)} potential matches:\n")
 
@@ -183,7 +342,7 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
 
             print("  Invalid choice, try again")
 
-    def _browse_all_models(self, results: List) -> Optional:
+    def _browse_all_models(self, results: list[ScoredMatch]) -> Optional[ModelWithLocation]:
         """Browse all fuzzy search results with pagination."""
         page = 0
         page_size = 10

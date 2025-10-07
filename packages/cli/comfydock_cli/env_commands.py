@@ -822,8 +822,13 @@ class EnvironmentCommands:
             if logger:
                 logger.debug("Using auto-resolution strategies")
         else:
-            node_strategy = InteractiveNodeStrategy()
-            model_strategy = InteractiveModelStrategy()
+            node_strategy = InteractiveNodeStrategy(
+                search_fn=env.workflow_manager.global_node_resolver.search_packages,
+                installed_packages=env.pyproject.nodes.get_existing()
+            )
+            model_strategy = InteractiveModelStrategy(
+                search_fn=env.workflow_manager.find_similar_models
+            )
             if logger:
                 logger.debug("Using interactive resolution strategies")
 
@@ -931,9 +936,12 @@ class EnvironmentCommands:
             node_strategy = AutoNodeStrategy()
             model_strategy = AutoModelStrategy()
         else:
-            node_strategy = InteractiveNodeStrategy()
+            node_strategy = InteractiveNodeStrategy(
+                search_fn=env.workflow_manager.global_node_resolver.search_packages,
+                installed_packages=env.pyproject.nodes.get_existing()
+            )
             model_strategy = InteractiveModelStrategy(
-                fuzzy_search_fn=env.workflow_manager.find_similar_models
+                search_fn=env.workflow_manager.find_similar_models
             )
 
         # Phase 1: Resolve dependencies (updates pyproject.toml)

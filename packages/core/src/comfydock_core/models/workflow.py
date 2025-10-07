@@ -390,7 +390,7 @@ class ResolvedNodePackage:
     """A potential match for an unknown node."""
 
     package_id: str
-    package_data: GlobalNodePackage
+    package_data: GlobalNodePackage | None
     node_type: str
     versions: list[str]
     match_type: str  # "exact", "type_only", "fuzzy"
@@ -474,7 +474,12 @@ class ResolutionResult:
     @property
     def has_issues(self) -> bool:
         """Check if there are any unresolved issues."""
-        return bool(self.models_unresolved or self.models_ambiguous)
+        return bool(
+            self.models_unresolved
+            or self.models_ambiguous
+            or self.nodes_unresolved
+            or self.nodes_ambiguous
+        )
 
     @property
     def summary(self) -> str:
