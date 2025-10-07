@@ -376,7 +376,7 @@ class InstalledPackageInfo:
         return bool(self.suggested_version and
                    self.installed_version != self.suggested_version)
 
-@dataclass
+@dataclass(frozen=True)
 class WorkflowNodeWidgetRef:
     """Reference to a widget value in a workflow node."""
     node_id: str
@@ -484,7 +484,7 @@ class ResolutionResult:
     nodes_resolved: List[ResolvedNodePackage] = field(default_factory=list)  # Nodes resolved/added
     nodes_unresolved: List[WorkflowNode] = field(default_factory=list)  # Nodes not found
     nodes_ambiguous: List[List[ResolvedNodePackage]] = field(default_factory=list)  # Nodes with multiple matches
-    models_resolved: List["ModelWithLocation"] = field(default_factory=list)  # Models cleanly resolved
+    models_resolved: Dict["WorkflowNodeWidgetRef", "ModelWithLocation"] = field(default_factory=dict)  # Maps refs to resolved models
     models_unresolved: List["WorkflowNodeWidgetRef"] = field(default_factory=list)  # Models not found
     models_ambiguous: List[tuple["WorkflowNodeWidgetRef", List["ModelWithLocation"]]] = field(default_factory=list)  # Models with multiple matches
 
@@ -515,12 +515,7 @@ class ResolutionResult:
         if self.models_ambiguous:
             parts.append(f"{len(self.models_ambiguous)} ambiguous models")
 
-        if not parts:
-            return "No resolutions"
-
-        result = f"Resolutions: {', '.join(parts)}"
-
-        return result
+        return f"Resolutions: {', '.join(parts)}" if parts else "No resolutions"
 
 
 @dataclass

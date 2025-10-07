@@ -193,45 +193,51 @@ class NodeManager:
             if has_conflict:
                 raise CDNodeConflictError(conflict_msg, context=conflict_context)
 
+        # Download to cache (but don't install yet)
+        cache_path = self.node_lookup.download_to_cache(node_info)
+        if not cache_path:
+            raise CDEnvironmentError(f"Failed to download node '{node_info.name}'")
+
+        # Scan requirements from cached directory
+        requirements = self.node_lookup.scan_requirements(cache_path)
+
+        # Create node package
+        node_package = NodePackage(node_info=node_info, requirements=requirements)
+
+        # TEST DEPENDENCIES FIRST (before any filesystem or pyproject changes)
+        if not no_test and node_package.requirements:
+            logger.info(f"Testing dependency resolution for '{node_package.name}' before installation")
+            test_result = self._test_requirements_in_isolation(node_package.requirements)
+            if not test_result.success:
+                raise CDNodeConflictError(
+                    f"Node '{node_package.name}' has dependency conflicts: "
+                    f"{self.resolution_tester.format_conflicts(test_result)}"
+                )
+
+        # Dependencies are compatible - safe to proceed with installation
         # Check for .disabled version of this node and clean it up
         disabled_path = self.custom_nodes_path / f"{node_info.name}.disabled"
         if disabled_path.exists():
             logger.info(f"Removing old disabled version of {node_info.name}")
             shutil.rmtree(disabled_path)
 
-        # Download to cache and copy to custom_nodes
-        cache_path = self.node_lookup.download_to_cache(node_info)
-        if not cache_path:
-            raise CDEnvironmentError(f"Failed to download node '{node_info.name}'")
-
         # Copy from cache to custom_nodes
         target_path = self.custom_nodes_path / node_info.name
         shutil.copytree(cache_path, target_path, dirs_exist_ok=True)
         logger.info(f"Installed node '{node_info.name}' to {target_path}")
 
-        # Scan requirements from installed directory
-        requirements = self.node_lookup.scan_requirements(target_path)
-
-        # Create node package
-        node_package = NodePackage(node_info=node_info, requirements=requirements)
-
         # Add to pyproject with all complexity handled internally
         try:
             self.add_node_package(node_package)
         except Exception as e:
+            # Rollback: Remove installed files on pyproject error
+            if target_path.exists():
+                shutil.rmtree(target_path)
+                logger.warning(f"Rolled back installation of '{node_info.name}' due to error")
             # Re-raise as CDEnvironmentError for consistency
             if "already exists" in str(e):
                 raise CDEnvironmentError(str(e))
             raise
-
-        # Test resolution if requested (extraction happens later after sync)
-        if not no_test:
-            resolution_result = self.resolution_tester.test_resolution(self.pyproject.path)
-            if not resolution_result.success:
-                raise CDNodeConflictError(
-                    f"Node '{node_package.name}' has dependency conflicts: "
-                    f"{self.resolution_tester.format_conflicts(resolution_result)}"
-                )
 
         # Sync Python environment to install new dependencies (matches remove behavior)
         self.uv.sync_project(all_groups=True)
@@ -964,3 +970,23 @@ class NodeManager:
                 drift[node_info.name] = (added, removed)
 
         return drift
+
+    def _test_requirements_in_isolation(self, requirements: list[str]):
+        """Test requirements in isolation without modifying pyproject.toml.
+
+        Uses the resolution tester to check if requirements are compatible
+        with the current environment without actually modifying it.
+
+        Args:
+            requirements: List of requirement strings to test
+
+        Returns:
+            ResolutionResult with success status and any conflicts
+        """
+        # Use test_with_additions which creates a temp copy of pyproject.toml
+        # and tests the dependencies in isolation
+        return self.resolution_tester.test_with_additions(
+            base_pyproject=self.pyproject.path,
+            additional_deps=requirements,
+            group_name=None  # Test as main dependencies for broadest compatibility check
+        )

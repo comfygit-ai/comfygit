@@ -145,9 +145,24 @@ class NodeLookupService:
             try:
                 if node_info.source == "registry":
                     if not node_info.download_url:
-                        logger.error(f"No download URL for registry node '{node_info.name}'")
-                        return None
-                    download_and_extract_archive(node_info.download_url, temp_path)
+                        # Fallback: Clone from repository if download URL missing
+                        if node_info.repository:
+                            logger.info(
+                                f"No CDN package for '{node_info.name}', "
+                                f"falling back to git clone from {node_info.repository}"
+                            )
+                            # Update source to git for this installation
+                            node_info.source = "git"
+                            ref = node_info.version if node_info.version else None
+                            git_clone(node_info.repository, temp_path, depth=1, ref=ref, timeout=30)
+                        else:
+                            logger.error(
+                                f"Cannot download '{node_info.name}': "
+                                f"no CDN package and no repository URL"
+                            )
+                            return None
+                    else:
+                        download_and_extract_archive(node_info.download_url, temp_path)
                 elif node_info.source == "git":
                     if not node_info.repository:
                         logger.error(f"No repository URL for git node '{node_info.name}'")

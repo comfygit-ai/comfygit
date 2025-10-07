@@ -644,7 +644,7 @@ class WorkflowHandler(BaseHandler):
     def apply_resolution(
         self,
         workflow_name: str,
-        models: list,
+        models: dict | list,
         model_refs: list,
         node_packs: set[str] | None = None,
     ) -> None:
@@ -652,8 +652,8 @@ class WorkflowHandler(BaseHandler):
 
         Args:
             workflow_name: Name of workflow
-            models: List of ModelWithLocation objects
-            model_refs: List of WorkflowNodeWidgetRef objects
+            models: Dict mapping WorkflowNodeWidgetRef to ModelWithLocation (new) or list (deprecated)
+            model_refs: List of WorkflowNodeWidgetRef objects (unused if models is dict)
             node_packs: List of node pack identifiers used by workflow
 
         Raises:
@@ -667,7 +667,8 @@ class WorkflowHandler(BaseHandler):
         fresh_mappings = self._build_model_mappings(models, model_refs) if models else {}
 
         # Add models via ModelHandler
-        for model in models:
+        model_list = list(models.values()) if isinstance(models, dict) else models
+        for model in model_list:
             self.manager.models.add_model(
                 model_hash=model.hash,
                 filename=model.filename,
@@ -683,30 +684,43 @@ class WorkflowHandler(BaseHandler):
         if node_packs:
             self.set_node_packs(workflow_name, node_packs)
 
-        logger.info(f"Applied {len(models)} model(s) and {len(node_packs or [])} node pack(s) for workflow '{workflow_name}'")
+        logger.info(f"Applied {len(model_list)} model(s) and {len(node_packs or [])} node pack(s) for workflow '{workflow_name}'")
 
-    def _build_model_mappings(self, models: list, model_refs: list) -> dict:
+    def _build_model_mappings(self, models: dict | list, model_refs: list) -> dict:
         """Build mapping structure from models and refs.
 
         Encapsulates the schema: hash -> {nodes: [{node_id, widget_idx}]}
 
         Args:
-            models: List of ModelWithLocation objects
-            model_refs: List of WorkflowNodeWidgetRef objects
+            models: Dict mapping WorkflowNodeWidgetRef to ModelWithLocation (new) or list (deprecated)
+            model_refs: List of WorkflowNodeWidgetRef objects (unused if models is dict)
 
         Returns:
             Mapping dict with hash as key
         """
         mappings = {}
-        for i, model in enumerate(models):
-            if i < len(model_refs):
-                ref = model_refs[i]
+
+        if isinstance(models, dict):
+            # New path: models is Dict[WorkflowNodeWidgetRef, ModelWithLocation]
+            for ref, model in models.items():
                 if model.hash not in mappings:
                     mappings[model.hash] = {"nodes": []}
                 mappings[model.hash]["nodes"].append({
                     "node_id": str(ref.node_id),
                     "widget_idx": int(ref.widget_index)
                 })
+        else:
+            # Old path: index-based matching (deprecated, kept for compatibility)
+            for i, model in enumerate(models):
+                if i < len(model_refs):
+                    ref = model_refs[i]
+                    if model.hash not in mappings:
+                        mappings[model.hash] = {"nodes": []}
+                    mappings[model.hash]["nodes"].append({
+                        "node_id": str(ref.node_id),
+                        "widget_idx": int(ref.widget_index)
+                    })
+
         return mappings
 
     def set_model_resolutions(self, name: str, model_resolutions: dict) -> None:

@@ -426,7 +426,7 @@ class WorkflowManager:
         nodes_resolved: list[ResolvedNodePackage] = []
         nodes_unresolved: list[WorkflowNode] = []
         nodes_ambiguous: list[list[ResolvedNodePackage]] = []
-        models_resolved: list[ModelWithLocation] = []
+        models_resolved: dict[WorkflowNodeWidgetRef, ModelWithLocation] = {}
         models_ambiguous: list[tuple[WorkflowNodeWidgetRef, list[ModelWithLocation]]] = []
         models_unresolved: list[WorkflowNodeWidgetRef] = []
 
@@ -474,7 +474,7 @@ class WorkflowManager:
                 logger.debug(f"Ambiguous node: {resolved_packages}")
                 nodes_ambiguous.append(resolved_packages)
 
-        # Resolve models
+        # Resolve models - build mapping from ref to resolved model
         for model_ref in analysis.found_models:
             result = self.model_resolver.resolve_model(model_ref, workflow_name)
 
@@ -483,7 +483,7 @@ class WorkflowManager:
                 models_unresolved.append(model_ref)
             elif result.resolved_model:
                 # Clean resolution (exact match or from pyproject cache)
-                models_resolved.append(result.resolved_model)
+                models_resolved[model_ref] = result.resolved_model
                 logger.debug(f"Resolved model: {result.resolved_model.filename}")
             elif result.candidates:
                 # Ambiguous - multiple matches
@@ -521,7 +521,7 @@ class WorkflowManager:
             Updated ResolutionResult with fixes applied
         """
         nodes_to_add = list(resolution.nodes_resolved)
-        models_to_add = list(resolution.models_resolved)
+        models_to_add = dict(resolution.models_resolved)
 
         remaining_nodes_ambiguous: list[list[ResolvedNodePackage]] = []
         remaining_nodes_unresolved: list[WorkflowNode] = []
@@ -559,7 +559,7 @@ class WorkflowManager:
             for model_ref, candidates in resolution.models_ambiguous:
                 resolved = model_strategy.resolve_ambiguous_model(model_ref, candidates)
                 if resolved:
-                    models_to_add.append(resolved)
+                    models_to_add[model_ref] = resolved
                     logger.info(f"Resolved ambiguous model: {resolved.filename}")
                 else:
                     remaining_models_ambiguous.append((model_ref, candidates))
@@ -587,7 +587,7 @@ class WorkflowManager:
                         model = self.model_repository.find_by_exact_path(path)
 
                         if model:
-                            models_to_add.append(model)
+                            models_to_add[model_ref] = model
                             logger.info(f"Resolved: {model_ref.widget_value} → {path}")
                         else:
                             logger.warning(f"Model not found in index: {path}")
@@ -677,18 +677,16 @@ class WorkflowManager:
 
         # Update workflow JSON with stripped paths for ComfyUI compatibility
         # Note: This is needed even with symlinks - see docs/context/comfyui-node-loader-base-directories.md
-        if workflow_name and model_refs and resolution.models_resolved:
+        if workflow_name and resolution.models_resolved:
             self.update_workflow_model_paths(
                 workflow_name=workflow_name,
-                resolution=resolution,
-                model_refs=model_refs
+                resolution=resolution
             )
 
     def update_workflow_model_paths(
         self,
         workflow_name: str,
-        resolution: ResolutionResult,
-        model_refs: list[WorkflowNodeWidgetRef]
+        resolution: ResolutionResult
     ) -> None:
         """Update workflow JSON files with resolved and stripped model paths.
 
@@ -702,8 +700,7 @@ class WorkflowManager:
 
         Args:
             workflow_name: Name of workflow to update
-            resolution: Resolution result with resolved models
-            model_refs: Original model references from workflow analysis
+            resolution: Resolution result with ref→model mapping
         """
         from ..repositories.workflow_repository import WorkflowRepository
 
@@ -718,34 +715,32 @@ class WorkflowManager:
         updated_count = 0
         skipped_count = 0
 
-        # Update each resolved model's path in the workflow
-        for i, model in enumerate(resolution.models_resolved):
-            if i < len(model_refs):
-                ref = model_refs[i]
-                node_id = ref.node_id
-                widget_idx = ref.widget_index
+        # Update each resolved model's path in the workflow using the ref→model mapping
+        for ref, model in resolution.models_resolved.items():
+            node_id = ref.node_id
+            widget_idx = ref.widget_index
 
-                # Skip custom nodes - they have undefined path behavior
-                if not self.model_resolver.model_config.is_model_loader_node(ref.node_type):
-                    logger.debug(
-                        f"Skipping path update for custom node '{ref.node_type}' "
-                        f"(node_id={node_id}, widget={widget_idx}). "
-                        f"Custom nodes manage their own model paths."
-                    )
-                    skipped_count += 1
-                    continue
+            # Skip custom nodes - they have undefined path behavior
+            if not self.model_resolver.model_config.is_model_loader_node(ref.node_type):
+                logger.debug(
+                    f"Skipping path update for custom node '{ref.node_type}' "
+                    f"(node_id={node_id}, widget={widget_idx}). "
+                    f"Custom nodes manage their own model paths."
+                )
+                skipped_count += 1
+                continue
 
-                # Update the node's widget value with resolved path
-                if node_id in workflow.nodes:
-                    node = workflow.nodes[node_id]
-                    if widget_idx < len(node.widgets_values):
-                        old_path = node.widgets_values[widget_idx]
-                        # Strip base directory prefix for ComfyUI BUILTIN node loaders
-                        # e.g., "checkpoints/sd15/model.ckpt" → "sd15/model.ckpt"
-                        display_path = self._strip_base_directory_for_node(ref.node_type, model.relative_path)
-                        node.widgets_values[widget_idx] = display_path
-                        logger.debug(f"Updated node {node_id} widget {widget_idx}: {old_path} → {display_path}")
-                        updated_count += 1
+            # Update the node's widget value with resolved path
+            if node_id in workflow.nodes:
+                node = workflow.nodes[node_id]
+                if widget_idx < len(node.widgets_values):
+                    old_path = node.widgets_values[widget_idx]
+                    # Strip base directory prefix for ComfyUI BUILTIN node loaders
+                    # e.g., "checkpoints/sd15/model.ckpt" → "sd15/model.ckpt"
+                    display_path = self._strip_base_directory_for_node(ref.node_type, model.relative_path)
+                    node.widgets_values[widget_idx] = display_path
+                    logger.debug(f"Updated node {node_id} widget {widget_idx}: {old_path} → {display_path}")
+                    updated_count += 1
 
         # Save updated workflow back to ComfyUI
         WorkflowRepository.save(workflow, workflow_path)

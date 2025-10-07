@@ -92,6 +92,7 @@ class NodeInfo:
         return cls(
             name=registry_node_info.name,
             registry_id=registry_node_info.id,
+            repository=registry_node_info.repository,  # Preserve repository for git fallback
             version=registry_node_info.latest_version.version if registry_node_info.latest_version else None,
             download_url=registry_node_info.latest_version.download_url if registry_node_info.latest_version else None,
             source="registry"

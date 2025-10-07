@@ -6,7 +6,8 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from comfydock_core.models.environment import UserAction
-from comfydock_core.models.exceptions import CDNodeConflictError, CDEnvironmentError
+from comfydock_core.models.exceptions import CDNodeConflictError, CDEnvironmentError, UVCommandError
+from comfydock_core.utils.uv_error_handler import handle_uv_error
 from .strategies.interactive import InteractiveNodeStrategy, InteractiveModelStrategy
 from .formatters.error_formatter import NodeErrorFormatter
 
@@ -322,11 +323,14 @@ class EnvironmentCommands:
         workflows_with_issues = [w.name for w in status.workflow.workflows_with_issues]
         if workflows_with_issues:
             if len(workflows_with_issues) == 1:
-                suggestions.append(f"Fix issues: comfydock workflow resolve {workflows_with_issues[0]}")
-                suggestions.append(f"Or commit anyway: comfydock commit -m \"...\" --allow-issues")
+                suggestions.append(f"Fix issues: comfydock workflow resolve \"{workflows_with_issues[0]}\"")
             else:
-                suggestions.append(f"Fix {len(workflows_with_issues)} workflows with issues")
-                suggestions.append("Or commit anyway: comfydock commit -m \"...\" --allow-issues")
+                suggestions.append(f"Fix workflows (pick one):")
+                for wf_name in workflows_with_issues[:3]:
+                    suggestions.append(f"  comfydock workflow resolve \"{wf_name}\"")
+                if len(workflows_with_issues) > 3:
+                    suggestions.append(f"  ... and {len(workflows_with_issues) - 3} more")
+            suggestions.append("Or commit anyway: comfydock commit -m \"...\" --allow-issues")
 
         # Ready to commit
         elif status.workflow.sync_status.has_changes and status.workflow.is_commit_safe:
@@ -801,7 +805,7 @@ class EnvironmentCommands:
                 print(f"  • {wf.name}: {wf.issue_summary}")
 
             print("\n💡 Options:")
-            print("  1. Resolve issues: comfydock workflow resolve <name>")
+            print("  1. Resolve issues: comfydock workflow resolve \"<name>\"")
             print("  2. Force commit: comfydock commit -m 'msg' --allow-issues")
             sys.exit(1)
 
@@ -983,9 +987,22 @@ class EnvironmentCommands:
                 for node_id in uninstalled_nodes:
                     try:
                         print(f"  • Installing {node_id}...", end=" ", flush=True)
-                        env.add_node(node_id, no_test=True)  # Skip test since already resolved
-                        print("✓")
+                        node_info = env.add_node(node_id, no_test=True)  # Skip test since already resolved
+
+                        # Show source indication if installed from github (not registry CDN)
+                        if node_info.source == "git" and node_info.registry_id:
+                            print("✓ (from GitHub)")
+                        else:
+                            print("✓")
                         installed_count += 1
+                    except UVCommandError as e:
+                        # Handle UV-specific errors with enhanced logging and user messaging
+                        if logger:
+                            user_msg, _ = handle_uv_error(e, node_id, logger)
+                            print(f"✗ ({user_msg})")
+                        else:
+                            print(f"✗ (UV dependency resolution failed)")
+                        failed_nodes.append(node_id)
                     except Exception as e:
                         print(f"✗ ({e})")
                         failed_nodes.append(node_id)
@@ -999,6 +1016,8 @@ class EnvironmentCommands:
                     print(f"\n⚠️  Failed to install {len(failed_nodes)} nodes:")
                     for node_id in failed_nodes:
                         print(f"  • {node_id}")
+                    print("\n💡 For detailed error information:")
+                    print(f"   {self.workspace.path}/logs/{env.name}.log")
                     print("\nYou can try installing them manually:")
                     print(f"  comfydock node add <node-id>")
             else:
@@ -1029,7 +1048,7 @@ class EnvironmentCommands:
                 print(f"  ✗ {len(uninstalled)} packages need installation")
 
             print("\n💡 Next:")
-            print(f"  Try again: comfydock workflow resolve {args.name}")
+            print(f"  Try again: comfydock workflow resolve \"{args.name}\"")
             print("  Or install packages: comfydock env repair")
             print("  Or commit with issues: comfydock commit -m \"...\" --allow-issues")
 
