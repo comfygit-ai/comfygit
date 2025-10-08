@@ -11,9 +11,9 @@ from pathlib import Path
 
 from ..integrations.uv_command import UVCommand
 from ..logging.logging_config import get_logger
+from ..managers.pyproject_manager import PyprojectManager
 from ..models.exceptions import CDPyprojectError
 from ..utils.conflict_parser import parse_uv_conflicts, parse_uv_resolution
-from ..managers.pyproject_manager import PyprojectManager
 
 logger = get_logger(__name__)
 
@@ -60,9 +60,7 @@ class ResolutionTester:
             result.warnings.append(f"pyproject.toml not found: {pyproject_path}")
             return result
 
-        self.logger.debug(
-            f"Testing resolution with original pyproject.toml: {pyproject_path.read_text()}"
-        )
+        self.logger.debug(f"Testing resolution for pyproject at {pyproject_path}")
 
         try:
             # Create a temporary directory for resolution testing
@@ -79,11 +77,6 @@ class ResolutionTester:
                     cache_dir=self.uv_cache_path,
                     python_install_dir=self.uv_python_path,
                     cwd=temp_path,
-                )
-
-                # Log pyproject.toml:
-                self.logger.debug(
-                    f"Testing resolution with pyproject.toml: {temp_pyproject.read_text()}"
                 )
 
                 # Try to resolve dependencies
@@ -137,6 +130,12 @@ class ResolutionTester:
         if not base_pyproject.exists():
             result.warnings.append(f"Base pyproject.toml not found: {base_pyproject}")
             return result
+
+        # Log what we're testing
+        deps_preview = ', '.join(additional_deps[:3])
+        if len(additional_deps) > 3:
+            deps_preview += f'... (+{len(additional_deps) - 3} more)'
+        self.logger.debug(f"Testing additions: {deps_preview} to group '{group_name or 'main'}'")
 
         try:
             # Create temporary directory for testing

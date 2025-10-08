@@ -1,13 +1,12 @@
 # managers/node_manager.py
 from __future__ import annotations
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..logging.logging_config import get_logger
 from ..managers.pyproject_manager import PyprojectManager
-from ..validation.resolution_tester import ResolutionTester
 from ..managers.uv_project_manager import UVProjectManager
 from ..models.exceptions import (
     CDEnvironmentError,
@@ -16,12 +15,12 @@ from ..models.exceptions import (
     NodeAction,
     NodeConflictContext,
 )
-from ..models.shared import NodePackage, UpdateResult, NodeRemovalResult
+from ..models.shared import NodeInfo, NodePackage, NodeRemovalResult, UpdateResult
 from ..resolvers.global_node_resolver import GlobalNodeResolver
 from ..services.node_lookup_service import NodeLookupService
-from ..models.shared import NodeInfo
-from ..strategies.confirmation import ConfirmationStrategy, AutoConfirmStrategy
+from ..strategies.confirmation import AutoConfirmStrategy, ConfirmationStrategy
 from ..utils.dependency_parser import parse_dependency_string
+from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
     from ..services.registry_data_manager import RegistryDataManager
@@ -264,9 +263,12 @@ class NodeManager:
 
             # 4. Re-raise with appropriate error type
             from ..models.exceptions import UVCommandError
-            from ..utils.uv_error_handler import format_uv_error_for_user
+            from ..utils.uv_error_handler import format_uv_error_for_user, log_uv_error
 
             if isinstance(e, UVCommandError):
+                # Log full error details for debugging
+                log_uv_error(logger, e, node_package.name)
+                # Format concise message for user
                 user_msg = format_uv_error_for_user(e)
                 raise CDNodeConflictError(
                     f"Node '{node_package.name}' dependency sync failed: {user_msg}"
@@ -702,7 +704,7 @@ class NodeManager:
             node_name = node_info.name
             node_path = self.custom_nodes_path / node_name
 
-            # Download to cache and copy to filesystem 
+            # Download to cache and copy to filesystem
             logger.info(f"Downloading node '{node_name}' to {node_path}")
             cache_path = self.node_lookup.download_to_cache(node_info)
             if not cache_path:

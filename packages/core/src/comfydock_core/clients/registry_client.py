@@ -65,9 +65,8 @@ class ComfyRegistryClient:
         data = self._make_registry_request(url)
 
         if data:
-            logger.info(
-                f"Registry client: Found node '{node_id}' in registry: {str(data)}"
-            )
+            version = data.get('latest_version', {}).get('version', 'unknown')
+            logger.debug(f"Found node '{node_id}' in registry (version: {version})")
             return RegistryNodeInfo.from_api_data(data)
 
         return None
@@ -94,9 +93,8 @@ class ComfyRegistryClient:
         data = self._make_registry_request(url)
 
         if data:
-            logger.info(
-                f"Registry client: Found install info for node '{node_id}' in registry: {str(data)}"
-            )
+            version = data.get('version', 'unknown')
+            logger.debug(f"Found install info for node '{node_id}' (version: {version})")
             return RegistryNodeVersion.from_api_data(data)
 
         return None

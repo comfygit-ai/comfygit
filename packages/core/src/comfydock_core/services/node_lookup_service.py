@@ -5,10 +5,10 @@ from pathlib import Path
 from comfydock_core.models.exceptions import CDNodeNotFoundError, CDRegistryError
 from comfydock_core.models.shared import NodeInfo
 
-from ..caching import APICacheManager, CustomNodeCacheManager
-from ..logging.logging_config import get_logger
 from ..analyzers.custom_node_scanner import CustomNodeScanner
+from ..caching import APICacheManager, CustomNodeCacheManager
 from ..clients import ComfyRegistryClient, GitHubClient
+from ..logging.logging_config import get_logger
 
 logger = get_logger(__name__)
 
@@ -66,10 +66,9 @@ class NodeLookupService:
         try:
             registry_node = self.registry_client.get_node(identifier)
             if registry_node:
-                logger.info(f"Found node '{registry_node.name}' in registry: {str(registry_node)}")
                 if requested_version:
                     version = requested_version
-                    logger.info(f"Using requested version: {version}")
+                    logger.debug(f"Using requested version: {version}")
                 else:
                     version = registry_node.latest_version.version if registry_node.latest_version else None
                 node_version = self.registry_client.install_node(registry_node.id, version)
@@ -129,9 +128,10 @@ class NodeLookupService:
         Returns:
             Path to cached node directory, or None if download failed
         """
+        import tempfile
+
         from ..utils.download import download_and_extract_archive
         from ..utils.git import git_clone
-        import tempfile
 
         # Check if already cached
         if cache_path := self.custom_node_cache.get_cached_path(node_info):
