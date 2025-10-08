@@ -214,33 +214,71 @@ class NodeManager:
                     f"{self.resolution_tester.format_conflicts(test_result)}"
                 )
 
-        # Dependencies are compatible - safe to proceed with installation
-        # Check for .disabled version of this node and clean it up
-        disabled_path = self.custom_nodes_path / f"{node_info.name}.disabled"
-        if disabled_path.exists():
-            logger.info(f"Removing old disabled version of {node_info.name}")
-            shutil.rmtree(disabled_path)
-
-        # Copy from cache to custom_nodes
+        # === BEGIN TRANSACTIONAL SECTION ===
+        # Snapshot state before any modifications for rollback
+        pyproject_snapshot = self.pyproject.snapshot()
         target_path = self.custom_nodes_path / node_info.name
-        shutil.copytree(cache_path, target_path, dirs_exist_ok=True)
-        logger.info(f"Installed node '{node_info.name}' to {target_path}")
+        disabled_path = self.custom_nodes_path / f"{node_info.name}.disabled"
+        disabled_existed = disabled_path.exists()
 
-        # Add to pyproject with all complexity handled internally
         try:
-            self.add_node_package(node_package)
-        except Exception as e:
-            # Rollback: Remove installed files on pyproject error
-            if target_path.exists():
-                shutil.rmtree(target_path)
-                logger.warning(f"Rolled back installation of '{node_info.name}' due to error")
-            # Re-raise as CDEnvironmentError for consistency
-            if "already exists" in str(e):
-                raise CDEnvironmentError(str(e))
-            raise
+            # STEP 1: Filesystem changes
+            if disabled_existed:
+                logger.info(f"Removing old disabled version of {node_info.name}")
+                shutil.rmtree(disabled_path)
 
-        # Sync Python environment to install new dependencies (matches remove behavior)
-        self.uv.sync_project(all_groups=True)
+            shutil.copytree(cache_path, target_path, dirs_exist_ok=True)
+            logger.info(f"Installed node '{node_info.name}' to {target_path}")
+
+            # STEP 2: Pyproject changes
+            self.add_node_package(node_package)
+
+            # STEP 3: Environment sync
+            self.uv.sync_project(all_groups=True)
+
+        except Exception as e:
+            # === ROLLBACK ===
+            logger.warning(f"Installation failed for '{node_info.name}', rolling back...")
+
+            # 1. Restore pyproject.toml
+            try:
+                self.pyproject.restore(pyproject_snapshot)
+                logger.debug("Restored pyproject.toml to pre-installation state")
+            except Exception as restore_err:
+                logger.error(f"Failed to restore pyproject.toml: {restore_err}")
+
+            # 2. Clean up filesystem
+            if target_path.exists():
+                try:
+                    shutil.rmtree(target_path)
+                    logger.debug(f"Removed {target_path}")
+                except Exception as fs_err:
+                    logger.warning(f"Could not remove {target_path} during rollback: {fs_err}")
+
+            # 3. Note about disabled directory (cannot restore - already deleted)
+            if disabled_existed:
+                logger.warning(
+                    f"Cannot restore {disabled_path.name} "
+                    f"(was deleted before rollback)"
+                )
+
+            # 4. Re-raise with appropriate error type
+            from ..models.exceptions import UVCommandError
+            from ..utils.uv_error_handler import format_uv_error_for_user
+
+            if isinstance(e, UVCommandError):
+                user_msg = format_uv_error_for_user(e)
+                raise CDNodeConflictError(
+                    f"Node '{node_package.name}' dependency sync failed: {user_msg}"
+                ) from e
+            elif "already exists" in str(e):
+                raise CDEnvironmentError(str(e)) from e
+            else:
+                raise CDEnvironmentError(
+                    f"Failed to add node '{node_package.name}': {e}"
+                ) from e
+
+        # === END TRANSACTIONAL SECTION ===
 
         logger.info(f"Successfully added node '{node_package.name}'")
         return node_package.node_info

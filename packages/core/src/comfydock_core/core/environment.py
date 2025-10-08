@@ -289,11 +289,8 @@ class Environment:
             self.git_manager.rollback_to(target, safe=False, force=True)  # Always force after confirmation
         else:
             # Empty rollback = discard uncommitted changes (rollback to current)
+            target_version = "HEAD"  # For commit message consistency
             self.git_manager.discard_uncommitted()
-            # Still need to restore workflows even for empty rollback
-            self.workflow_manager.restore_all_from_cec()
-            logger.info("Discarded uncommitted changes")
-            return  # No further processing for empty rollback
 
         # 4. Check if there were any changes BEFORE doing expensive operations
         # This handles "rollback to current version" case

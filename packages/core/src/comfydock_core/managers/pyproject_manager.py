@@ -182,7 +182,7 @@ class PyprojectManager:
 
     def set_manifest_state(self, state: str) -> None:
         """Set the manifest state.
-        
+
         Args:
             state: 'local' or 'exportable'
         """
@@ -198,6 +198,26 @@ class PyprojectManager:
         config['tool']['comfydock']['manifest_state'] = state
         self.save(config)
         logger.info(f"Set manifest state to: {state}")
+
+    def snapshot(self) -> dict:
+        """Create a deep copy of current pyproject.toml state for rollback.
+
+        Returns:
+            Deep copy of the entire config dictionary
+        """
+        import copy
+        return copy.deepcopy(self.load())
+
+    def restore(self, snapshot: dict) -> None:
+        """Restore pyproject.toml from a snapshot.
+
+        Args:
+            snapshot: Previously captured state from snapshot()
+        """
+        self.save(snapshot)
+        # Reset lazy handlers so they reload from restored state
+        self.reset_lazy_handlers()
+        logger.debug("Restored pyproject.toml from snapshot")
 
 
 class BaseHandler:

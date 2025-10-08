@@ -987,7 +987,7 @@ class EnvironmentCommands:
                 for node_id in uninstalled_nodes:
                     try:
                         print(f"  • Installing {node_id}...", end=" ", flush=True)
-                        node_info = env.add_node(node_id, no_test=True)  # Skip test since already resolved
+                        node_info = env.add_node(node_id) # Should test every node transactionally and remove on failures
 
                         # Show source indication if installed from github (not registry CDN)
                         if node_info.source == "git" and node_info.registry_id:
