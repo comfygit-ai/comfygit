@@ -85,9 +85,16 @@ class ResolutionTester:
                     resolution_output = resolution_result.stdout
                 except Exception as e:
                     self.logger.error(f"Error during resolution test: {e}")
-                    # result.warnings.append(f"Could not test resolution: {str(e)}")
+
+                    # Try to extract structured conflicts
                     conflicts = parse_uv_conflicts(str(e))
-                    result.conflicts.extend(conflicts)
+                    if conflicts:
+                        result.conflicts.extend(conflicts)
+                    else:
+                        # Fallback: Add raw error as warning if parsing failed
+                        # This ensures users ALWAYS see SOME error message
+                        result.warnings.append(f"Resolution failed: {str(e)[:500]}")
+
                     return result
 
                 logger.debug(f"Resolution output: {resolution_output}")

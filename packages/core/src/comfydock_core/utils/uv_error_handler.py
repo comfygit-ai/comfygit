@@ -71,7 +71,7 @@ def log_uv_error(logger: logging.Logger, error: UVCommandError, context: str) ->
         logger.error(f"  STDOUT:\n{error.stdout}")
 
 
-def format_uv_error_for_user(error: UVCommandError, max_hint_length: int = 100) -> str:
+def format_uv_error_for_user(error: UVCommandError, max_hint_length: int = 300) -> str:
     """Format UV error for user-facing display.
 
     Provides a concise, helpful error message with:
