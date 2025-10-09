@@ -147,6 +147,27 @@ class ModelResolver:
             # Load the pyproject config
             config = self.pyproject.load()
 
+            # Get models optional section FIRST (before checking workflow mappings)
+            # This is critical to prevent optional models from being treated as required
+            models_optional = config.get('tool', {}).get('comfydock', {}).get('models', {}).get('optional', {})
+            workflow_ref = ref.widget_value
+
+            # PRIORITY 1: Check if this is a Type 1 optional model (filename key, unresolved)
+            # This must be checked BEFORE workflow mappings to prevent duplication in required section
+            if workflow_ref in models_optional:
+                optional_entry = models_optional[workflow_ref]
+                if optional_entry.get('unresolved'):
+                    # Type 1 optional: already marked as optional, return empty result (skip)
+                    logger.debug(f"Model {workflow_ref} is marked as optional (unresolved), skipping resolution")
+                    return ModelResolutionResult(
+                        reference=ref,
+                        candidates=[],
+                        resolution_type="optional_unresolved",
+                        resolved_model=None,
+                        resolution_confidence=1.0,
+                    )
+
+            # PRIORITY 2: Check workflow mappings for hash-based resolution
             # Navigate to tool.comfydock.workflows section
             workflows = config.get('tool', {}).get('comfydock', {}).get('workflows', {})
 
@@ -161,17 +182,44 @@ class ModelResolver:
                 return None
 
             # Check if this widget_value (workflow reference) has a saved mapping
-            workflow_ref = ref.widget_value
             if workflow_ref not in models_section:
                 return None
 
             # Get the mapping for this workflow reference
             mapping = models_section[workflow_ref]
-            model_hash = mapping.get('hash')
+
+            # PRIORITY 3: Check hash-based resolution (Type 2 optional or required)
+            model_hash = mapping.get('hash') if isinstance(mapping, dict) else None
             if not model_hash:
                 return None
 
-            # Verify the model still exists in the index
+            # Check if hash-based model is in optional section (Type 2)
+            if model_hash in models_optional:
+                # Type 2 optional: has full metadata but marked as optional
+                logger.debug(f"Model {workflow_ref} (hash {model_hash[:8]}...) is marked as optional, checking index")
+                # Still try to resolve from index (Type 2 has full metadata)
+                models = self.model_repository.find_model_by_hash(model_hash)
+                if models and len(models) > 0:
+                    model = models[0]
+                    return ModelResolutionResult(
+                        reference=ref,
+                        candidates=models,
+                        resolution_type="optional_resolved",
+                        resolved_model=model,
+                        resolution_confidence=1.0,
+                    )
+                else:
+                    # Optional model not in index, but that's OK (mark as resolved anyway)
+                    logger.debug(f"Optional model {workflow_ref} not in index, but already marked optional (skip)")
+                    return ModelResolutionResult(
+                        reference=ref,
+                        candidates=[],
+                        resolution_type="optional_missing",
+                        resolved_model=None,
+                        resolution_confidence=1.0,
+                    )
+
+            # Regular required model: Verify it exists in the index
             models = self.model_repository.find_model_by_hash(model_hash)
             if models and len(models) > 0:
                 # Valid existing resolution - use it

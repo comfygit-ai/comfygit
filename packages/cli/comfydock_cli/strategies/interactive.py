@@ -21,17 +21,18 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         """
         self.search_fn = search_fn
         self.installed_packages = installed_packages or {}
+        self._last_choice = None  # Track last user choice for optional detection
 
     def _unified_choice_prompt(self, prompt_text: str, num_options: int, has_browse: bool = False) -> str:
-        """Unified choice prompt with inline manual/skip options.
+        """Unified choice prompt with inline manual/skip/optional options.
 
         Args:
-            prompt_text: The choice prompt like "Choice [1]/m/s: "
+            prompt_text: The choice prompt like "Choice [1]/m/o/s: "
             num_options: Number of valid numeric options (1-based)
             has_browse: Whether option 0 (browse) is available
 
         Returns:
-            User's choice as string (number, 'm', 's', or '0' for browse)
+            User's choice as string (number, 'm', 'o', 's', or '0' for browse)
         """
         while True:
             choice = input(prompt_text).strip().lower()
@@ -41,7 +42,7 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
                 return "1"
 
             # Check special options
-            if choice in ('m', 's'):
+            if choice in ('m', 's', 'o'):
                 return choice
 
             # Check browse option
@@ -112,12 +113,21 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
             else:
                 print("  No matches found")
 
-        # No matches - offer manual entry or skip
+        # No matches - offer manual entry, optional, or skip
         print("\nNo packages found.")
-        choice = self._unified_choice_prompt("Choice [m]/s: ", num_options=0, has_browse=False)
+        print("  [m] - Manually enter package ID")
+        print("  [o] - Mark as optional (workflow works without it)")
+        print("  [s] - Skip (leave unresolved)")
+        choice = self._unified_choice_prompt("Choice [m]/o/s: ", num_options=0, has_browse=False)
 
         if choice == 'm':
+            self._last_choice = 'manual'
             return self._get_manual_package_id(node_type)
+        elif choice == 'o':
+            self._last_choice = 'optional'
+            print(f"  ✓ Marked '{node_type}' as optional")
+            return None
+        self._last_choice = 'skip'
         return None
 
     def _resolve_ambiguous(
@@ -140,22 +150,36 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         if has_browse:
             print(f"  0. Browse all {len(possible)} matches")
 
+        print("\n  [1-9] - Select package to install")
+        print("  [o]   - Mark as optional (workflow works without it)")
+        print("  [m]   - Manually enter package ID")
+        print("  [s]   - Skip (leave unresolved)")
+
         choice = self._unified_choice_prompt(
-            "Choice [1]/m/s: ",
+            "Choice [1]/o/m/s: ",
             num_options=display_count,
             has_browse=has_browse
         )
 
         if choice == 's':
+            self._last_choice = 'skip'
+            return None
+        elif choice == 'o':
+            # Return None to skip - caller will check _last_choice for optional
+            self._last_choice = 'optional'
+            print(f"  ✓ Marked '{node_type}' as optional")
             return None
         elif choice == 'm':
+            self._last_choice = 'manual'
             return self._get_manual_package_id(node_type)
         elif choice == '0':
+            self._last_choice = 'browse'
             selected = self._browse_all_packages(possible)
             if selected and selected != "BACK":
                 return selected
             return None
         else:
+            self._last_choice = 'select'
             idx = int(choice) - 1
             return possible[idx]
 
@@ -183,22 +207,31 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
             print(f"  0. Browse all {len(results)} matches\n")
 
         choice = self._unified_choice_prompt(
-            "Choice [1]/m/s: ",
+            "Choice [1]/o/m/s: ",
             num_options=display_count,
             has_browse=has_browse
         )
 
         if choice == 's':
+            self._last_choice = 'skip'
+            return None
+        elif choice == 'o':
+            # Return None to skip - caller will check _last_choice for optional
+            self._last_choice = 'optional'
+            print(f"  ✓ Marked '{node_type}' as optional")
             return None
         elif choice == 'm':
+            self._last_choice = 'manual'
             return self._get_manual_package_id(node_type)
         elif choice == '0':
+            self._last_choice = 'browse'
             selected = self._browse_all_packages(results)
             if selected and selected != "BACK":
                 print(f"\n✓ Selected: {selected.package_id}")
                 return self._create_resolved_from_match(node_type, selected)
             return None
         else:
+            self._last_choice = 'select'
             idx = int(choice) - 1
             selected = results[idx]
             print(f"\n✓ Selected: {selected.package_id}")
@@ -279,15 +312,15 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
         self.search_fn = search_fn
 
     def _unified_choice_prompt(self, prompt_text: str, num_options: int, has_browse: bool = False) -> str:
-        """Unified choice prompt with inline manual/skip options.
+        """Unified choice prompt with inline manual/skip/optional options.
 
         Args:
-            prompt_text: The choice prompt like "Choice [1]/m/s: "
+            prompt_text: The choice prompt like "Choice [1]/m/o/s: "
             num_options: Number of valid numeric options (1-based)
             has_browse: Whether option 0 (browse) is available
 
         Returns:
-            User's choice as string (number, 'm', 's', or '0' for browse)
+            User's choice as string (number, 'm', 'o', 's', or '0' for browse)
         """
         while True:
             choice = input(prompt_text).strip().lower()
@@ -297,7 +330,7 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
                 return "1"
 
             # Check special options
-            if choice in ('m', 's'):
+            if choice in ('m', 's', 'o'):
                 return choice
 
             # Check browse option
@@ -325,8 +358,13 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
             size_mb = model.file_size / (1024 * 1024)
             print(f"  {i}. {model.relative_path} ({size_mb:.1f} MB)")
 
+        print("\n  [1-9] - Select model as required")
+        print("  [o]   - Mark as optional nice-to-have (select from above)")
+        print("  [m]   - Manually enter model path")
+        print("  [s]   - Skip (leave unresolved)")
+
         choice = self._unified_choice_prompt(
-            "Choice [1]/m/s: ",
+            "Choice [1]/o/m/s: ",
             num_options=display_count,
             has_browse=False
         )
@@ -341,6 +379,15 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
                 print(f"  ⚠️  Manual path entry: {path}")
                 print("  Path will be validated during workflow execution")
             return None
+        elif choice == 'o':
+            # User wants to mark as optional - prompt for which model
+            model_choice = input("  Which model? [1]: ").strip() or "1"
+            idx = int(model_choice) - 1
+            selected = candidates[idx]
+            # Mark model as optional by setting attribute
+            selected._mark_as_optional = True
+            print(f"  ✓ Selected as optional: {selected.relative_path}")
+            return selected
         else:
             idx = int(choice) - 1
             selected = candidates[idx]
@@ -367,14 +414,19 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
             else:
                 print("  No similar models found in index")
 
-        # No matches - offer manual entry or skip
+        # No matches - offer manual entry, optional, or skip
         print("\nNo models found.")
-        choice = self._unified_choice_prompt("Choice [m]/s: ", num_options=0, has_browse=False)
+        print("  [m] - Manually enter model path")
+        print("  [o] - Mark as optional (workflow works without it)")
+        print("  [s] - Skip (leave unresolved)")
+        choice = self._unified_choice_prompt("Choice [m]/o/s: ", num_options=0, has_browse=False)
 
         if choice == 'm':
             path = input("Enter model path: ").strip()
             if path:
                 return ("select", path)
+        elif choice == 'o':
+            return ("optional_unresolved", "")
         return ("skip", "")
 
     def _show_fuzzy_results(self, reference: WorkflowNodeWidgetRef, results: list[ScoredMatch]) -> tuple[str, str] | None:
@@ -394,7 +446,7 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
             print(f"  0. Browse all {len(results)} matches\n")
 
         choice = self._unified_choice_prompt(
-            "Choice [1]/m/s: ",
+            "Choice [1]/m/o/s: ",
             num_options=display_count,
             has_browse=has_browse
         )
@@ -406,6 +458,8 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
             if path:
                 return ("select", path)
             return ("skip", "")
+        elif choice == 'o':
+            return ("optional_unresolved", "")
         elif choice == '0':
             selected = self._browse_all_models(results)
             if selected and selected != "BACK":

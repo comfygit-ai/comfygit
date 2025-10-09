@@ -88,6 +88,28 @@ class WorkflowManager:
         # Return as-is if not a GitHub URL or not in registry
         return package_id
 
+    def _build_model_mappings_dict(self, models_with_refs: dict) -> dict:
+        """Build workflow model mappings from ref→model dict.
+
+        Args:
+            models_with_refs: Dict mapping WorkflowNodeWidgetRef to ModelWithLocation
+
+        Returns:
+            Dict mapping model hash to node locations:
+            {
+                "hash123": {"nodes": [{"node_id": "4", "widget_idx": 0}]}
+            }
+        """
+        mappings = {}
+        for ref, model in models_with_refs.items():
+            if model.hash not in mappings:
+                mappings[model.hash] = {"nodes": []}
+            mappings[model.hash]["nodes"].append({
+                "node_id": str(ref.node_id),
+                "widget_idx": int(ref.widget_index)
+            })
+        return mappings
+
     def get_workflow_sync_status(self) -> "WorkflowSyncStatus":
         """Get file-level sync status between ComfyUI and .cec.
 
@@ -509,6 +531,10 @@ class WorkflowManager:
             elif result.candidates:
                 # Ambiguous - multiple matches
                 models_ambiguous.append((model_ref, result.candidates))
+            elif result.resolution_type in ("optional_unresolved", "optional_resolved", "optional_missing"):
+                # Optional model (already marked as such in pyproject) - skip it (don't add to unresolved)
+                logger.debug(f"Model {model_ref.widget_value} is optional, skipping")
+                # Don't add to any list - it's already handled
             else:
                 # No resolution possible
                 models_unresolved.append(model_ref)
@@ -549,6 +575,9 @@ class WorkflowManager:
         remaining_models_ambiguous: list[tuple[WorkflowNodeWidgetRef, list[ModelWithLocation]]] = []
         remaining_models_unresolved: list[WorkflowNodeWidgetRef] = []
 
+        # Collect optional node types that user marked
+        optional_node_types: list[str] = []
+
         # Fix ambiguous nodes using strategy
         if node_strategy:
             for packages in resolution.nodes_ambiguous:
@@ -557,6 +586,10 @@ class WorkflowManager:
                     nodes_to_add.append(selected)
                     node_id = selected.package_data.id if selected.package_data else None
                     logger.info(f"Resolved ambiguous node: {node_id}")
+                elif hasattr(node_strategy, '_last_choice') and node_strategy._last_choice == 'optional':
+                    # User chose optional - mark for node_mappings
+                    optional_node_types.append(packages[0].node_type)
+                    logger.info(f"Marked node '{packages[0].node_type}' as optional")
                 else:
                     remaining_nodes_ambiguous.append(packages)
         else:
@@ -570,6 +603,10 @@ class WorkflowManager:
                     nodes_to_add.append(selected)
                     node_id = selected.package_data.id if selected.package_data else None
                     logger.info(f"Resolved unresolved node: {node_id}")
+                elif hasattr(node_strategy, '_last_choice') and node_strategy._last_choice == 'optional':
+                    # User chose optional - mark for node_mappings
+                    optional_node_types.append(node.type)
+                    logger.info(f"Marked node '{node.type}' as optional")
                 else:
                     remaining_nodes_unresolved.append(node)
         else:
@@ -580,8 +617,14 @@ class WorkflowManager:
             for model_ref, candidates in resolution.models_ambiguous:
                 resolved = model_strategy.resolve_ambiguous_model(model_ref, candidates)
                 if resolved:
+                    # Check if user wants this as optional (Type 2)
+                    is_optional = getattr(resolved, '_mark_as_optional', False)
+                    if is_optional:
+                        # Store model with special marker for apply_resolution
+                        resolved._is_optional_nice_to_have = True
                     models_to_add[model_ref] = resolved
-                    logger.info(f"Resolved ambiguous model: {resolved.filename}")
+                    optional_marker = " (optional)" if is_optional else ""
+                    logger.info(f"Resolved ambiguous model{optional_marker}: {resolved.filename}")
                 else:
                     remaining_models_ambiguous.append((model_ref, candidates))
         else:
@@ -614,6 +657,12 @@ class WorkflowManager:
                             logger.warning(f"Model not found in index: {path}")
                             remaining_models_unresolved.append(model_ref)
 
+                    elif action == "optional_unresolved":
+                        # Type 1: Mark as optional (unresolved, no hash)
+                        # Store None as sentinel for apply_resolution to handle specially
+                        models_to_add[model_ref] = None
+                        logger.info(f"Marked as optional (unresolved): {model_ref.widget_value}")
+
                     elif action == "skip":
                         remaining_models_unresolved.append(model_ref)
                         logger.info(f"Skipped: {model_ref.widget_value}")
@@ -625,7 +674,8 @@ class WorkflowManager:
         else:
             remaining_models_unresolved = list(resolution.models_unresolved)
 
-        return ResolutionResult(
+        # Return result with optional node types attached as metadata
+        result = ResolutionResult(
             nodes_resolved=nodes_to_add,
             nodes_unresolved=remaining_nodes_unresolved,
             nodes_ambiguous=remaining_nodes_ambiguous,
@@ -633,6 +683,9 @@ class WorkflowManager:
             models_unresolved=remaining_models_unresolved,
             models_ambiguous=remaining_models_ambiguous,
         )
+        # Store optional node types for apply_resolution to use
+        result._optional_node_types = optional_node_types
+        return result
         
     def apply_all_resolution(self, detailed_status: DetailedWorkflowStatus) -> None:
         """Apply resolutions for all workflows with proper context."""
@@ -694,21 +747,104 @@ class WorkflowManager:
         if saved_mappings > 0:
             logger.info(f"Saved {saved_mappings} custom node mapping(s) for future resolution")
 
-        # Update pyproject.toml with model metadata and mappings
-        if workflow_name:
-            self.pyproject.workflows.apply_resolution(
-                workflow_name=workflow_name,
-                models=resolution.models_resolved,
-                model_refs=model_refs or [],
-                node_packs=node_pack_ids
+        # Save optional node mappings (False value means optional)
+        optional_node_types = getattr(resolution, '_optional_node_types', [])
+        for node_type in optional_node_types:
+            self.pyproject.node_mappings.add_mapping(node_type, False)
+            logger.info(f"Marked node '{node_type}' as optional in node_mappings")
+
+        # Separate models by type before persisting
+        required_models = {}
+        optional_resolved = {}  # Type 2: Hash-based with full metadata
+        optional_unresolved_refs = {}  # Type 1: Filename-based minimal
+
+        for ref, model in resolution.models_resolved.items():
+            if model is None:
+                # Type 1: Optional unresolved (no model object, use filename as key)
+                optional_unresolved_refs[ref] = ref.widget_value
+            elif getattr(model, '_is_optional_nice_to_have', False):
+                # Type 2: Optional nice-to-have (full metadata)
+                optional_resolved[ref] = model
+            else:
+                # Required model
+                required_models[ref] = model
+
+        # Add required models to models.required
+        for ref, model in required_models.items():
+            self.pyproject.models.add_model(
+                model_hash=model.hash,
+                filename=model.filename,
+                file_size=model.file_size,
+                relative_path=model.relative_path,
+                category="required"
             )
 
+        # Add Type 2 optional models to models.optional (hash-based, full metadata)
+        for ref, model in optional_resolved.items():
+            self.pyproject.models.add_model(
+                model_hash=model.hash,
+                filename=model.filename,
+                file_size=model.file_size,
+                relative_path=model.relative_path,
+                category="optional"
+            )
+
+        # Add Type 1 optional models to models.optional (filename-based, minimal)
+        for ref, filename in optional_unresolved_refs.items():
+            self.pyproject.models.add_model(
+                model_hash=filename,  # Filename as key!
+                filename=filename,
+                file_size=0,
+                category="optional",
+                unresolved=True
+            )
+
+        # Build workflow mappings (combines all types)
+        all_models_for_mapping = {**required_models, **optional_resolved}
+
+        # Add filename-based mappings for Type 1 optional
+        for ref, filename in optional_unresolved_refs.items():
+            # Create fake model object with filename as hash for mapping
+            fake_model = ModelWithLocation(
+                hash=filename,  # Filename as hash key
+                filename=filename,
+                file_size=0,
+                relative_path="",
+                mtime=0.0,
+                last_seen=0
+            )
+            all_models_for_mapping[ref] = fake_model
+
+        # Update pyproject.toml workflow mappings ONLY
+        # Note: Models already added to models.required/optional above (lines 751-778)
+        # We only need to update workflow mappings, NOT add models again
+        if workflow_name:
+            self.pyproject.workflows.set_model_resolutions(
+                name=workflow_name,
+                model_resolutions=self._build_model_mappings_dict(all_models_for_mapping)
+            )
+            if node_pack_ids:
+                self.pyproject.workflows.set_node_packs(workflow_name, node_pack_ids)
+
         # Update workflow JSON with stripped paths for ComfyUI compatibility
-        # Note: This is needed even with symlinks - see docs/context/comfyui-node-loader-base-directories.md
-        if workflow_name and resolution.models_resolved:
+        # Note: Skip Type 1 optional models (no path update needed)
+        if workflow_name and (required_models or optional_resolved):
+            # Only update paths for models that have actual ModelWithLocation objects
+            models_to_update = {**required_models, **optional_resolved}
+
+            # Create updated resolution result with only models that need path updates
+            updated_resolution = ResolutionResult(
+                nodes_resolved=resolution.nodes_resolved,
+                nodes_unresolved=resolution.nodes_unresolved,
+                nodes_ambiguous=resolution.nodes_ambiguous,
+                models_resolved=models_to_update,
+                models_unresolved=resolution.models_unresolved,
+                models_ambiguous=resolution.models_ambiguous,
+            )
+
             self.update_workflow_model_paths(
                 workflow_name=workflow_name,
-                resolution=resolution
+                resolution=updated_resolution
             )
 
     def update_workflow_model_paths(

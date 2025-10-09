@@ -53,6 +53,12 @@ class ModelResolutionStrategy(Protocol):
 
         Returns:
             Chosen model or None to skip
+
+        Note:
+            To mark a model as Type 2 optional (nice-to-have), set the attribute
+            `_mark_as_optional = True` on the returned ModelWithLocation object.
+            This signals to the workflow manager to store it in models.optional
+            instead of models.required.
         """
         ...
 
@@ -65,7 +71,8 @@ class ModelResolutionStrategy(Protocol):
         Returns:
             Tuple of ("action", "data") or None to skip
             - ("select", "path/to/model.safetensors"): User selected from index
-            - ("skip", ""): User chose to skip
+            - ("optional_unresolved", ""): Mark as Type 1 optional (unresolved, no hash)
+            - ("skip", ""): User chose to skip (leave unresolved)
             - None: Cancelled (Ctrl+C)
         """
         ...

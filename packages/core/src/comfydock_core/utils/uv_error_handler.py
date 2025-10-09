@@ -104,7 +104,7 @@ def handle_uv_error(
     error: UVCommandError,
     context: str,
     logger: logging.Logger,
-    max_hint_length: int = 100
+    max_hint_length: int = 300
 ) -> tuple[str, bool]:
     """Complete UV error handling: log details + return user message.
 
