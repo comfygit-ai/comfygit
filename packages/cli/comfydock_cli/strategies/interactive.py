@@ -181,7 +181,10 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         else:
             self._last_choice = 'select'
             idx = int(choice) - 1
-            return possible[idx]
+            selected = possible[idx]
+            # Update match_type to ensure it's saved to node_mappings
+            # User selected from ambiguous list, so this counts as user confirmation
+            return self._create_resolved_from_match(node_type, selected)
 
     def _show_search_results(
         self,
@@ -242,16 +245,28 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         node_type: str,
         match
     ) -> ResolvedNodePackage:
-        """Create ResolvedNodePackage from user-confirmed match."""
+        """Create ResolvedNodePackage from user-confirmed match.
+
+        Args:
+            node_type: The node type being resolved
+            match: Either a search result (with .score) or ResolvedNodePackage (with .match_confidence)
+
+        Returns:
+            ResolvedNodePackage with match_type="user_confirmed"
+        """
         from comfydock_core.models.workflow import ResolvedNodePackage
+
+        # Handle both search results and existing ResolvedNodePackage
+        confidence = getattr(match, 'score', None) or getattr(match, 'match_confidence', 1.0)
+        versions = getattr(match, 'versions', [])
 
         return ResolvedNodePackage(
             package_id=match.package_id,
             package_data=match.package_data,
             node_type=node_type,
-            versions=[],
+            versions=versions,
             match_type="user_confirmed",
-            match_confidence=match.score
+            match_confidence=confidence
         )
 
     def _browse_all_packages(self, results: list):
