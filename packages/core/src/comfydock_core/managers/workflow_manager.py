@@ -650,11 +650,18 @@ class WorkflowManager:
                 # Multiple matches from registry (ambiguous)
                 nodes_ambiguous.append(resolved_packages)
                 
+        # Build simplified context with previous resolutions lookup
+        previous_resolutions = {}
+        workflow_models = self.pyproject.workflows.get_workflow_models(workflow_name)
+
+        for manifest_model in workflow_models:
+            if manifest_model.hash and manifest_model.status == "resolved":
+                for ref in manifest_model.nodes:
+                    previous_resolutions[ref] = manifest_model.hash
+
         model_context = ModelResolutionContext(
             workflow_name=workflow_name,
-            required_models=self.pyproject.models.get_category("required"),
-            optional_models=self.pyproject.models.get_category("optional"),
-            model_mappings=self.pyproject.workflows.get_model_resolutions(workflow_name),
+            previous_resolutions=previous_resolutions,
             auto_select_ambiguous=True # TODO: Make configurable
         )
 

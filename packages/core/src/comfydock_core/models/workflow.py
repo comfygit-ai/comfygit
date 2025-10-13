@@ -52,21 +52,14 @@ class WorkflowModelNodeMapping:
 
 @dataclass
 class ModelResolutionContext:
-    """Context for enhanced node resolution with state tracking."""
-    # Current workflow context
+    """Context for model resolution with previous resolution tracking."""
     workflow_name: str = ""
 
-    # Required models in the workflow
-    required_models: dict[str, ModelWithLocation] = field(default_factory=dict)
-    
-    # Optional models in the workflow
-    optional_models: dict[str, ModelWithLocation] = field(default_factory=dict)
+    # Lookup: ref → hash (if previously resolved)
+    previous_resolutions: dict[WorkflowNodeWidgetRef, str] = field(default_factory=dict)
 
-    # Model hashes mapped to one or more workflow nodes
-    model_mappings: dict[str, WorkflowModelNodeMapping] = field(default_factory=dict) 
-
-    # Auto-selection configuration (post-MVP: make this configurable via config file)
-    auto_select_ambiguous: bool = True  # Auto-select best package from registry mappings
+    # Auto-selection configuration
+    auto_select_ambiguous: bool = True
 
 
 @dataclass
@@ -413,6 +406,10 @@ class WorkflowNodeWidgetRef:
                 self.widget_index == value.widget_index and \
                 self.widget_value == value.widget_value
         return False
+    
+    def __hash__(self) -> int:
+        """Hash based on all fields for proper dict/set lookups."""
+        return hash((self.node_id, self.node_type, self.widget_index, self.widget_value))
 
 @dataclass
 class WorkflowDependencies:
