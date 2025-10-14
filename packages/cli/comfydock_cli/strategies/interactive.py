@@ -7,6 +7,7 @@ from comfydock_core.models.protocols import (
 )
 from comfydock_core.models.shared import ModelWithLocation
 from comfydock_core.models.workflow import (
+    NodeResolutionContext,
     ResolvedNodePackage,
     ScoredMatch,
     WorkflowNodeWidgetRef,
@@ -18,15 +19,8 @@ from comfydock_core.models.workflow import (
 class InteractiveNodeStrategy(NodeResolutionStrategy):
     """Interactive node resolution with unified search."""
 
-    def __init__(self, search_fn=None, installed_packages=None):
-        """Initialize with search function and installed packages.
-
-        Args:
-            search_fn: GlobalNodeResolver.search_packages function
-            installed_packages: Dict of installed packages for prioritization
-        """
-        self.search_fn = search_fn
-        self.installed_packages = installed_packages or {}
+    def __init__(self):
+        """Initialize strategy (stateless - context passed per resolution)."""
         self._last_choice = None  # Track last user choice for optional detection
 
     def _unified_choice_prompt(self, prompt_text: str, num_options: int, has_browse: bool = False) -> str:
@@ -84,13 +78,24 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         )
 
     def resolve_unknown_node(
-        self, node_type: str, possible: list[ResolvedNodePackage]
+        self,
+        node_type: str,
+        possible: list[ResolvedNodePackage],
+        context: "NodeResolutionContext"
     ) -> ResolvedNodePackage | None:
-        """Prompt user to resolve unknown node."""
+        """Prompt user to resolve unknown node.
 
+        Args:
+            node_type: The unknown node type
+            possible: List of possible package matches
+            context: Resolution context with search function and installed packages
+
+        Returns:
+            ResolvedNodePackage or None to skip
+        """
         # Case 1: Ambiguous from global table (multiple matches)
         if possible and len(possible) > 1:
-            return self._resolve_ambiguous(node_type, possible)
+            return self._resolve_ambiguous(node_type, possible, context)
 
         # Case 2: Single match from global table - confirm
         # NOTE: Shouldn't be called since automatic resolution should handle this
@@ -107,18 +112,18 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         # Case 3: No matches or user rejected single match - use unified search
         print(f"\n⚠️  Node not found in registry: {node_type}")
 
-        if self.search_fn:
+        if context.search_fn:
             print("🔍 Searching packages...")
 
-            results = self.search_fn(
+            results = context.search_fn(
                 node_type=node_type,
-                installed_packages=self.installed_packages,
+                installed_packages=context.installed_packages,
                 include_registry=True,
                 limit=10
             )
 
             if results:
-                return self._show_search_results(node_type, results)
+                return self._show_search_results(node_type, results, context)
             else:
                 print("  No matches found")
 
@@ -142,7 +147,8 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
     def _resolve_ambiguous(
         self,
         node_type: str,
-        possible: list[ResolvedNodePackage]
+        possible: list[ResolvedNodePackage],
+        context: "NodeResolutionContext"
     ) -> ResolvedNodePackage | None:
         """Handle ambiguous matches from global table."""
         print(f"\n🔍 Found {len(possible)} matches for '{node_type}':")
@@ -183,7 +189,7 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
             return self._get_manual_package_id(node_type)
         elif choice == '0':
             self._last_choice = 'browse'
-            selected = self._browse_all_packages(possible)
+            selected = self._browse_all_packages(possible, context)
             if selected and selected != "BACK":
                 return selected
             return None
@@ -198,7 +204,8 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
     def _show_search_results(
         self,
         node_type: str,
-        results: list
+        results: list,
+        context: "NodeResolutionContext"
     ) -> ResolvedNodePackage | None:
         """Show unified search results to user."""
         print(f"\nFound {len(results)} potential matches:\n")
@@ -207,7 +214,7 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         for i, match in enumerate(results[:display_count], 1):
             pkg_id = match.package_id
             desc = (match.package_data.description or "No description")[:60] if match.package_data else ""
-            installed_marker = " (installed)" if pkg_id in self.installed_packages else ""
+            installed_marker = " (installed)" if pkg_id in context.installed_packages else ""
 
             print(f"  {i}. {pkg_id}{installed_marker}")
             if desc:
@@ -237,7 +244,7 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
             return self._get_manual_package_id(node_type)
         elif choice == '0':
             self._last_choice = 'browse'
-            selected = self._browse_all_packages(results)
+            selected = self._browse_all_packages(results, context)
             if selected and selected != "BACK":
                 print(f"\n✓ Selected: {selected.package_id}")
                 return self._create_resolved_from_match(node_type, selected)
@@ -276,7 +283,7 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
             match_confidence=confidence
         )
 
-    def _browse_all_packages(self, results: list):
+    def _browse_all_packages(self, results: list, context: "NodeResolutionContext"):
         """Browse all matches with pagination."""
         page = 0
         page_size = 10
@@ -290,7 +297,7 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
 
             for i, match in enumerate(results[start:end], start + 1):
                 pkg_id = match.package_id
-                installed_marker = " (installed)" if pkg_id in self.installed_packages else ""
+                installed_marker = " (installed)" if pkg_id in context.installed_packages else ""
                 print(f"  {i}. {pkg_id}{installed_marker}")
 
             print("\n[N]ext, [P]rev, number, [B]ack, or [Q]uit:")
@@ -598,6 +605,7 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
         elif choice == '0':
             selected = self._browse_all_models(results)
             if selected and selected != "BACK":
+                assert isinstance(selected, ModelWithLocation)
                 return ResolvedModel(
                     workflow=context.workflow_name,
                     reference=reference,

@@ -5,8 +5,7 @@ from typing import TYPE_CHECKING
 
 from comfydock_core.models.protocols import ModelResolutionStrategy, NodeResolutionStrategy
 
-from ..models.shared import ModelWithLocation
-from ..models.workflow import WorkflowNodeWidgetRef
+from ..models.workflow import ModelResolutionContext, NodeResolutionContext, ResolvedModel, WorkflowNodeWidgetRef
 
 if TYPE_CHECKING:
     from ..models.workflow import ResolvedNodePackage
@@ -16,9 +15,21 @@ class AutoNodeStrategy(NodeResolutionStrategy):
     """Automatic node resolution - makes best effort choices without user input."""
 
     def resolve_unknown_node(
-        self, node_type: str, possible: list[ResolvedNodePackage]
+        self,
+        node_type: str,
+        possible: list[ResolvedNodePackage],
+        context: "NodeResolutionContext"
     ) -> ResolvedNodePackage | None:
-        """Pick the top suggestion by confidence, or first if tied."""
+        """Pick the top suggestion by confidence, or first if tied.
+
+        Args:
+            node_type: The unknown node type
+            possible: List of possible package matches
+            context: Resolution context (unused in auto mode)
+
+        Returns:
+            ResolvedNodePackage or None if no candidates
+        """
         if not possible:
             return None
 
@@ -37,14 +48,25 @@ class AutoNodeStrategy(NodeResolutionStrategy):
 class AutoModelStrategy(ModelResolutionStrategy):
     """Automatic model resolution - makes simple naive choices."""
 
-    def resolve_ambiguous_model(
-        self, reference: WorkflowNodeWidgetRef, candidates: list[ModelWithLocation]
-    ) -> ModelWithLocation | None:
-        """Pick the first candidate from the list."""
-        if not candidates:
-            return None
-        return candidates[0]
+    def resolve_model(
+        self,
+        reference: WorkflowNodeWidgetRef,
+        candidates: list[ResolvedModel],
+        context: ModelResolutionContext,
+    ) -> ResolvedModel | None:
+        """Pick the first candidate, or skip if none available.
 
-    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> tuple[str, str] | None:
-        """Skip missing models - return skip action."""
-        return ("skip", "")
+        Args:
+            reference: The model reference from workflow
+            candidates: List of potential matches (may be empty for missing models)
+            context: Resolution context with search function and workflow info
+
+        Returns:
+            First candidate as ResolvedModel, or None to skip
+        """
+        if not candidates:
+            # No candidates - skip (don't mark as optional)
+            return None
+
+        # Return first candidate (already a ResolvedModel)
+        return candidates[0]

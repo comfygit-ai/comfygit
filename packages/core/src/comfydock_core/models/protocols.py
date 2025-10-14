@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING,Protocol, Optional, List
 from abc import abstractmethod
 
-from .workflow import ModelResolutionContext, ResolvedModel, WorkflowNodeWidgetRef
+from .workflow import ModelResolutionContext, NodeResolutionContext, ResolvedModel, WorkflowNodeWidgetRef
 from .shared import ModelWithLocation
 
 if TYPE_CHECKING:
@@ -13,16 +13,20 @@ class NodeResolutionStrategy(Protocol):
     """Protocol for resolving unknown custom nodes."""
 
     def resolve_unknown_node(
-        self, node_type: str, possible: List[ResolvedNodePackage]
+        self,
+        node_type: str,
+        possible: List[ResolvedNodePackage],
+        context: NodeResolutionContext
     ) -> ResolvedNodePackage | None:
         """Given node type and suggestions, return package ID or None.
 
         Args:
             node_type: The unknown node type (e.g. "MyCustomNode")
-            suggestions: List of registry suggestions with package_id, confidence
+            possible: List of registry suggestions with package_id, confidence
+            context: Resolution context with search function and installed packages
 
         Returns:
-            Package ID to install or None to skip
+            ResolvedNodePackage to install or None to skip
         """
         ...
 
@@ -30,8 +34,7 @@ class NodeResolutionStrategy(Protocol):
         """Confirm whether to install a node package.
 
         Args:
-            package_id: Registry package ID
-            node_type: The node type being resolved
+            package: Resolved node package to confirm
 
         Returns:
             True to install, False to skip

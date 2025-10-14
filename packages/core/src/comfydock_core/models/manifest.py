@@ -97,3 +97,24 @@ class ManifestModel:
             category=data.get("category", "unknown"),
             sources=data.get("sources", [])
         )
+
+    @classmethod
+    def from_model_with_location(cls, model: "ModelWithLocation") -> "ManifestModel":
+        """Convert runtime model to manifest entry.
+
+        Args:
+            model: ModelWithLocation from model repository
+
+        Returns:
+            ManifestModel ready for TOML serialization
+        """
+        from comfydock_core.models.shared import ModelWithLocation
+
+        return cls(
+            hash=model.hash,
+            filename=model.filename,
+            size=model.file_size,
+            relative_path=model.relative_path,
+            category=model.category,
+            sources=[]  # TODO: Populate during export from CivitAI/HF lookup
+        )

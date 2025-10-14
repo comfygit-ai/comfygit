@@ -547,11 +547,11 @@ class NodeHandler(BaseHandler):
         )
         self.add(node_info, name)
 
-    def is_development(self, identifier: str) -> bool:
-        """Check if a node is a development node."""
-        nodes = self.get_existing()
-        node = nodes.get(identifier)
-        return node and hasattr(node, 'version') and node.version == 'dev'
+    # def is_development(self, identifier: str) -> bool:
+    #     """Check if a node is a development node."""
+    #     nodes = self.get_existing()
+    #     node = nodes.get(identifier)
+    #     return node and hasattr(node, 'version') and node.version == 'dev'
 
     def get_existing(self) -> dict[str, NodeInfo]:
         """Get all existing custom nodes from pyproject.toml."""
@@ -705,8 +705,8 @@ class WorkflowHandler(BaseHandler):
             model: ManifestWorkflowModel to add or update
 
         Note:
-            - If model with same hash exists, updates it
-            - If unresolved model with same filename exists, updates it
+            - If model with same hash exists, merges nodes
+            - If unresolved model with same filename exists, merges nodes
             - Otherwise, appends as new model
         """
         existing = self.get_workflow_models(workflow_name)
@@ -715,22 +715,28 @@ class WorkflowHandler(BaseHandler):
         updated = False
         for i, existing_model in enumerate(existing):
             if model.hash and existing_model.hash == model.hash:
-                # Update existing resolved model
-                existing[i] = model
+                # Merge nodes from both models (avoid duplicates)
+                existing_refs = {(n.node_id, n.widget_index) for n in existing_model.nodes}
+                new_refs = [n for n in model.nodes if (n.node_id, n.widget_index) not in existing_refs]
+                existing_model.nodes.extend(new_refs)
                 updated = True
+                logger.debug(f"Merged {len(new_refs)} new node(s) into existing model '{model.filename}'")
                 break
             elif not model.hash and not existing_model.hash and existing_model.filename == model.filename:
-                # Update existing unresolved model
-                existing[i] = model
+                # Merge nodes for unresolved model
+                existing_refs = {(n.node_id, n.widget_index) for n in existing_model.nodes}
+                new_refs = [n for n in model.nodes if (n.node_id, n.widget_index) not in existing_refs]
+                existing_model.nodes.extend(new_refs)
                 updated = True
+                logger.debug(f"Merged {len(new_refs)} new node(s) into existing unresolved model '{model.filename}'")
                 break
 
         if not updated:
             # New model
             existing.append(model)
+            logger.debug(f"Added new model '{model.filename}' to workflow '{workflow_name}'")
 
         self.set_workflow_models(workflow_name, existing)
-        logger.debug(f"{'Updated' if updated else 'Added'} model '{model.filename}' to workflow '{workflow_name}'")
 
 
     def get_all_with_resolutions(self) -> dict:

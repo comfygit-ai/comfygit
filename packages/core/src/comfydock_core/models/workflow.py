@@ -43,6 +43,10 @@ class NodeResolutionContext:
     # Current workflow context
     workflow_name: str = ""
 
+    # Search function for fuzzy package matching (injected by workflow_manager)
+    # Signature: (node_type: str, installed_packages: dict, include_registry: bool, limit: int) -> list[ResolvedNodePackage]
+    search_fn: Callable | None = None
+
     # Auto-selection configuration (post-MVP: make this configurable via config file)
     auto_select_ambiguous: bool = True  # Auto-select best package from registry mappings
     
