@@ -793,13 +793,6 @@ class WorkflowManager:
 
                     logger.info(f"Resolved node: {node_type} -> {normalized_id}")
 
-                except KeyboardInterrupt:
-                    logger.info("Cancelled - node stays unresolved")
-                    if candidates:
-                        remaining_nodes_ambiguous.append(candidates)
-                    else:
-                        remaining_nodes_unresolved.append(WorkflowNode(id="", type=node_type))
-                    break
                 except Exception as e:
                     logger.error(f"Failed to resolve {node_type}: {e}")
                     if candidates:
@@ -860,10 +853,6 @@ class WorkflowManager:
                     else:
                         logger.info(f"Marked as optional (unresolved): {model_ref.widget_value}")
 
-                except KeyboardInterrupt:
-                    logger.info("Cancelled - model stays unresolved")
-                    remaining_models_unresolved.append(model_ref)
-                    break
                 except Exception as e:
                     logger.error(f"Failed to resolve {model_ref.widget_value}: {e}")
                     remaining_models_unresolved.append(model_ref)

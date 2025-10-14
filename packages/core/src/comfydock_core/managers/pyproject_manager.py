@@ -112,6 +112,9 @@ class PyprojectManager:
         # Clean up empty sections before saving
         self._cleanup_empty_sections(config)
 
+        # Ensure proper spacing between major sections
+        self._ensure_section_spacing(config)
+
         try:
             # Ensure parent directory exists
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,6 +146,88 @@ class PyprojectManager:
             return not d
 
         _clean_dict(config)
+
+    def _ensure_section_spacing(self, config: dict) -> None:
+        """Ensure proper spacing between major sections in tool.comfydock.
+
+        This adds visual separation between:
+        - [tool.comfydock] metadata and workflows
+        - workflows section and models section
+        """
+        if 'tool' not in config or 'comfydock' not in config['tool']:
+            return
+
+        comfydock = config['tool']['comfydock']
+
+        # Track which sections exist
+        has_metadata = any(k in comfydock for k in ['comfyui_version', 'python_version', 'manifest_state'])
+        has_nodes = 'nodes' in comfydock
+        has_workflows = 'workflows' in comfydock
+        has_models = 'models' in comfydock
+
+        # Only rebuild if we have workflows or models (need spacing)
+        if not (has_workflows or has_models):
+            return
+
+        # Deep copy sections to strip any accumulated whitespace
+        def deep_copy_table(obj):
+            """Recursively copy tomlkit objects, preserving special types."""
+            if isinstance(obj, dict):
+                # Determine if inline table or regular table
+                is_inline = hasattr(obj, '__class__') and 'InlineTable' in obj.__class__.__name__
+                new_dict = tomlkit.inline_table() if is_inline else tomlkit.table()
+                for k, v in obj.items():
+                    # Skip whitespace items (empty keys)
+                    if k == '':
+                        continue
+                    new_dict[k] = deep_copy_table(v)
+                return new_dict
+            elif isinstance(obj, list):
+                # Check if this is a tomlkit array (preserve inline table items)
+                is_tomlkit_array = hasattr(obj, '__class__') and 'Array' in obj.__class__.__name__
+                if is_tomlkit_array:
+                    new_array = tomlkit.array()
+                    for item in obj:
+                        # Preserve inline tables inside arrays
+                        if hasattr(item, '__class__') and 'InlineTable' in item.__class__.__name__:
+                            new_inline = tomlkit.inline_table()
+                            for k, v in item.items():
+                                new_inline[k] = deep_copy_table(v)
+                            new_array.append(new_inline)
+                        else:
+                            new_array.append(deep_copy_table(item))
+                    return new_array
+                else:
+                    return [deep_copy_table(item) for item in obj]
+            else:
+                return obj
+
+        # Create a new table with sections in the correct order
+        new_table = tomlkit.table()
+
+        # Add metadata fields first
+        for key in ['comfyui_version', 'python_version', 'manifest_state']:
+            if key in comfydock:
+                new_table[key] = comfydock[key]
+
+        # Add nodes if it exists
+        if has_nodes:
+            new_table['nodes'] = deep_copy_table(comfydock['nodes'])
+
+        # Add workflows with preceding newline if needed
+        if has_workflows:
+            if has_metadata or has_nodes:
+                new_table.add(tomlkit.nl())
+            new_table['workflows'] = deep_copy_table(comfydock['workflows'])
+
+        # Add models with preceding newline if needed
+        if has_models:
+            if has_metadata or has_nodes or has_workflows:
+                new_table.add(tomlkit.nl())
+            new_table['models'] = deep_copy_table(comfydock['models'])
+
+        # Replace the comfydock table
+        config['tool']['comfydock'] = new_table
 
     def get_manifest_state(self) -> str:
         """Get the current manifest state.
@@ -680,7 +765,13 @@ class WorkflowHandler(BaseHandler):
             models: List of ManifestWorkflowModel objects (resolved and unresolved)
         """
         config = self.load()
-        self.ensure_section(config, 'tool', 'comfydock', 'workflows', workflow_name)
+
+        # Ensure sections exist
+        self.ensure_section(config, 'tool', 'comfydock', 'workflows')
+
+        # Ensure specific workflow exists
+        if workflow_name not in config['tool']['comfydock']['workflows']:
+            config['tool']['comfydock']['workflows'][workflow_name] = tomlkit.table()
 
         # Set workflow path
         if 'path' not in config['tool']['comfydock']['workflows'][workflow_name]:
@@ -870,6 +961,8 @@ class ModelHandler(BaseHandler):
             CDPyprojectError: If save fails
         """
         config = self.load()
+
+        # Ensure sections exist
         self.ensure_section(config, "tool", "comfydock", "models")
 
         # Serialize to inline table for compact representation

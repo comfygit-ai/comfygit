@@ -17,23 +17,27 @@ class ManifestWorkflowModel:
     sources: list[str] = field(default_factory=list)  # Download URLs
     
     def to_toml_dict(self) -> dict:
-        """Serialize to TOML-compatible dict."""
+        """Serialize to TOML-compatible dict with inline table formatting."""
+        import tomlkit
+
+        # Build nodes as inline tables for clean TOML output
+        nodes_array = tomlkit.array()
+        for n in self.nodes:
+            node_entry = tomlkit.inline_table()
+            node_entry['node_id'] = n.node_id
+            node_entry['node_type'] = n.node_type
+            node_entry['widget_idx'] = n.widget_index
+            node_entry['widget_value'] = n.widget_value
+            nodes_array.append(node_entry)
+
         result = {
             "filename": self.filename,
             "category": self.category,
             "criticality": self.criticality,
             "status": self.status,
-            "nodes": [
-                {
-                    "node_id": n.node_id,
-                    "node_type": n.node_type,
-                    "widget_idx": n.widget_index,
-                    "widget_value": n.widget_value
-                }
-                for n in self.nodes
-            ]
+            "nodes": nodes_array
         }
-        
+
         # Only include optional fields if present
         if self.hash is not None:
             result["hash"] = self.hash
