@@ -822,6 +822,12 @@ class WorkflowHandler(BaseHandler):
                 existing_refs = {(n.node_id, n.widget_index) for n in existing_model.nodes}
                 new_refs = [n for n in model.nodes if (n.node_id, n.widget_index) not in existing_refs]
                 existing_model.nodes.extend(new_refs)
+
+                # Update mutable fields (user can change: required → optional, unresolved → resolved)
+                existing_model.criticality = model.criticality
+                existing_model.status = model.status
+                existing_model.category = model.category
+
                 updated = True
                 logger.debug(f"Merged {len(new_refs)} new node(s) into existing unresolved model '{model.filename}'")
                 break

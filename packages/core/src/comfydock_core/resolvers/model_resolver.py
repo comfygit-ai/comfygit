@@ -181,6 +181,17 @@ class ModelResolver:
         if not model_hash:
             return None
 
+        # Handle optional unresolved models (marked with special marker)
+        if model_hash == "_optional":
+            return ResolvedModel(
+                workflow=workflow_name,
+                reference=widget_ref,
+                match_type="workflow_context",
+                resolved_model=None,
+                is_optional=True,
+                match_confidence=1.0,
+            )
+
         # Look up model in repository by hash
         resolved_model = self.model_repository.get_model(model_hash)
 

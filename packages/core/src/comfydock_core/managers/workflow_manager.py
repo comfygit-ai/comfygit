@@ -135,7 +135,8 @@ class WorkflowManager:
 
         # Build manifest model
         if model is None:
-            # Unresolved model
+            # Model without hash - always unresolved (even if optional)
+            # Optional means "workflow works without it", not "resolved"
             manifest_model = ManifestWorkflowModel(
                 filename=model_ref.widget_value,
                 category=category,
@@ -641,9 +642,15 @@ class WorkflowManager:
         workflow_models = self.pyproject.workflows.get_workflow_models(workflow_name)
 
         for manifest_model in workflow_models:
-            if manifest_model.hash and manifest_model.status == "resolved":
+            # Include resolved models (have hash) OR optional unresolved (user decided to skip)
+            if manifest_model.status == "resolved" and manifest_model.hash:
+                # Type 2: Optional Resolved (has hash) or Required Resolved (has hash)
                 for ref in manifest_model.nodes:
                     previous_resolutions[ref] = manifest_model.hash
+            elif manifest_model.status == "unresolved" and manifest_model.criticality == "optional":
+                # Type 1: Optional Unresolved (no hash, but user marked as optional)
+                for ref in manifest_model.nodes:
+                    previous_resolutions[ref] = "_optional"
 
         model_context = ModelResolutionContext(
             workflow_name=workflow_name,
