@@ -931,7 +931,7 @@ class EnvironmentCommands:
             sys.exit(1)
 
         # Phase 2: Check for uninstalled nodes and prompt for installation
-        uninstalled_nodes = env.get_uninstalled_nodes()
+        uninstalled_nodes = env.get_uninstalled_nodes(workflow_name=args.name)
 
         if uninstalled_nodes:
             print(f"\n📦 Found {len(uninstalled_nodes)} missing node packs:")
@@ -1003,7 +1003,7 @@ class EnvironmentCommands:
                 print("  • Install individually: comfydock node add <node-id>")
 
         # Display final results - check issues first
-        uninstalled = env.get_uninstalled_nodes()
+        uninstalled = env.get_uninstalled_nodes(workflow_name=args.name)
 
         if result.has_issues or uninstalled:
             print("\n⚠️  Partial resolution - issues remain:")

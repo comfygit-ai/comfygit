@@ -464,7 +464,7 @@ class Environment:
 
         return result
 
-    def get_uninstalled_nodes(self) -> list[str]:
+    def get_uninstalled_nodes(self, workflow_name: str | None = None) -> list[str]:
         """Get list of node package IDs referenced in workflows but not installed.
 
         Compares nodes referenced in workflow sections against installed nodes
@@ -481,7 +481,14 @@ class Environment:
         """
         # Get all node IDs referenced in workflows
         workflow_node_ids = set()
-        workflows = self.pyproject.workflows.get_all_with_resolutions()
+        if workflow_name:
+            if workflow := self.pyproject.workflows.get_workflow(workflow_name):
+                workflows = {workflow_name: workflow}
+            else:
+                logger.warning(f"Workflow '{workflow_name}' not found")
+                return []
+        else:
+            workflows = self.pyproject.workflows.get_all_with_resolutions()
 
         for workflow_data in workflows.values():
             node_list = workflow_data.get('nodes', [])

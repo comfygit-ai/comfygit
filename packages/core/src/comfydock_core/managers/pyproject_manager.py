@@ -627,6 +627,15 @@ class NodeHandler(BaseHandler):
 
 class WorkflowHandler(BaseHandler):
     """Handles workflow model resolutions and tracking."""
+    
+    def get_workflow(self, name: str) -> dict | None:
+        """Get a workflow from pyproject.toml."""
+        try:
+            config = self.load()
+            return config.get('tool', {}).get('comfydock', {}).get('workflows', {}).get(name, None)
+        except Exception:
+            logger.error(f"Failed to load config for workflow: {name}")
+            return None
 
     def add_workflow(self, name: str) -> None:
         """Add a new workflow to the pyproject.toml."""
