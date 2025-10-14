@@ -669,7 +669,7 @@ class WorkflowManager:
             elif len(result) == 1:
                 # Clean resolution (exact match or from pyproject cache)
                 logger.debug(f"Resolved model: {result[0]}")
-                models_resolved = result
+                models_resolved.append(result[0])
             elif len(result) > 1:
                 # Ambiguous - multiple matches
                 logger.debug(f"Ambiguous model: {result}")
