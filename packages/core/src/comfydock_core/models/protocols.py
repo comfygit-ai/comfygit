@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING,Protocol, Optional, List
 from abc import abstractmethod
 
-from .workflow import WorkflowNodeWidgetRef
+from .workflow import ModelResolutionContext, ResolvedModel, WorkflowNodeWidgetRef
 from .shared import ModelWithLocation
 
 if TYPE_CHECKING:
@@ -42,38 +42,27 @@ class NodeResolutionStrategy(Protocol):
 class ModelResolutionStrategy(Protocol):
     """Protocol for resolving model references."""
 
-    def resolve_ambiguous_model(
-        self, reference: WorkflowNodeWidgetRef, candidates: List[ModelWithLocation]
-    ) -> Optional[ModelWithLocation]:
-        """Choose from multiple model matches.
+    def resolve_model(
+        self,
+        reference: WorkflowNodeWidgetRef,
+        candidates: List["ResolvedModel"],
+        context: "ModelResolutionContext",
+    ) -> Optional["ResolvedModel"]:
+        """Resolve a model reference (ambiguous or missing).
 
         Args:
             reference: The model reference from workflow
-            candidates: List of possible model matches
+            candidates: List of potential matches (may be empty for missing models)
+            context: Resolution context with search function and workflow info
 
         Returns:
-            Chosen model or None to skip
+            ResolvedModel with resolved_model filled (or None for optional unresolved)
+            None to skip resolution
 
         Note:
-            To mark a model as Type 2 optional (nice-to-have), set the attribute
-            `_mark_as_optional = True` on the returned ModelWithLocation object.
-            This signals to the workflow manager to store it in models.optional
-            instead of models.required.
-        """
-        ...
-
-    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> tuple[str, str] | None:
-        """Handle completely missing model.
-
-        Args:
-            reference: The model reference that couldn't be found
-
-        Returns:
-            Tuple of ("action", "data") or None to skip
-            - ("select", "path/to/model.safetensors"): User selected from index
-            - ("optional_unresolved", ""): Mark as Type 1 optional (unresolved, no hash)
-            - ("skip", ""): User chose to skip (leave unresolved)
-            - None: Cancelled (Ctrl+C)
+            - For resolved models: Return ResolvedModel with resolved_model set
+            - For optional unresolved: Return ResolvedModel with resolved_model=None, is_optional=True
+            - To skip: Return None
         """
         ...
 

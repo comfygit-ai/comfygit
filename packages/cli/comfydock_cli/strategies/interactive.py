@@ -6,7 +6,13 @@ from comfydock_core.models.protocols import (
     NodeResolutionStrategy,
 )
 from comfydock_core.models.shared import ModelWithLocation
-from comfydock_core.models.workflow import ResolvedNodePackage, ScoredMatch, WorkflowNodeWidgetRef
+from comfydock_core.models.workflow import (
+    ResolvedNodePackage,
+    ScoredMatch,
+    WorkflowNodeWidgetRef,
+    ResolvedModel,
+    ModelResolutionContext,
+)
 
 
 class InteractiveNodeStrategy(NodeResolutionStrategy):
@@ -323,10 +329,6 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
 class InteractiveModelStrategy(ModelResolutionStrategy):
     """Interactive model resolution with user prompts."""
 
-    def __init__(self, search_fn=None):
-        """Initialize with optional fuzzy search function."""
-        self.search_fn = search_fn
-
     def _unified_choice_prompt(self, prompt_text: str, num_options: int, has_browse: bool = False) -> str:
         """Unified choice prompt with inline manual/skip/optional options.
 
@@ -361,18 +363,52 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
 
             print("  Invalid choice, try again")
 
-    def resolve_ambiguous_model(
-        self, reference: WorkflowNodeWidgetRef, candidates: list[ModelWithLocation]
-    ) -> ModelWithLocation | None:
-        """Prompt user to resolve ambiguous model."""
+    def resolve_model(
+        self,
+        reference: WorkflowNodeWidgetRef,
+        candidates: list[ResolvedModel],
+        context: ModelResolutionContext
+    ) -> ResolvedModel | None:
+        """Unified model resolution - handles both ambiguous and missing models.
+
+        Args:
+            reference: The model reference from workflow
+            candidates: List of potential matches (empty for missing models)
+            context: Resolution context with search function and workflow info
+
+        Returns:
+            ResolvedModel with resolved_model set (or None for optional unresolved)
+            None to skip resolution
+        """
+        # Case 1: Multiple candidates (ambiguous)
+        if len(candidates) > 1:
+            return self._handle_ambiguous(reference, candidates, context)
+
+        # Case 2: Single candidate (confirm)
+        if len(candidates) == 1:
+            return self._handle_single_candidate(reference, candidates[0], context)
+
+        # Case 3: No candidates (missing - use search)
+        return self._handle_missing(reference, context)
+
+    def _handle_ambiguous(
+        self,
+        reference: WorkflowNodeWidgetRef,
+        candidates: list[ResolvedModel],
+        context: ModelResolutionContext
+    ) -> ResolvedModel | None:
+        """Handle ambiguous models (multiple matches)."""
+
         print(f"\n🔍 Multiple matches for model in node #{reference.node_id}:")
         print(f"  Looking for: {reference.widget_value}")
         print("  Found matches:")
 
         display_count = min(10, len(candidates))
-        for i, model in enumerate(candidates[:display_count], 1):
-            size_mb = model.file_size / (1024 * 1024)
-            print(f"  {i}. {model.relative_path} ({size_mb:.1f} MB)")
+        for i, resolved in enumerate(candidates[:display_count], 1):
+            model = resolved.resolved_model
+            if model:
+                size_mb = model.file_size / (1024 * 1024)
+                print(f"  {i}. {model.relative_path} ({size_mb:.1f} MB)")
 
         print("\n  [1-9] - Select model as required")
         print("  [o]   - Mark as optional nice-to-have (select from above)")
@@ -388,45 +424,95 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
         if choice == 's':
             return None
         elif choice == 'm':
-            path = input("Enter model path: ").strip()
-            if path:
-                # Create a ModelWithLocation from the manual path
-                # Note: This is a simplified version, actual implementation may vary
-                print(f"  ⚠️  Manual path entry: {path}")
-                print("  Path will be validated during workflow execution")
-            return None
+            return self._handle_manual_entry(reference, context)
         elif choice == 'o':
             # User wants to mark as optional - prompt for which model
             model_choice = input("  Which model? [1]: ").strip() or "1"
             idx = int(model_choice) - 1
             selected = candidates[idx]
-            # Mark model as optional by setting attribute
-            selected._mark_as_optional = True
-            print(f"  ✓ Selected as optional: {selected.relative_path}")
-            return selected
+            # Return as optional
+            return ResolvedModel(
+                workflow=context.workflow_name,
+                reference=reference,
+                resolved_model=selected.resolved_model,
+                is_optional=True,
+                match_type="user_confirmed",
+                match_confidence=1.0
+            )
         else:
             idx = int(choice) - 1
             selected = candidates[idx]
-            print(f"  ✓ Selected: {selected.relative_path}")
-            return selected
+            if selected.resolved_model:
+                print(f"  ✓ Selected: {selected.resolved_model.relative_path}")
+            return ResolvedModel(
+                workflow=context.workflow_name,
+                reference=reference,
+                resolved_model=selected.resolved_model,
+                is_optional=False,
+                match_type="user_confirmed",
+                match_confidence=1.0
+            )
 
-    def handle_missing_model(self, reference: WorkflowNodeWidgetRef) -> tuple[str, str] | None:
-        """Prompt user for missing model."""
+    def _handle_single_candidate(
+        self,
+        reference: WorkflowNodeWidgetRef,
+        candidate: ResolvedModel,
+        context: ModelResolutionContext
+    ) -> ResolvedModel | None:
+        """Handle single candidate (confirm with user)."""
+        model = candidate.resolved_model
+        if not model:
+            return None
+
+        print(f"\n✓ Found match for: {reference.widget_value}")
+        print(f"  {model.relative_path} ({model.file_size / (1024 * 1024):.1f} MB)")
+
+        choice = input("Accept? [Y/n/o/m]: ").strip().lower()
+
+        if choice in ('', 'y', 'yes'):
+            return ResolvedModel(
+                workflow=context.workflow_name,
+                reference=reference,
+                resolved_model=model,
+                is_optional=False,
+                match_type="user_confirmed",
+                match_confidence=1.0
+            )
+        elif choice == 'o':
+            return ResolvedModel(
+                workflow=context.workflow_name,
+                reference=reference,
+                resolved_model=model,
+                is_optional=True,
+                match_type="user_confirmed",
+                match_confidence=1.0
+            )
+        elif choice == 'm':
+            return self._handle_manual_entry(reference, context)
+        else:
+            return None
+
+    def _handle_missing(
+        self,
+        reference: WorkflowNodeWidgetRef,
+        context: ModelResolutionContext
+    ) -> ResolvedModel | None:
+        """Handle missing models (no candidates)."""
         print(f"\n⚠️  Model not found: {reference.widget_value}")
         print(f"  in node #{reference.node_id} ({reference.node_type})")
 
-        # If we have fuzzy search, try it first
-        if self.search_fn:
+        # Try fuzzy search if available
+        if context.search_fn:
             print("\n🔍 Searching model index...")
 
-            similar: list[ScoredMatch] | None = self.search_fn(
+            similar = context.search_fn(
                 missing_ref=reference.widget_value,
                 node_type=reference.node_type,
                 limit=10
             )
 
             if similar:
-                return self._show_fuzzy_results(reference, similar)
+                return self._show_fuzzy_results(reference, similar, context)
             else:
                 print("  No similar models found in index")
 
@@ -438,15 +524,43 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
         choice = self._unified_choice_prompt("Choice [m]/o/s: ", num_options=0, has_browse=False)
 
         if choice == 'm':
-            path = input("Enter model path: ").strip()
-            if path:
-                return ("select", path)
+            return self._handle_manual_entry(reference, context)
         elif choice == 'o':
-            return ("optional_unresolved", "")
-        return ("skip", "")
+            # Type 1 optional: unresolved, no hash
+            return ResolvedModel(
+                workflow=context.workflow_name,
+                reference=reference,
+                resolved_model=None,
+                is_optional=True,
+                match_type="optional_unresolved",
+                match_confidence=1.0
+            )
+        return None
 
-    def _show_fuzzy_results(self, reference: WorkflowNodeWidgetRef, results: list[ScoredMatch]) -> tuple[str, str] | None:
+    def _handle_manual_entry(
+        self,
+        reference: WorkflowNodeWidgetRef,
+        context: ModelResolutionContext
+    ) -> ResolvedModel | None:
+        """Handle manual model path entry."""
+        path = input("Enter model path: ").strip()
+        if not path:
+            return None
+
+        # TODO: Look up in model repository by exact path
+        # For now, just mark as skipped
+        print(f"  ⚠️  Manual path entry: {path}")
+        print("  Path will be validated during workflow execution")
+        return None
+
+    def _show_fuzzy_results(
+        self,
+        reference: WorkflowNodeWidgetRef,
+        results: list[ScoredMatch],
+        context: ModelResolutionContext
+    ) -> ResolvedModel | None:
         """Show fuzzy search results and get user selection."""
+
         print(f"\nFound {len(results)} potential matches:\n")
 
         display_count = min(5, len(results))
@@ -468,28 +582,53 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
         )
 
         if choice == 's':
-            return ("skip", "")
+            return None
         elif choice == 'm':
-            path = input("Enter model path: ").strip()
-            if path:
-                return ("select", path)
-            return ("skip", "")
+            return self._handle_manual_entry(reference, context)
         elif choice == 'o':
-            return ("optional_unresolved", "")
+            # Mark as optional unresolved
+            return ResolvedModel(
+                workflow=context.workflow_name,
+                reference=reference,
+                resolved_model=None,
+                is_optional=True,
+                match_type="optional_unresolved",
+                match_confidence=1.0
+            )
         elif choice == '0':
             selected = self._browse_all_models(results)
             if selected and selected != "BACK":
-                return ("select", selected.relative_path)
-            return ("skip", "")
+                return ResolvedModel(
+                    workflow=context.workflow_name,
+                    reference=reference,
+                    resolved_model=selected,
+                    is_optional=False,
+                    match_type="user_confirmed",
+                    match_confidence=1.0
+                )
+            return None
         else:
             idx = int(choice) - 1
             selected = results[idx].model
             print(f"\n✓ Selected: {selected.relative_path}")
             print(f"  Hash: {selected.hash[:12]}... | Size: {selected.file_size / (1024 * 1024 * 1024):.2f} GB")
-            return ("select", selected.relative_path)
+            return ResolvedModel(
+                workflow=context.workflow_name,
+                reference=reference,
+                resolved_model=selected,
+                is_optional=False,
+                match_type="user_confirmed",
+                match_confidence=1.0
+            )
 
-    def _browse_all_models(self, results: list[ScoredMatch]) -> ModelWithLocation | None:
-        """Browse all fuzzy search results with pagination."""
+    def _browse_all_models(self, results: list[ScoredMatch]) -> ModelWithLocation | str | None:
+        """Browse all fuzzy search results with pagination.
+
+        Returns:
+            ModelWithLocation if user selects a model
+            "BACK" if user cancels
+            None if user quits
+        """
         page = 0
         page_size = 10
         total_pages = (len(results) + page_size - 1) // page_size

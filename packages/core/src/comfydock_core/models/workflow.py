@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from ..models.node_mapping import (
     GlobalNodePackage,
@@ -52,13 +52,17 @@ class WorkflowModelNodeMapping:
 
 @dataclass
 class ModelResolutionContext:
-    """Context for model resolution with previous resolution tracking."""
-    workflow_name: str = ""
+    """Context for model resolution with search function and workflow info."""
+    workflow_name: str
 
     # Lookup: ref → hash (if previously resolved)
     previous_resolutions: dict[WorkflowNodeWidgetRef, str] = field(default_factory=dict)
 
-    # Auto-selection configuration
+    # Search function for fuzzy matching (injected by workflow_manager)
+    # Signature: (missing_ref: str, node_type: str, limit: int) -> list[ScoredMatch]
+    search_fn: Callable | None = None
+
+    # Auto-selection configuration (for automated strategies)
     auto_select_ambiguous: bool = True
 
 
