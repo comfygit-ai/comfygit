@@ -12,7 +12,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "https://github.com/owner/repo"
             result = repository._normalize_github_url(url)
             assert result == "https://github.com/owner/repo"
@@ -21,7 +26,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "https://github.com/owner/repo.git"
             result = repository._normalize_github_url(url)
             assert result == "https://github.com/owner/repo"
@@ -30,7 +40,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "git@github.com:owner/repo.git"
             result = repository._normalize_github_url(url)
             assert result == "https://github.com/owner/repo"
@@ -39,7 +54,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "git@github.com:owner/repo"
             result = repository._normalize_github_url(url)
         assert result == "https://github.com/owner/repo"
@@ -48,7 +68,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "ssh://git@github.com/owner/repo.git"
             result = repository._normalize_github_url(url)
             assert result == "https://github.com/owner/repo"
@@ -57,7 +82,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "ssh://git@github.com/owner/repo"
             result = repository._normalize_github_url(url)
             assert result == "https://github.com/owner/repo"
@@ -66,7 +96,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "https://www.github.com/owner/repo"
             result = repository._normalize_github_url(url)
             assert result == "https://github.com/owner/repo"
@@ -75,7 +110,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "https://github.com/owner/repo/tree/main"
             result = repository._normalize_github_url(url)
             assert result == "https://github.com/owner/repo"
@@ -84,7 +124,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             result = repository._normalize_github_url("")
             assert result == ""
 
@@ -92,7 +137,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             result = repository._normalize_github_url(None)
             assert result == ""
 
@@ -100,7 +150,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "https://gitlab.com/owner/repo.git"
             result = repository._normalize_github_url(url)
             # Non-GitHub URLs still get .git removed
@@ -110,7 +165,12 @@ class TestGitHubUrlNormalization:
         with tempfile.TemporaryDirectory() as tmpdir:
             mappings_path = Path(tmpdir) / "mappings.json"
             mappings_path.write_text('{"mappings": {}, "packages": {}}')
-            repository = NodeMappingsRepository(mappings_path=mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             url = "https://github.com/owner"  # Missing repo
             result = repository._normalize_github_url(url)
             # Should return original URL since it doesn't have enough path parts

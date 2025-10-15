@@ -17,23 +17,42 @@ class NodeLookupService:
     """Pure stateless service for finding nodes and analyzing their requirements.
 
     Responsibilities:
-    - Registry API calls (finding nodes by ID/URL)
+    - Registry lookup (cache-first, then API)
     - GitHub API calls (validating repos, getting commit info)
     - Requirement scanning (analyzing node directories)
     - Cache management (API responses, downloaded node archives)
     """
 
-    def __init__(self, workspace_path: Path | None = None, cache_path: Path | None = None):
-        """Initialize the node lookup service."""
+    def __init__(
+        self,
+        workspace_path: Path | None = None,
+        cache_path: Path | None = None,
+        node_mappings_repository=None,
+        workspace_config_repository=None,
+    ):
+        """Initialize the node lookup service.
+
+        Args:
+            workspace_path: Path to workspace root
+            cache_path: Path to cache directory
+            node_mappings_repository: Repository for cached node mappings
+            workspace_config_repository: Repository for workspace config (cache preference)
+        """
         self.scanner = CustomNodeScanner()
         cache_path = cache_path or (workspace_path / "cache" if workspace_path else None)
         self.api_cache = APICacheManager(cache_base_path=cache_path)
         self.custom_node_cache = CustomNodeCacheManager(cache_base_path=cache_path)
         self.registry_client = ComfyRegistryClient(cache_manager=self.api_cache)
         self.github_client = GitHubClient(cache_manager=self.api_cache)
+        self.node_mappings_repository = node_mappings_repository
+        self.workspace_config_repository = workspace_config_repository
 
     def find_node(self, identifier: str) -> NodeInfo | None:
-        """Find node info from registry or git URL.
+        """Find node info from cache, registry, or git URL.
+
+        Cache-first strategy:
+        1. If prefer_registry_cache=True and package in local cache → return from cache
+        2. Otherwise → query live API
 
         Args:
             identifier: Registry ID (optionally with @version), node name, or git URL
@@ -48,7 +67,7 @@ class NodeLookupService:
             identifier = parts[0]
             requested_version = parts[1]
 
-        # Check if it's a git URL
+        # Check if it's a git URL - these bypass cache
         if identifier.startswith(('https://', 'git@', 'ssh://')):
             try:
                 if repo_info := self.github_client.get_repository_info(identifier):
@@ -62,7 +81,21 @@ class NodeLookupService:
                 logger.warning(f"Invalid git URL: {e}")
                 return None
 
-        # Check registry
+        # Check if we should prefer cached mappings
+        prefer_cache = True
+        if self.workspace_config_repository:
+            prefer_cache = self.workspace_config_repository.get_prefer_registry_cache()
+
+        # Strategy: Cache first, then API
+        if prefer_cache and self.node_mappings_repository:
+            package = self.node_mappings_repository.get_package(identifier)
+            if package:
+                logger.debug(f"Found '{identifier}' in local cache")
+                return NodeInfo.from_global_package(package, version=requested_version)
+            else:
+                logger.debug(f"'{identifier}' not in local cache, trying API...")
+
+        # Fallback to registry API
         try:
             registry_node = self.registry_client.get_node(identifier)
             if registry_node:

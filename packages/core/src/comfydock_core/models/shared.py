@@ -92,6 +92,44 @@ class NodeInfo:
         )
 
     @classmethod
+    def from_global_package(cls, package, version: str | None = None):
+        """Create NodeInfo from GlobalNodePackage (cached mappings data).
+
+        Args:
+            package: GlobalNodePackage from node mappings repository
+            version: Specific version to use, or None for latest
+
+        Returns:
+            NodeInfo instance
+        """
+        from ..models.node_mapping import GlobalNodePackage
+
+        # Determine version to use
+        if version is None:
+            # Get latest version (highest version number or first in dict)
+            if package.versions:
+                version = max(package.versions.keys())
+            else:
+                version = None
+
+        # Get version-specific data
+        version_data = None
+        download_url = None
+        if version and package.versions:
+            version_data = package.versions.get(version)
+            if version_data:
+                download_url = version_data.download_url
+
+        return cls(
+            name=package.display_name or package.id,
+            registry_id=package.id,
+            repository=package.repository,
+            version=version,
+            download_url=download_url,
+            source="registry"
+        )
+
+    @classmethod
     def from_pyproject_config(cls, pyproject_config: dict, node_identifier: str) -> "NodeInfo | None":
         if not pyproject_config:
             return None

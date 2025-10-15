@@ -105,3 +105,15 @@ class WorkspaceConfigRepository:
             return data.api_credentials.civitai_token
 
         return None
+
+    def get_prefer_registry_cache(self) -> bool:
+        """Get prefer_registry_cache setting (defaults to True)."""
+        data = self.load()
+        return data.prefer_registry_cache
+
+    def set_prefer_registry_cache(self, enabled: bool):
+        """Set prefer_registry_cache setting."""
+        data = self.load()
+        data.prefer_registry_cache = enabled
+        self.save(data)
+        logger.info(f"Registry cache preference set to: {enabled}")

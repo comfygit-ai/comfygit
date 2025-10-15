@@ -39,6 +39,7 @@ class WorkspaceConfig:
     created_at: str
     global_model_directory: ModelDirectory | None
     api_credentials: APICredentials | None = None
+    prefer_registry_cache: bool = True  # Use local node mappings cache instead of API
 
     @classmethod
     def from_dict(cls, data):
@@ -48,6 +49,7 @@ class WorkspaceConfig:
             created_at=data["created_at"],
             global_model_directory=ModelDirectory.from_dict(data["global_model_directory"]) if data.get("global_model_directory") else None,
             api_credentials=APICredentials.from_dict(data.get("api_credentials")) if data.get("api_credentials") else None,
+            prefer_registry_cache=data.get("prefer_registry_cache", True),
         )
 
     @classmethod
@@ -58,5 +60,6 @@ class WorkspaceConfig:
             "created_at": instance.created_at,
             "global_model_directory": ModelDirectory.to_dict(instance.global_model_directory) if instance.global_model_directory else None,
             "api_credentials": instance.api_credentials.to_dict() if instance.api_credentials else None,
+            "prefer_registry_cache": instance.prefer_registry_cache,
         }
         return result

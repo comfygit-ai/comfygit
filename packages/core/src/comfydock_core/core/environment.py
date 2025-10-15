@@ -95,6 +95,8 @@ class Environment:
         return NodeLookupService(
             workspace_path=self.workspace_paths.root,
             cache_path=self.workspace_paths.cache,
+            node_mappings_repository=self.node_mapping_repository,
+            workspace_config_repository=self.workspace_config_manager,
         )
 
     @cached_property

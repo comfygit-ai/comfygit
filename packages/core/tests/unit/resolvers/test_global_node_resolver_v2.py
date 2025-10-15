@@ -70,7 +70,12 @@ class TestSchemaV2Loading:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             # Should load without error
@@ -149,7 +154,12 @@ class TestSchemaV2Loading:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             mapping = resolver.global_mappings.mappings["ReActorFaceSwapOpt::079f3587"]
@@ -200,7 +210,12 @@ class TestResolutionWithRanking:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             node = WorkflowNode(
@@ -243,7 +258,12 @@ class TestResolutionWithRanking:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
             node = WorkflowNode(id="1", type="TestNode")
 
@@ -281,7 +301,12 @@ class TestAutoSelectionLogic:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             # Simulate rank 2 is installed
@@ -323,7 +348,12 @@ class TestAutoSelectionLogic:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             # No installed packages
@@ -362,7 +392,12 @@ class TestAutoSelectionLogic:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             # Context with auto_select disabled
@@ -418,7 +453,12 @@ class TestRankFieldPersistence:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
             node = WorkflowNode(id="1", type="TestNode")  # No inputs = type-only match
 
@@ -463,7 +503,12 @@ class TestManagerSourceHandling:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             mapping = resolver.global_mappings.mappings["TestNode::_"]
@@ -503,7 +548,12 @@ class TestManagerSourceHandling:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             mapping = resolver.global_mappings.mappings["TestNode::_"]
@@ -536,7 +586,12 @@ class TestBackwardCompatibility:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
 
             context = NodeResolutionContext(
@@ -567,7 +622,12 @@ class TestBackwardCompatibility:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            repository = NodeMappingsRepository(mappings_path)
+            # Create mock data manager
+            from unittest.mock import Mock
+            mock_data_manager = Mock()
+            mock_data_manager.get_mappings_path.return_value = mappings_path
+
+            repository = NodeMappingsRepository(data_manager=mock_data_manager)
             resolver = GlobalNodeResolver(repository)
             node = WorkflowNode(id="1", type="TestNode", inputs=[])
 
