@@ -24,15 +24,15 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
         self._last_choice = None  # Track last user choice for optional detection
 
     def _unified_choice_prompt(self, prompt_text: str, num_options: int, has_browse: bool = False) -> str:
-        """Unified choice prompt with inline manual/skip/optional options.
+        """Unified choice prompt with inline manual/skip/optional/refine options.
 
         Args:
-            prompt_text: The choice prompt like "Choice [1]/m/o/s: "
+            prompt_text: The choice prompt like "Choice [1]/r/m/o/s: "
             num_options: Number of valid numeric options (1-based)
             has_browse: Whether option 0 (browse) is available
 
         Returns:
-            User's choice as string (number, 'm', 'o', 's', or '0' for browse)
+            User's choice as string (number, 'm', 'o', 's', 'r', or '0' for browse)
         """
         while True:
             choice = input(prompt_text).strip().lower()
@@ -42,7 +42,7 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
                 return "1"
 
             # Check special options
-            if choice in ('m', 's', 'o'):
+            if choice in ('m', 's', 'o', 'r'):
                 return choice
 
             # Check browse option
@@ -109,40 +109,80 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
                 return pkg
             # User rejected - fall through to search
 
-        # Case 3: No matches or user rejected single match - use unified search
+        # Case 3: No matches or user rejected single match - use unified search with refinement
         print(f"\n⚠️  Node not found in registry: {node_type}")
 
-        if context.search_fn:
-            print("🔍 Searching packages...")
+        if not context.search_fn:
+            # No search available - can only mark optional, manual, or skip
+            print("\n  [m] - Manually enter package ID")
+            print("  [o] - Mark as optional (workflow works without it)")
+            print("  [s] - Skip (leave unresolved)")
+            choice = self._unified_choice_prompt("Choice [m]/o/s: ", num_options=0, has_browse=False)
+
+            if choice == 'm':
+                self._last_choice = 'manual'
+                return self._get_manual_package_id(node_type)
+            elif choice == 'o':
+                self._last_choice = 'optional'
+                print(f"  ✓ Marked '{node_type}' as optional")
+                return self._get_optional_package(node_type)
+            self._last_choice = 'skip'
+            return None
+
+        # Search with refinement loop
+        search_term = node_type
+
+        while True:
+            print(f"🔍 Searching for: {search_term}")
 
             results = context.search_fn(
-                node_type=node_type,
+                node_type=search_term,
                 installed_packages=context.installed_packages,
                 include_registry=True,
-                limit=10
+                limit=5
             )
 
             if results:
-                return self._show_search_results(node_type, results, context)
+                # Show results with refinement option
+                result = self._show_search_results_with_refinement(
+                    node_type, search_term, results, context
+                )
+
+                if result == "REFINE":
+                    # User wants to refine search
+                    new_term = input("\nEnter new search term: ").strip()
+                    if new_term:
+                        search_term = new_term
+                        continue
+                    else:
+                        print("  Keeping previous search term")
+                        continue
+                else:
+                    # User made a choice (package, optional, manual, or skip)
+                    return result
             else:
-                print("  No matches found")
+                # No results found
+                print("  No packages found")
+                print("\n  [r] - Refine search")
+                print("  [m] - Manually enter package ID")
+                print("  [o] - Mark as optional (workflow works without it)")
+                print("  [s] - Skip (leave unresolved)")
+                choice = self._unified_choice_prompt("Choice [r]/m/o/s: ", num_options=0, has_browse=False)
 
-        # No matches - offer manual entry, optional, or skip
-        print("\nNo packages found.")
-        print("  [m] - Manually enter package ID")
-        print("  [o] - Mark as optional (workflow works without it)")
-        print("  [s] - Skip (leave unresolved)")
-        choice = self._unified_choice_prompt("Choice [m]/o/s: ", num_options=0, has_browse=False)
-
-        if choice == 'm':
-            self._last_choice = 'manual'
-            return self._get_manual_package_id(node_type)
-        elif choice == 'o':
-            self._last_choice = 'optional'
-            print(f"  ✓ Marked '{node_type}' as optional")
-            return self._get_optional_package(node_type)
-        self._last_choice = 'skip'
-        return None
+                if choice == 'r':
+                    new_term = input("\nEnter new search term: ").strip()
+                    if new_term:
+                        search_term = new_term
+                        continue
+                elif choice == 'm':
+                    self._last_choice = 'manual'
+                    return self._get_manual_package_id(node_type)
+                elif choice == 'o':
+                    self._last_choice = 'optional'
+                    print(f"  ✓ Marked '{node_type}' as optional")
+                    return self._get_optional_package(node_type)
+                self._last_choice = 'skip'
+                return None
 
     def _resolve_ambiguous(
         self,
@@ -201,13 +241,20 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
             # User selected from ambiguous list, so this counts as user confirmation
             return self._create_resolved_from_match(node_type, selected)
 
-    def _show_search_results(
+    def _show_search_results_with_refinement(
         self,
         node_type: str,
+        search_term: str,
         results: list,
         context: "NodeResolutionContext"
-    ) -> ResolvedNodePackage | None:
-        """Show unified search results to user."""
+    ) -> ResolvedNodePackage | None | str:
+        """Show search results with refinement option.
+
+        Returns:
+            ResolvedNodePackage - user selected a package
+            "REFINE" - user wants to refine search
+            None - user skipped or marked optional
+        """
         print(f"\nFound {len(results)} potential matches:\n")
 
         display_count = min(5, len(results))
@@ -221,34 +268,31 @@ class InteractiveNodeStrategy(NodeResolutionStrategy):
                 print(f"     {desc}")
             print()
 
-        has_browse = len(results) > 5
-        if has_browse:
-            print(f"  0. Browse all {len(results)} matches\n")
+        print("  [1-5] - Select package to install")
+        print("  [r]   - Refine search")
+        print("  [m]   - Manually enter package ID")
+        print("  [o]   - Mark as optional (workflow works without it)")
+        print("  [s]   - Skip (leave unresolved)")
 
         choice = self._unified_choice_prompt(
-            "Choice [1]/o/m/s: ",
+            "Choice [1]/r/m/o/s: ",
             num_options=display_count,
-            has_browse=has_browse
+            has_browse=False
         )
 
         if choice == 's':
             self._last_choice = 'skip'
             return None
+        elif choice == 'r':
+            self._last_choice = 'refine'
+            return "REFINE"
         elif choice == 'o':
-            # Return None to skip - caller will check _last_choice for optional
             self._last_choice = 'optional'
             print(f"  ✓ Marked '{node_type}' as optional")
-            return None
+            return self._get_optional_package(node_type)
         elif choice == 'm':
             self._last_choice = 'manual'
             return self._get_manual_package_id(node_type)
-        elif choice == '0':
-            self._last_choice = 'browse'
-            selected = self._browse_all_packages(results, context)
-            if selected and selected != "BACK":
-                print(f"\n✓ Selected: {selected.package_id}")
-                return self._create_resolved_from_match(node_type, selected)
-            return None
         else:
             self._last_choice = 'select'
             idx = int(choice) - 1
@@ -549,6 +593,7 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
                         continue
                 else:
                     # User made a choice (model, optional, or skip)
+                    assert isinstance(result, ResolvedModel) or result is None
                     return result
             else:
                 # No results found

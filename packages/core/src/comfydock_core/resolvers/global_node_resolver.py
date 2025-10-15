@@ -491,8 +491,8 @@ class GlobalNodeResolver:
                     confidence=confidence
                 ))
 
-        # Sort by score descending
-        scored.sort(key=lambda x: x.score, reverse=True)
+        # Sort by (score, stars) descending - stars act as tiebreaker for similar scores
+        scored.sort(key=lambda x: (x.score, x.package_data.github_stars or 0), reverse=True)
         return scored[:limit]
 
     def _calculate_match_score(
@@ -510,12 +510,13 @@ class GlobalNodeResolver:
         2. Keyword overlap bonus
         3. Hint pattern bonuses (heuristics!)
         4. Installed package bonus
+        5. Popularity bonus (GitHub stars on log scale)
         """
         from difflib import SequenceMatcher
 
         pkg_id_lower = pkg_id.lower()
 
-        # 1. Base fuzzy score
+        # 1. Base fuzzy score (ID and display name only)
         base_score = SequenceMatcher(None, node_type_lower, pkg_id_lower).ratio()
 
         # Also check display name
@@ -525,46 +526,66 @@ class GlobalNodeResolver:
             ).ratio()
             base_score = max(base_score, name_score)
 
-        # 2. Keyword overlap bonus
-        node_keywords = set(re.findall(r'\w+', node_type_lower))
-        pkg_keywords = set(re.findall(r'\w+', pkg_id_lower))
+        # 2. Keyword overlap bonus (ID, display name, AND description for better recall)
+        # Split on underscores, hyphens, and whitespace to extract individual keywords
+        node_keywords = set(re.findall(r'[a-z0-9]+', node_type_lower))
+        pkg_keywords = set(re.findall(r'[a-z0-9]+', pkg_id_lower))
         if pkg_data.display_name:
-            pkg_keywords.update(re.findall(r'\w+', pkg_data.display_name.lower()))
+            pkg_keywords.update(re.findall(r'[a-z0-9]+', pkg_data.display_name.lower()))
 
-        keyword_overlap = len(node_keywords & pkg_keywords) / max(len(node_keywords), 1)
-        keyword_bonus = keyword_overlap * 0.20
+        # Add description keywords but with limited weight
+        desc_keywords = set()
+        if pkg_data.description:
+            desc_keywords = set(re.findall(r'[a-z0-9]+', pkg_data.description.lower()))
+
+        # Calculate overlap for ID/name vs description separately
+        id_overlap = len(node_keywords & pkg_keywords) / max(len(node_keywords), 1)
+        desc_overlap = len(node_keywords & desc_keywords) / max(len(node_keywords), 1)
+
+        # Combine with weighted importance:
+        # - ID/name match is primary (0.50 max bonus - increased to dominate over fuzzy)
+        # - Description match is secondary boost (0.15 max bonus)
+        keyword_bonus = (id_overlap * 0.50) + (desc_overlap * 0.15)
 
         # 3. Hint pattern bonuses (THE HEURISTICS!)
-        hint_bonus = self._detect_hint_patterns(node_type, node_type_lower, pkg_id_lower)
+        hint_bonus = self._detect_hint_patterns(node_type, pkg_id_lower)
 
         # 4. Installed package bonus
         installed_bonus = 0.10 if is_installed else 0.0
 
-        # Combine and cap at 1.0
-        final_score = base_score + keyword_bonus + hint_bonus + installed_bonus
-        return min(1.0, final_score)
+        # 5. Popularity bonus (log scale to prevent overwhelming text relevance)
+        # 10 stars → 0.01, 100 stars → 0.02, 1000 stars → 0.03, 10000 stars → 0.04
+        import math
+        popularity_bonus = 0.0
+        if pkg_data.github_stars and pkg_data.github_stars > 0:
+            popularity_bonus = math.log10(pkg_data.github_stars) * 0.1
+
+        # Combine - don't cap at 1.0 so popularity can differentiate high-scoring packages
+        final_score = base_score + keyword_bonus + hint_bonus + installed_bonus + popularity_bonus
+        return final_score
 
     def _detect_hint_patterns(
         self,
         node_type: str,
-        node_type_lower: str,
         pkg_id_lower: str
     ) -> float:
         """Detect hint patterns and return bonus score.
 
         This is where heuristics live - as score boosters!
+        These bonuses are now more conservative to prevent score inflation.
         """
         max_bonus = 0.0
 
-        # Pattern 1: Parenthetical hint
-        # "Node Name (package)" → "package"
-        if "(" in node_type and ")" in node_type:
-            hint = node_type.split("(")[-1].rstrip(")").strip().lower()
-            if len(hint) >= 3:  # Minimum length to avoid false positives
-                if hint == pkg_id_lower:
-                    max_bonus = max(max_bonus, 0.70)  # Exact match
-                elif hint in pkg_id_lower:
-                    max_bonus = max(max_bonus, 0.60)  # Substring match
+        # Pattern 1: Parenthetical/Bracket hint (STRONG signal)
+        # "Node Name (package)" → "package" OR "Node Name [package]" → "package"
+        for open_char, close_char in [("(", ")"), ("[", "]")]:
+            if open_char in node_type and close_char in node_type:
+                hint = node_type.split(open_char)[-1].rstrip(close_char).strip().lower()
+                if len(hint) >= 3:  # Minimum length to avoid false positives
+                    if hint == pkg_id_lower:
+                        max_bonus = max(max_bonus, 0.50)  # Exact match
+                    elif hint in pkg_id_lower:
+                        max_bonus = max(max_bonus, 0.40)  # Substring match
 
         # Pattern 2: Pipe separator
         # "Node Name | PackageName" → "PackageName"
@@ -573,7 +594,7 @@ class GlobalNodeResolver:
             if len(parts) == 2:
                 hint = parts[1].strip().lower()
                 if hint in pkg_id_lower:
-                    max_bonus = max(max_bonus, 0.55)
+                    max_bonus = max(max_bonus, 0.35)  # Reduced from 0.55
 
         # Pattern 3: Dash/Colon separator
         # "Node Name - Package" or "Node: Package"
@@ -583,16 +604,11 @@ class GlobalNodeResolver:
                 if len(parts) >= 2:
                     hint = parts[-1].strip().lower()
                     if len(hint) >= 3 and hint in pkg_id_lower:
-                        max_bonus = max(max_bonus, 0.50)
+                        max_bonus = max(max_bonus, 0.30)  # Reduced from 0.50
                         break
 
-        # Pattern 4: Fragment match (weakest)
-        # "DepthAnythingV2" → "depthanythingv2" in package
-        pkg_parts = re.split(r'[-_]', pkg_id_lower)
-        for part in pkg_parts:
-            if len(part) > 4 and part in node_type_lower:
-                max_bonus = max(max_bonus, 0.40)
-                break
+        # Pattern 4: Fragment match (weakest) - removed to reduce noise
+        # This was adding too many false positives
 
         return max_bonus
 
