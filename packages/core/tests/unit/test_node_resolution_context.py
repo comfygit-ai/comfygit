@@ -8,7 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 from comfydock_core.resolvers.global_node_resolver import GlobalNodeResolver
-from comfydock_core.models.workflow import WorkflowNode
+from comfydock_core.models.workflow import WorkflowNode, NodeResolutionContext
 from comfydock_core.models.node_mapping import (
     GlobalNodeMappings,
     GlobalNodePackage,
@@ -16,15 +16,6 @@ from comfydock_core.models.node_mapping import (
     GlobalNodeMappingsStats,
 )
 from comfydock_core.models.shared import NodeInfo
-
-
-@dataclass
-class NodeResolutionContext:
-    """Context for enhanced node resolution."""
-    installed_packages: dict[str, NodeInfo] = field(default_factory=dict)
-    session_resolved: dict[str, str] = field(default_factory=dict)
-    custom_mappings: dict[str, str] = field(default_factory=dict)
-    workflow_name: str = ""
 
 
 class TestPropertiesFieldResolution:
@@ -85,7 +76,6 @@ class TestPropertiesFieldResolution:
         assert result[0].match_type == "properties"
         assert result[0].match_confidence == 1.0
         assert "abc123def456" in result[0].versions
-        assert context.session_resolved["Mute / Bypass Repeater (rgthree)"] == "rgthree-comfy"
 
     def test_properties_with_invalid_cnr_id_falls_through(self, tmp_path):
         """Properties with cnr_id not in registry should fall through to next strategy."""
@@ -144,11 +134,14 @@ class TestSessionCacheDeduplication:
             "generated_at": "2024-01-01",
             "stats": {},
             "mappings": {
-                "TestNode::_": {
-                    "id": "TestNode::_",
-                    "package_id": "test-package",
-                    "versions": []
-                }
+                "TestNode::_": [
+                    {
+                        "package_id": "test-package",
+                        "versions": [],
+                        "rank": 1,
+                        "source": "registry"
+                    }
+                ]
             },
             "packages": {
                 "test-package": {
@@ -189,12 +182,9 @@ class TestSessionCacheDeduplication:
         assert result2 is not None
         assert result1[0].package_id == result2[0].package_id == "test-package"
 
-        # Session cache should contain the node type
-        assert "TestNode" in context.session_resolved
-        assert context.session_resolved["TestNode"] == "test-package"
-
-        # Second result should indicate cache hit
-        assert result2[0].match_type == "session_cache"
+        # Both should be type_only matches (no session cache in current implementation)
+        assert result1[0].match_type == "type_only"
+        assert result2[0].match_type == "type_only"
 
 
 class TestCustomMappingsOverride:
@@ -211,11 +201,14 @@ class TestCustomMappingsOverride:
             "generated_at": "2024-01-01",
             "stats": {},
             "mappings": {
-                "AmbiguousNode::_": {
-                    "id": "AmbiguousNode::_",
-                    "package_id": "package-a",
-                    "versions": []
-                }
+                "AmbiguousNode::_": [
+                    {
+                        "package_id": "package-a",
+                        "versions": [],
+                        "rank": 1,
+                        "source": "registry"
+                    }
+                ]
             },
             "packages": {
                 "package-a": {"id": "package-a", "display_name": "Package A", "versions": {}},
@@ -268,7 +261,7 @@ class TestCustomMappingsOverride:
         resolver = GlobalNodeResolver(mappings_file)
 
         context = NodeResolutionContext(
-            custom_mappings={"SkippedNode": "skip"}
+            custom_mappings={"SkippedNode": False}  # False = optional node
         )
 
         node = WorkflowNode(
@@ -280,8 +273,11 @@ class TestCustomMappingsOverride:
         # ACT
         result = resolver.resolve_single_node_with_context(node, context)
 
-        # ASSERT: Should return empty list (not None!)
-        assert result == [], "Skip mapping should return empty list"
+        # ASSERT: Should return ResolvedNodePackage with is_optional=True
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].is_optional is True
+        assert result[0].match_type == "custom_mapping"
 
 
 class TestHeuristicRemoved:
@@ -400,11 +396,14 @@ class TestResolutionPriorityOrder:
             "generated_at": "2024-01-01",
             "stats": {},
             "mappings": {
-                "TestNode::_": {
-                    "id": "TestNode::_",
-                    "package_id": "global-package",
-                    "versions": []
-                }
+                "TestNode::_": [
+                    {
+                        "package_id": "global-package",
+                        "versions": [],
+                        "rank": 1,
+                        "source": "registry"
+                    }
+                ]
             },
             "packages": {
                 "global-package": {"id": "global-package", "display_name": "Global", "versions": {}},
@@ -419,9 +418,8 @@ class TestResolutionPriorityOrder:
 
         resolver = GlobalNodeResolver(mappings_file)
 
-        # Context with session cache, custom mapping
+        # Context with custom mapping and properties
         context = NodeResolutionContext(
-            session_resolved={"TestNode": "cached-package"},  # Highest priority!
             custom_mappings={"TestNode": "custom-package"}
         )
 
@@ -437,10 +435,10 @@ class TestResolutionPriorityOrder:
         # ACT
         result = resolver.resolve_single_node_with_context(node, context)
 
-        # ASSERT: Should use cached-package (session cache wins!)
+        # ASSERT: Custom mapping has priority over properties and global table
         assert result is not None
-        assert result[0].package_id == "cached-package"
-        assert result[0].match_type == "session_cache"
+        assert result[0].package_id == "custom-package"
+        assert result[0].match_type == "custom_mapping"
 
     def test_fallthrough_order_when_higher_priorities_missing(self, tmp_path):
         """Should fall through priority levels in order."""
@@ -452,11 +450,14 @@ class TestResolutionPriorityOrder:
             "generated_at": "2024-01-01",
             "stats": {},
             "mappings": {
-                "TestNode::_": {
-                    "id": "TestNode::_",
-                    "package_id": "global-package",
-                    "versions": []
-                }
+                "TestNode::_": [
+                    {
+                        "package_id": "global-package",
+                        "versions": [],
+                        "rank": 1,
+                        "source": "registry"
+                    }
+                ]
             },
             "packages": {
                 "global-package": {"id": "global-package", "display_name": "Global", "versions": {}},

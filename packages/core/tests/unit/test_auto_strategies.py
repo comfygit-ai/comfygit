@@ -1,7 +1,7 @@
 """Test auto resolution strategies."""
 import pytest
 from comfydock_core.strategies import AutoNodeStrategy, AutoModelStrategy
-from comfydock_core.models.workflow import WorkflowNodeWidgetRef, ResolvedNodePackage
+from comfydock_core.models.workflow import WorkflowNodeWidgetRef, ResolvedNodePackage, ResolvedModel
 from comfydock_core.models.shared import ModelWithLocation
 from comfydock_core.models.node_mapping import GlobalNodePackage
 
@@ -11,7 +11,9 @@ class TestAutoNodeStrategy:
 
     def test_resolve_unknown_node_with_suggestions(self):
         """Should pick highest confidence suggestion."""
+        from comfydock_core.models.workflow import NodeResolutionContext
         strategy = AutoNodeStrategy()
+        context = NodeResolutionContext()
         suggestions = [
             ResolvedNodePackage(
                 package_id='node-b',
@@ -51,12 +53,14 @@ class TestAutoNodeStrategy:
             ),
         ]
 
-        result = strategy.resolve_unknown_node('SomeNode', suggestions)
+        result = strategy.resolve_unknown_node('SomeNode', suggestions, context)
         assert result.package_id == 'node-a'
 
     def test_resolve_unknown_node_with_tied_confidence(self):
         """Should pick first when confidence is tied."""
+        from comfydock_core.models.workflow import NodeResolutionContext
         strategy = AutoNodeStrategy()
+        context = NodeResolutionContext()
         suggestions = [
             ResolvedNodePackage(
                 package_id='node-a',
@@ -84,13 +88,15 @@ class TestAutoNodeStrategy:
             ),
         ]
 
-        result = strategy.resolve_unknown_node('SomeNode', suggestions)
+        result = strategy.resolve_unknown_node('SomeNode', suggestions, context)
         assert result.package_id == 'node-a'
 
     def test_resolve_unknown_node_empty_suggestions(self):
         """Should return None for empty suggestions."""
+        from comfydock_core.models.workflow import NodeResolutionContext
         strategy = AutoNodeStrategy()
-        result = strategy.resolve_unknown_node('SomeNode', [])
+        context = NodeResolutionContext()
+        result = strategy.resolve_unknown_node('SomeNode', [], context)
         assert result is None
 
     def test_confirm_node_install_always_true(self):
@@ -114,9 +120,11 @@ class TestAutoNodeStrategy:
 class TestAutoModelStrategy:
     """Test automatic model resolution strategy."""
 
-    def test_resolve_ambiguous_model_picks_first(self):
-        """Should pick first candidate."""
+    def test_resolve_model_picks_first(self):
+        """Should pick first candidate when multiple available."""
+        from comfydock_core.models.workflow import ModelResolutionContext
         strategy = AutoModelStrategy()
+        context = ModelResolutionContext(workflow_name="test")
         ref = WorkflowNodeWidgetRef(
             node_id='1',
             node_type='CheckpointLoader',
@@ -125,30 +133,42 @@ class TestAutoModelStrategy:
         )
 
         candidates = [
-            ModelWithLocation(
-                hash='abc123',
-                filename='model1.safetensors',
-                file_size=1000,
-                relative_path='checkpoints/model1.safetensors',
-                mtime=1234567890.0,
-                last_seen=1234567890
+            ResolvedModel(
+                workflow="test",
+                reference=ref,
+                resolved_model=ModelWithLocation(
+                    hash='abc123',
+                    filename='model1.safetensors',
+                    file_size=1000,
+                    relative_path='checkpoints/model1.safetensors',
+                    mtime=1234567890.0,
+                    last_seen=1234567890
+                ),
+                match_type="exact"
             ),
-            ModelWithLocation(
-                hash='def456',
-                filename='model2.safetensors',
-                file_size=2000,
-                relative_path='checkpoints/model2.safetensors',
-                mtime=1234567891.0,
-                last_seen=1234567891
+            ResolvedModel(
+                workflow="test",
+                reference=ref,
+                resolved_model=ModelWithLocation(
+                    hash='def456',
+                    filename='model2.safetensors',
+                    file_size=2000,
+                    relative_path='checkpoints/model2.safetensors',
+                    mtime=1234567891.0,
+                    last_seen=1234567891
+                ),
+                match_type="fuzzy"
             ),
         ]
 
-        result = strategy.resolve_ambiguous_model(ref, candidates)
+        result = strategy.resolve_model(ref, candidates, context)
         assert result == candidates[0]
 
-    def test_resolve_ambiguous_model_empty_candidates(self):
-        """Should return None for empty candidates."""
+    def test_resolve_model_empty_candidates(self):
+        """Should return None for empty candidates (skip)."""
+        from comfydock_core.models.workflow import ModelResolutionContext
         strategy = AutoModelStrategy()
+        context = ModelResolutionContext(workflow_name="test")
         ref = WorkflowNodeWidgetRef(
             node_id='1',
             node_type='CheckpointLoader',
@@ -156,12 +176,14 @@ class TestAutoModelStrategy:
             widget_value='model.safetensors'
         )
 
-        result = strategy.resolve_ambiguous_model(ref, [])
+        result = strategy.resolve_model(ref, [], context)
         assert result is None
 
-    def test_handle_missing_model_returns_skip(self):
-        """Should return skip action for missing models."""
+    def test_resolve_model_missing_returns_none(self):
+        """Should return None to skip missing models."""
+        from comfydock_core.models.workflow import ModelResolutionContext
         strategy = AutoModelStrategy()
+        context = ModelResolutionContext(workflow_name="test")
         ref = WorkflowNodeWidgetRef(
             node_id='1',
             node_type='CheckpointLoader',
@@ -169,5 +191,6 @@ class TestAutoModelStrategy:
             widget_value='missing.safetensors'
         )
 
-        result = strategy.handle_missing_model(ref)
-        assert result == ("skip", "")
+        # Empty candidates = missing model
+        result = strategy.resolve_model(ref, [], context)
+        assert result is None

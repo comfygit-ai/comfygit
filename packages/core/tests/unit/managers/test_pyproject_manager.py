@@ -43,24 +43,25 @@ class TestModelHandlerFormatting:
 
     def test_add_required_model_only(self, temp_pyproject):
         """Test adding only required models doesn't create optional section."""
+        from comfydock_core.models.manifest import ManifestModel
         manager = PyprojectManager(temp_pyproject)
 
         # Add a required model
-        manager.models.add_model(
-            model_hash="abc123",
+        model = ManifestModel(
+            hash="abc123",
             filename="test_model.safetensors",
-            file_size=1234567,
-            category="required",
-            relative_path="checkpoints/test_model.safetensors"
+            size=1234567,
+            relative_path="checkpoints/test_model.safetensors",
+            category="checkpoints"
         )
+        manager.models.add_model(model)
 
         # Read the raw TOML output
         with open(temp_pyproject) as f:
             content = f.read()
 
-        # Verify structure
-        assert "[tool.comfydock.models.required]" in content
-        assert "[tool.comfydock.models.optional]" not in content
+        # Verify structure - models are now stored by hash
+        assert "[tool.comfydock.models]" in content
         assert "abc123" in content
 
         # Verify inline table format (all on one line)
@@ -71,72 +72,70 @@ class TestModelHandlerFormatting:
         assert 'relative_path' in model_line
 
     def test_add_optional_model_only(self, temp_pyproject):
-        """Test adding only optional models doesn't create required section."""
+        """Test adding models to global manifest."""
+        from comfydock_core.models.manifest import ManifestModel
         manager = PyprojectManager(temp_pyproject)
 
-        # Add an optional model
-        manager.models.add_model(
-            model_hash="xyz789",
+        # Add a model
+        model = ManifestModel(
+            hash="xyz789",
             filename="optional_model.safetensors",
-            file_size=9876543,
-            category="optional",
-            relative_path="checkpoints/optional.safetensors"
+            size=9876543,
+            relative_path="checkpoints/optional.safetensors",
+            category="checkpoints"
         )
+        manager.models.add_model(model)
 
         # Read the raw TOML output
         with open(temp_pyproject) as f:
             content = f.read()
 
-        # Verify structure
-        assert "[tool.comfydock.models.optional]" in content
-        assert "[tool.comfydock.models.required]" not in content
+        # Verify structure - global models section
+        assert "[tool.comfydock.models]" in content
+        assert "xyz789" in content
 
     def test_add_both_model_categories(self, temp_pyproject):
-        """Test adding both required and optional models."""
+        """Test adding multiple models to global manifest."""
+        from comfydock_core.models.manifest import ManifestModel
         manager = PyprojectManager(temp_pyproject)
 
-        # Add models to both categories
-        manager.models.add_model(
-            model_hash="req123",
+        # Add multiple models
+        model1 = ManifestModel(
+            hash="req123",
             filename="required.safetensors",
-            file_size=1000,
-            category="required"
+            size=1000,
+            relative_path="checkpoints/required.safetensors",
+            category="checkpoints"
         )
-        manager.models.add_model(
-            model_hash="opt456",
+        model2 = ManifestModel(
+            hash="opt456",
             filename="optional.safetensors",
-            file_size=2000,
-            category="optional"
+            size=2000,
+            relative_path="loras/optional.safetensors",
+            category="loras"
         )
+        manager.models.add_model(model1)
+        manager.models.add_model(model2)
 
         # Read the raw TOML output
         with open(temp_pyproject) as f:
             content = f.read()
 
-        # Both sections should exist
-        assert "[tool.comfydock.models.required]" in content
-        assert "[tool.comfydock.models.optional]" in content
-
-        # Models should be under the correct sections
-        lines = content.split('\n')
-        req_section_idx = next(i for i, l in enumerate(lines) if 'models.required]' in l)
-        opt_section_idx = next(i for i, l in enumerate(lines) if 'models.optional]' in l)
-
-        # Required model should come before optional section
-        req_model_idx = next(i for i, l in enumerate(lines) if 'req123' in l)
-        assert req_section_idx < req_model_idx < opt_section_idx
-
-        # Optional model should come after optional section
-        opt_model_idx = next(i for i, l in enumerate(lines) if 'opt456' in l)
-        assert opt_section_idx < opt_model_idx
+        # Both models should be in global section
+        assert "[tool.comfydock.models]" in content
+        assert "req123" in content
+        assert "opt456" in content
 
     def test_remove_all_models_cleans_sections(self, temp_pyproject):
         """Test removing all models cleans up empty sections."""
+        from comfydock_core.models.manifest import ManifestModel
         manager = PyprojectManager(temp_pyproject)
 
         # Add models
-        manager.models.add_model("hash1", "model1.safetensors", 1000, "required")
-        manager.models.add_model("hash2", "model2.safetensors", 2000, "optional")
+        model1 = ManifestModel(hash="hash1", filename="model1.safetensors", size=1000, relative_path="checkpoints/model1.safetensors", category="checkpoints")
+        model2 = ManifestModel(hash="hash2", filename="model2.safetensors", size=2000, relative_path="loras/model2.safetensors", category="loras")
+        manager.models.add_model(model1)
+        manager.models.add_model(model2)
 
         # Remove all models
         manager.models.remove_model("hash1")

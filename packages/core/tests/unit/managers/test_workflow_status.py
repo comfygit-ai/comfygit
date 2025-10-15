@@ -62,7 +62,7 @@ class TestDetailedWorkflowStatus:
             name="wf1",
             sync_state="synced",
             dependencies=WorkflowDependencies(workflow_name="wf1"),
-            resolution=ResolutionResult()  # No issues
+            resolution=ResolutionResult(workflow_name="wf1")  # No issues
         )
 
         status = DetailedWorkflowStatus(
@@ -94,7 +94,7 @@ class TestDetailedWorkflowStatus:
             name="wf1",
             sync_state="modified",
             dependencies=WorkflowDependencies(workflow_name="wf1"),
-            resolution=ResolutionResult(models_unresolved=[model_ref])
+            resolution=ResolutionResult(workflow_name="wf1", models_unresolved=[model_ref])
         )
 
         status = DetailedWorkflowStatus(
@@ -127,7 +127,7 @@ class TestDetailedWorkflowStatus:
             name="wf1",
             sync_state="modified",
             dependencies=WorkflowDependencies(workflow_name="wf1"),
-            resolution=ResolutionResult(models_unresolved=[model_ref])
+            resolution=ResolutionResult(workflow_name="wf1", models_unresolved=[model_ref])
         )
 
         status = DetailedWorkflowStatus(
@@ -152,7 +152,7 @@ class TestDetailedWorkflowStatus:
             name="wf1",
             sync_state="modified",
             dependencies=WorkflowDependencies(workflow_name="wf1"),
-            resolution=ResolutionResult()  # No issues
+            resolution=ResolutionResult(workflow_name="wf1")  # No issues
         )
 
         status = DetailedWorkflowStatus(

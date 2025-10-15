@@ -22,19 +22,27 @@ class TestUnifiedSearchScoring:
         global_data = {
             "version": "test",
             "generated_at": "2024-01-01",
-            "stats": {},
+            "stats": {
+                "packages": 2,
+                "signatures": 0,
+                "total_nodes": 0
+            },
             "mappings": {},
             "packages": {
                 "rgthree-comfy": {
                     "id": "rgthree-comfy",
                     "display_name": "rgthree's ComfyUI Nodes",
                     "description": "Workflow management nodes",
+                    "repository": "https://github.com/rgthree/rgthree-comfy",
+                    "github_stars": 100,
                     "versions": {}
                 },
                 "comfyui-impact-pack": {
                     "id": "comfyui-impact-pack",
                     "display_name": "Impact Pack",
                     "description": "Various utility nodes",
+                    "repository": "https://github.com/ltdrdata/ComfyUI-Impact-Pack",
+                    "github_stars": 50,
                     "versions": {}
                 }
             }
@@ -48,7 +56,7 @@ class TestUnifiedSearchScoring:
         # ACT: Search for node with hint
         results = resolver.search_packages(
             node_type="Test Node (rgthree)",
-            installed_packages=None,
+            installed_packages={},
             include_registry=True,
             limit=10
         )
