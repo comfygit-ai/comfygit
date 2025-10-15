@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from comfydock_core.resolvers.global_node_resolver import GlobalNodeResolver
+from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
 from comfydock_core.models.workflow import WorkflowNode, NodeResolutionContext
 from comfydock_core.models.shared import NodeInfo
 
@@ -69,7 +70,8 @@ class TestSchemaV2Loading:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             # Should load without error
             assert resolver.global_mappings is not None
@@ -147,7 +149,8 @@ class TestSchemaV2Loading:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             mapping = resolver.global_mappings.mappings["ReActorFaceSwapOpt::079f3587"]
             assert len(mapping.packages) == 3
@@ -197,7 +200,8 @@ class TestResolutionWithRanking:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             node = WorkflowNode(
                 id="1",
@@ -239,7 +243,8 @@ class TestResolutionWithRanking:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
             node = WorkflowNode(id="1", type="TestNode")
 
             result = resolver.resolve_single_node_from_mapping(node)
@@ -276,7 +281,8 @@ class TestAutoSelectionLogic:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             # Simulate rank 2 is installed
             installed_packages = {
@@ -317,7 +323,8 @@ class TestAutoSelectionLogic:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             # No installed packages
             context = NodeResolutionContext(
@@ -355,7 +362,8 @@ class TestAutoSelectionLogic:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             # Context with auto_select disabled
             context = NodeResolutionContext(
@@ -410,7 +418,8 @@ class TestRankFieldPersistence:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
             node = WorkflowNode(id="1", type="TestNode")  # No inputs = type-only match
 
             result = resolver.resolve_single_node_from_mapping(node)
@@ -454,7 +463,8 @@ class TestManagerSourceHandling:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             mapping = resolver.global_mappings.mappings["TestNode::_"]
             assert mapping.packages[0].source == "manager"
@@ -493,7 +503,8 @@ class TestManagerSourceHandling:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             mapping = resolver.global_mappings.mappings["TestNode::_"]
             assert mapping.packages[0].source is None
@@ -525,7 +536,8 @@ class TestBackwardCompatibility:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
 
             context = NodeResolutionContext(
                 installed_packages={},
@@ -555,7 +567,8 @@ class TestBackwardCompatibility:
             with open(mappings_path, 'w') as f:
                 json.dump(mappings_data, f)
 
-            resolver = GlobalNodeResolver(mappings_path)
+            repository = NodeMappingsRepository(mappings_path)
+            resolver = GlobalNodeResolver(repository)
             node = WorkflowNode(id="1", type="TestNode", inputs=[])
 
             result = resolver.resolve_single_node_from_mapping(node)

@@ -29,7 +29,6 @@ class ModelResolver:
     def __init__(
         self,
         model_repository: ModelRepository,
-        pyproject_manager: PyprojectManager,
         model_config: ModelConfig | None = None, 
         download_manager=None,
     ):
@@ -41,7 +40,6 @@ class ModelResolver:
         """
         self.model_repository = model_repository
         self.model_config = model_config or ModelConfig.load()
-        self.pyproject = pyproject_manager
         self.download_manager = download_manager
 
     def resolve_model(

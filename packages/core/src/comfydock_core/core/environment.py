@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         NodeResolutionStrategy,
         RollbackStrategy,
     )
+    from ..repositories.node_mappings_repository import NodeMappingsRepository
     from ..repositories.model_repository import ModelRepository
     from ..repositories.workspace_config_repository import WorkspaceConfigRepository
     from ..services.registry_data_manager import RegistryDataManager
@@ -49,15 +50,15 @@ class Environment:
         path: Path,
         workspace_paths: WorkspacePaths,
         model_repository: ModelRepository,
+        node_mapping_repository: NodeMappingsRepository,
         workspace_config_manager: WorkspaceConfigRepository,
-        registry_data_manager: RegistryDataManager
     ):
         self.name = name
         self.path = path
         self.workspace_paths = workspace_paths
         self.model_repository = model_repository
+        self.node_mapping_repository = node_mapping_repository
         self.workspace_config_manager = workspace_config_manager
-        self.registry_data_manager = registry_data_manager
 
         # Workspace-level paths
         self.global_models_path = self.workspace_config_manager.get_models_directory()
@@ -108,7 +109,7 @@ class Environment:
             self.node_lookup,
             self.resolution_tester,
             self.custom_nodes_path,
-            self.registry_data_manager
+            self.node_mapping_repository
         )
 
     @cached_property
@@ -125,7 +126,7 @@ class Environment:
             self.cec_path,
             self.pyproject,
             self.model_repository,
-            self.registry_data_manager
+            self.node_mapping_repository
         )
 
     @cached_property
@@ -366,7 +367,7 @@ class Environment:
     # Node Management
     # =====================================================
 
-    def add_node(self, identifier: str, is_local: bool = False, is_development: bool = False, no_test: bool = False, force: bool = False) -> NodeInfo:
+    def add_node(self, identifier: str, is_development: bool = False, no_test: bool = False, force: bool = False) -> NodeInfo:
         """Add a custom node to the environment.
 
         Raises:
@@ -374,7 +375,7 @@ class Environment:
             CDNodeConflictError: If node has dependency conflicts
             CDEnvironmentError: If node with same name already exists
         """
-        return self.node_manager.add_node(identifier, is_local, is_development, no_test, force)
+        return self.node_manager.add_node(identifier, is_development, no_test, force)
 
     def remove_node(self, identifier: str):
         """Remove a custom node.

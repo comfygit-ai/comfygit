@@ -8,6 +8,7 @@ import pytest
 from pathlib import Path
 
 from comfydock_core.resolvers.global_node_resolver import GlobalNodeResolver
+from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
 from comfydock_core.models.shared import NodeInfo
 
 
@@ -51,7 +52,8 @@ class TestUnifiedSearchScoring:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # ACT: Search for node with hint
         results = resolver.search_packages(
@@ -93,7 +95,8 @@ class TestUnifiedSearchScoring:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # ACT: Node with hint pointing to target-package
         results = resolver.search_packages(
@@ -131,7 +134,8 @@ class TestUnifiedSearchScoring:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         installed_packages = {
             "installed-pkg": NodeInfo(
@@ -181,7 +185,8 @@ class TestUnifiedSearchScoring:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # ACT
         results = resolver.search_packages(
@@ -215,7 +220,8 @@ class TestUnifiedSearchScoring:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # ACT: Request only 5 results
         results = resolver.search_packages(
@@ -248,7 +254,8 @@ class TestUnifiedSearchScoring:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # ACT: Search for something completely different
         results = resolver.search_packages(
@@ -287,7 +294,8 @@ class TestHeuristicRemovalBehavior:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         from comfydock_core.models.workflow import NodeResolutionContext, WorkflowNode
 
@@ -333,7 +341,8 @@ class TestHeuristicRemovalBehavior:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # ASSERT: Old methods should not exist
         assert not hasattr(resolver, '_likely_provides_node'), \
@@ -360,7 +369,8 @@ class TestSearchPackagesEdgeCases:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # ACT
         results = resolver.search_packages(node_type="", include_registry=True)
@@ -383,7 +393,8 @@ class TestSearchPackagesEdgeCases:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # ACT
         results = resolver.search_packages(
@@ -420,7 +431,8 @@ class TestSearchPackagesEdgeCases:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         installed_packages = {
             "installed-pkg": NodeInfo(

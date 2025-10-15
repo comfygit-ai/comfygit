@@ -15,7 +15,7 @@ def workflow_manager():
                 cec_path=Path("/tmp/cec"),
                 pyproject=Mock(),
                 model_repository=Mock(),
-                registry_data_manager=Mock()
+                node_mapping_repository=Mock()
             )
             return manager
 

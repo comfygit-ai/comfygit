@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from comfydock_core.models.shared import ModelWithLocation
 from comfydock_core.resolvers.global_node_resolver import GlobalNodeResolver
+from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
 from comfydock_core.services.registry_data_manager import RegistryDataManager
 
 from ..resolvers.model_resolver import ModelResolver
@@ -59,12 +60,13 @@ class WorkflowManager:
         cec_path: Path,
         pyproject: PyprojectManager,
         model_repository: ModelRepository,
-        registry_data_manager: RegistryDataManager,
+        node_mapping_repository: NodeMappingsRepository
     ):
         self.comfyui_path = comfyui_path
         self.cec_path = cec_path
         self.pyproject = pyproject
         self.model_repository = model_repository
+        self.node_mapping_repository = node_mapping_repository
 
         self.comfyui_workflows = comfyui_path / "user" / "default" / "workflows"
         self.cec_workflows = cec_path / "workflows"
@@ -73,14 +75,9 @@ class WorkflowManager:
         self.comfyui_workflows.mkdir(parents=True, exist_ok=True)
         self.cec_workflows.mkdir(parents=True, exist_ok=True)
 
-        self.resgistry_data_manager = registry_data_manager
-        node_mappings_path = self.resgistry_data_manager.get_mappings_path()
-
-        self.global_node_resolver = GlobalNodeResolver(mappings_path=node_mappings_path)
-        self.model_resolver = ModelResolver(
-            model_repository=self.model_repository,
-            pyproject_manager=self.pyproject
-        )
+        # Create repository and inject into resolver
+        self.global_node_resolver = GlobalNodeResolver(self.node_mapping_repository)
+        self.model_resolver = ModelResolver(model_repository=self.model_repository)
 
     def _normalize_package_id(self, package_id: str) -> str:
         """Normalize GitHub URLs to registry IDs if they exist in the registry.

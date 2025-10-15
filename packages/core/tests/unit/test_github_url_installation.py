@@ -29,12 +29,9 @@ class TestGitHubURLInstallation:
         custom_nodes_path = tmp_path / "custom_nodes"
         custom_nodes_path.mkdir()
 
-        registry_data_manager = Mock()
-        registry_data_manager.get_mappings_path.return_value = tmp_path / "mappings.json"
-
-        # Create mock mappings file
-        mappings_file = tmp_path / "mappings.json"
-        mappings_file.write_text('{"version": "1.0", "stats": {}, "mappings": {}, "packages": {}}')
+        # Create mock node repository
+        node_repository = Mock()
+        node_repository.resolve_github_url = Mock()
 
         manager = NodeManager(
             pyproject=pyproject,
@@ -42,7 +39,7 @@ class TestGitHubURLInstallation:
             node_lookup=node_lookup,
             resolution_tester=resolution_tester,
             custom_nodes_path=custom_nodes_path,
-            registry_data_manager=registry_data_manager
+            node_repository=node_repository
         )
 
         return manager
@@ -53,8 +50,8 @@ class TestGitHubURLInstallation:
         # Setup: GitHub URL that's NOT in the registry
         github_url = "https://github.com/logtd/ComfyUI-HotReloadHack.git"
 
-        # Mock global resolver to return None (not in registry)
-        mock_node_manager.global_resolver.resolve_github_url = Mock(return_value=None)
+        # Mock node repository to return None (not in registry)
+        mock_node_manager.node_repository.resolve_github_url = Mock(return_value=None)
 
         # Mock node lookup to return git node info (simulates GitHub API call)
         git_node_info = NodeInfo(
@@ -98,10 +95,10 @@ class TestGitHubURLInstallation:
         github_url = "https://github.com/ltdrdata/ComfyUI-Manager.git"
         registry_id = "comfyui-manager"
 
-        # Mock global resolver to return registry package
+        # Mock node repository to return registry package
         resolved_package = Mock()
         resolved_package.id = registry_id
-        mock_node_manager.global_resolver.resolve_github_url = Mock(return_value=resolved_package)
+        mock_node_manager.node_repository.resolve_github_url = Mock(return_value=resolved_package)
 
         # Mock that it's not already installed
         mock_node_manager._get_existing_node_by_registry_id = Mock(return_value={})

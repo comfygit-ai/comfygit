@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+
+
 from ..logging.logging_config import get_logger
 from ..managers.pyproject_manager import PyprojectManager
 from ..managers.uv_project_manager import UVProjectManager
@@ -23,6 +25,7 @@ from ..utils.dependency_parser import parse_dependency_string
 from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
+    from ..repositories.node_mappings_repository import NodeMappingsRepository
     from ..services.registry_data_manager import RegistryDataManager
 
 logger = get_logger(__name__)
@@ -38,18 +41,14 @@ class NodeManager:
         node_lookup: NodeLookupService,
         resolution_tester: ResolutionTester,
         custom_nodes_path: Path,
-        registry_data_manager: RegistryDataManager
+        node_repository: NodeMappingsRepository,
     ):
         self.pyproject = pyproject
         self.uv = uv
         self.node_lookup = node_lookup
         self.resolution_tester = resolution_tester
         self.custom_nodes_path = custom_nodes_path
-        self.registry_data_manager = registry_data_manager
-
-        # Initialize global resolver for GitHub URL → Registry ID mapping
-        node_mapper_path = self.registry_data_manager.get_mappings_path()
-        self.global_resolver = GlobalNodeResolver(node_mapper_path)
+        self.node_repository = node_repository
 
     def _find_node_by_name(self, name: str) -> tuple[str, NodeInfo] | None:
         """Find a node by name across all identifiers (case-insensitive).
@@ -122,7 +121,6 @@ class NodeManager:
     def add_node(
         self,
         identifier: str,
-        is_local: bool = False,
         is_development: bool = False,
         no_test: bool = False,
         force: bool = False,
@@ -131,7 +129,6 @@ class NodeManager:
 
         Args:
             identifier: Registry ID or GitHub URL of the node
-            is_local: If the node is installed locally
             is_development: If the node is a development node
             no_test: Skip testing the node
 
@@ -153,7 +150,7 @@ class NodeManager:
         if self._is_github_url(identifier):
             github_url = identifier
             # Try to resolve GitHub URL to registry ID
-            if resolved := self.global_resolver.resolve_github_url(identifier):
+            if resolved := self.node_repository.resolve_github_url(identifier):
                 registry_id = resolved.id
                 logger.info(f"Resolved GitHub URL to registry ID: {registry_id}")
 

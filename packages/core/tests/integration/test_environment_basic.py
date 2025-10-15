@@ -29,10 +29,18 @@ def test_workspace_operations(tmp_path):
 
 def test_environment_lifecycle_with_subprocess_mock(tmp_path):
     """Test environment lifecycle by mocking subprocess.run directly."""
+    import json
 
     # Create workspace
     workspace_path = tmp_path / "test_workspace"
     workspace = WorkspaceFactory.create(workspace_path)
+
+    # Create empty node mappings file to avoid network fetch
+    custom_nodes_cache = workspace.paths.cache / "custom_nodes"
+    custom_nodes_cache.mkdir(parents=True, exist_ok=True)
+    node_mappings = custom_nodes_cache / "node_mappings.json"
+    with open(node_mappings, 'w') as f:
+        json.dump({"mappings": {}, "packages": {}, "stats": {}}, f)
 
     # Set models directory (required for environment creation)
     models_dir = workspace_path / "models"

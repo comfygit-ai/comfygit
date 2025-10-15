@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from comfydock_core.core.workspace import WorkspacePaths
     from comfydock_core.repositories.model_repository import ModelRepository
+    from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
     from comfydock_core.repositories.workspace_config_repository import WorkspaceConfigRepository
-    from comfydock_core.services.registry_data_manager import RegistryDataManager
 
 logger = get_logger(__name__)
 
@@ -30,9 +30,9 @@ class EnvironmentFactory:
         name: str,
         env_path: Path,
         workspace_paths: WorkspacePaths,
-        model_index_manager: ModelRepository,
+        model_repository: ModelRepository,
+        node_mapping_repository: NodeMappingsRepository,
         workspace_config_manager: WorkspaceConfigRepository,
-        registry_data_manager: RegistryDataManager,
         python_version: str = "3.12",
         comfyui_version: str | None = None,
     ) -> Environment:
@@ -47,12 +47,12 @@ class EnvironmentFactory:
 
         # Initialize environment
         env = Environment(
-            name,
-            env_path,
-            workspace_paths,
-            model_index_manager,
-            workspace_config_manager,
-            registry_data_manager,
+            name=name,
+            path=env_path,
+            workspace_paths=workspace_paths,
+            model_repository=model_repository,
+            node_mapping_repository=node_mapping_repository,
+            workspace_config_manager=workspace_config_manager,
         )
 
         # Clone ComfyUI

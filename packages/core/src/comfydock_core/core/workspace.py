@@ -5,6 +5,7 @@ import shutil
 from functools import cached_property
 from pathlib import Path
 
+from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
 from comfydock_core.repositories.workspace_config_repository import WorkspaceConfigRepository
 
 from ..factories.environment_factory import EnvironmentFactory
@@ -82,21 +83,25 @@ class Workspace:
     @cached_property
     def workspace_config_manager(self) -> WorkspaceConfigRepository:
         return WorkspaceConfigRepository(self.paths.workspace_file)
-
+    
+    @cached_property
+    def registry_data_manager(self) -> RegistryDataManager:
+        return RegistryDataManager(self.paths.cache)
+    
     @cached_property
     def model_index_manager(self) -> ModelRepository:
         db_path = self.paths.cache / "models.db"
         return ModelRepository(db_path)
+    
+    @cached_property
+    def node_mapping_repository(self) -> NodeMappingsRepository:
+        return NodeMappingsRepository(self.registry_data_manager)
 
     @cached_property
     def model_scanner(self) -> ModelScanner:
         from ..configs.model_config import ModelConfig
         config = ModelConfig.load()
         return ModelScanner(self.model_index_manager, config)
-
-    @cached_property
-    def registry_data_manager(self) -> RegistryDataManager:
-        return RegistryDataManager(self.paths.cache)
 
     def update_registry_data(self) -> bool:
         """Force update registry data from GitHub.
@@ -125,12 +130,12 @@ class Workspace:
             if env_dir.is_dir() and (env_dir / ".cec").exists():
                 try:
                     env = Environment(
-                        env_dir.name,
-                        env_dir,
-                        self.paths,
-                        self.model_index_manager,
-                        self.workspace_config_manager,
-                        self.registry_data_manager
+                        name=env_dir.name,
+                        path=env_dir,
+                        workspace_paths=self.paths,
+                        model_repository=self.model_index_manager,
+                        node_mapping_repository=self.node_mapping_repository,
+                        workspace_config_manager=self.workspace_config_manager,
                     )
                     environments.append(env)
                 except Exception as e:
@@ -156,12 +161,12 @@ class Workspace:
             raise CDEnvironmentNotFoundError(f"Environment '{name}' not found")
 
         return Environment(
-            name,
-            env_path,
-            self.paths,
-            self.model_index_manager,
-            self.workspace_config_manager,
-            self.registry_data_manager
+            name=name,
+            path=env_path,
+            workspace_paths=self.paths,
+            model_repository=self.model_index_manager,
+            node_mapping_repository=self.node_mapping_repository,
+            workspace_config_manager=self.workspace_config_manager
         )
 
     def create_environment(
@@ -198,9 +203,9 @@ class Workspace:
                 name=name,
                 env_path=env_path,
                 workspace_paths=self.paths,
-                model_index_manager=self.model_index_manager,
+                model_repository=self.model_index_manager,
+                node_mapping_repository=self.node_mapping_repository,
                 workspace_config_manager=self.workspace_config_manager,
-                registry_data_manager=self.registry_data_manager,
                 python_version=python_version,
                 comfyui_version=comfyui_version
             )

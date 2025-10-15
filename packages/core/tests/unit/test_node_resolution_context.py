@@ -8,6 +8,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 from comfydock_core.resolvers.global_node_resolver import GlobalNodeResolver
+from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
 from comfydock_core.models.workflow import WorkflowNode, NodeResolutionContext
 from comfydock_core.models.node_mapping import (
     GlobalNodeMappings,
@@ -47,7 +48,8 @@ class TestPropertiesFieldResolution:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # Create node with properties
         node = WorkflowNode(
@@ -94,7 +96,8 @@ class TestPropertiesFieldResolution:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         node = WorkflowNode(
             id="1",
@@ -155,7 +158,8 @@ class TestSessionCacheDeduplication:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
         context = NodeResolutionContext()
 
         # Create two nodes with same type, different IDs
@@ -219,7 +223,8 @@ class TestCustomMappingsOverride:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # Context with custom mapping to package-b
         context = NodeResolutionContext(
@@ -258,7 +263,8 @@ class TestCustomMappingsOverride:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         context = NodeResolutionContext(
             custom_mappings={"SkippedNode": False}  # False = optional node
@@ -306,7 +312,8 @@ class TestHeuristicRemoved:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # Context with installed package
         context = NodeResolutionContext(
@@ -353,7 +360,8 @@ class TestHeuristicRemoved:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         context = NodeResolutionContext(
             installed_packages={
@@ -416,7 +424,8 @@ class TestResolutionPriorityOrder:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # Context with custom mapping and properties
         context = NodeResolutionContext(
@@ -468,7 +477,8 @@ class TestResolutionPriorityOrder:
         with open(mappings_file, 'w') as f:
             json.dump(global_data, f)
 
-        resolver = GlobalNodeResolver(mappings_file)
+        repository = NodeMappingsRepository(mappings_file)
+        resolver = GlobalNodeResolver(repository)
 
         # Test 1: Custom mapping (no session cache)
         context1 = NodeResolutionContext(

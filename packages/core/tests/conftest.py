@@ -40,6 +40,13 @@ def test_workspace(tmp_path):
     # Use factory to create properly initialized workspace
     workspace = WorkspaceFactory.create(workspace_path)
 
+    # Create empty node mappings file to avoid network fetch in tests
+    custom_nodes_cache = workspace.paths.cache / "custom_nodes"
+    custom_nodes_cache.mkdir(parents=True, exist_ok=True)
+    node_mappings = custom_nodes_cache / "node_mappings.json"
+    with open(node_mappings, 'w') as f:
+        json.dump({"mappings": {}, "packages": {}, "stats": {}}, f)
+
     # Set up models directory inside workspace
     models_dir = workspace_path / "models"
     models_dir.mkdir()
@@ -72,8 +79,8 @@ def test_env(test_workspace):
         path=env_path,
         workspace_paths=test_workspace.paths,
         model_repository=test_workspace.model_index_manager,
+        node_mapping_repository=test_workspace.node_mapping_repository,
         workspace_config_manager=test_workspace.workspace_config_manager,
-        registry_data_manager=test_workspace.registry_data_manager,
     )
 
     # Create minimal pyproject.toml
@@ -97,13 +104,6 @@ def test_env(test_workspace):
     # Initialize git repo
     git_mgr = GitManager(cec_path)
     git_mgr.initialize_environment_repo("Initial test environment")
-
-    # Create empty node mappings file to avoid initialization errors
-    custom_nodes_cache = test_workspace.paths.cache / "custom_nodes"
-    custom_nodes_cache.mkdir(parents=True, exist_ok=True)
-    node_mappings = custom_nodes_cache / "node_mappings.json"
-    with open(node_mappings, 'w') as f:
-        json.dump({"mappings": {}, "packages": {}, "stats": {}}, f)
 
     return env
 
