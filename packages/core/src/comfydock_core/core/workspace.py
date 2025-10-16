@@ -8,17 +8,17 @@ from pathlib import Path
 from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
 from comfydock_core.repositories.workspace_config_repository import WorkspaceConfigRepository
 
+from ..analyzers.model_scanner import ModelScanner
 from ..factories.environment_factory import EnvironmentFactory
 from ..logging.logging_config import get_logger
-from ..repositories.model_repository import ModelRepository
-from ..analyzers.model_scanner import ModelScanner
 from ..models.exceptions import (
     CDEnvironmentExistsError,
     CDEnvironmentNotFoundError,
     CDWorkspaceError,
     ComfyDockError,
 )
-from ..models.shared import ModelWithLocation, TrackedDirectory
+from ..models.shared import ModelWithLocation
+from ..repositories.model_repository import ModelRepository
 from ..services.registry_data_manager import RegistryDataManager
 from .environment import Environment
 
@@ -88,16 +88,16 @@ class Workspace:
     @cached_property
     def workspace_config_manager(self) -> WorkspaceConfigRepository:
         return WorkspaceConfigRepository(self.paths.workspace_file)
-    
+
     @cached_property
     def registry_data_manager(self) -> RegistryDataManager:
         return RegistryDataManager(self.paths.cache)
-    
+
     @cached_property
     def model_index_manager(self) -> ModelRepository:
         db_path = self.paths.cache / "models.db"
         return ModelRepository(db_path)
-    
+
     @cached_property
     def node_mapping_repository(self) -> NodeMappingsRepository:
         return NodeMappingsRepository(self.registry_data_manager)
@@ -107,6 +107,15 @@ class Workspace:
         from ..configs.model_config import ModelConfig
         config = ModelConfig.load()
         return ModelScanner(self.model_index_manager, config)
+
+    @cached_property
+    def model_downloader(self):
+        from ..services.model_downloader import ModelDownloader
+        return ModelDownloader(
+            model_repository=self.model_index_manager,
+            models_dir=self.paths.models,
+            workspace_config=self.workspace_config_manager
+        )
 
     def update_registry_data(self) -> bool:
         """Force update registry data from GitHub.
@@ -141,6 +150,7 @@ class Workspace:
                         model_repository=self.model_index_manager,
                         node_mapping_repository=self.node_mapping_repository,
                         workspace_config_manager=self.workspace_config_manager,
+                        model_downloader=self.model_downloader
                     )
                     environments.append(env)
                 except Exception as e:
@@ -171,7 +181,8 @@ class Workspace:
             workspace_paths=self.paths,
             model_repository=self.model_index_manager,
             node_mapping_repository=self.node_mapping_repository,
-            workspace_config_manager=self.workspace_config_manager
+            workspace_config_manager=self.workspace_config_manager,
+            model_downloader=self.model_downloader
         )
 
     def create_environment(
@@ -211,6 +222,7 @@ class Workspace:
                 model_repository=self.model_index_manager,
                 node_mapping_repository=self.node_mapping_repository,
                 workspace_config_manager=self.workspace_config_manager,
+                model_downloader=self.model_downloader,
                 python_version=python_version,
                 comfyui_version=comfyui_version
             )

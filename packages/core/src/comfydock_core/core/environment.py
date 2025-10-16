@@ -6,36 +6,33 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..analyzers.status_scanner import StatusScanner
 from ..factories.uv_factory import create_uv_for_environment
 from ..logging.logging_config import get_logger
 from ..managers.git_manager import GitManager
 from ..managers.model_symlink_manager import ModelSymlinkManager
 from ..managers.node_manager import NodeManager
 from ..managers.pyproject_manager import PyprojectManager
-from ..validation.resolution_tester import ResolutionTester
-from ..analyzers.status_scanner import StatusScanner
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
-from ..models.sync import SyncResult
 from ..models.shared import NodeInfo
+from ..models.sync import SyncResult
 from ..utils.common import run_command
+from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
-    from ..models.workflow import (
-        WorkflowSyncStatus,
-        ResolutionResult,
-        DetailedWorkflowStatus
-    )
     from comfydock_core.models.protocols import (
         ModelResolutionStrategy,
         NodeResolutionStrategy,
         RollbackStrategy,
     )
-    from ..repositories.node_mappings_repository import NodeMappingsRepository
+
+    from ..models.workflow import DetailedWorkflowStatus, ResolutionResult, WorkflowSyncStatus
     from ..repositories.model_repository import ModelRepository
+    from ..repositories.node_mappings_repository import NodeMappingsRepository
     from ..repositories.workspace_config_repository import WorkspaceConfigRepository
-    from ..services.registry_data_manager import RegistryDataManager
+    from ..services.model_downloader import ModelDownloader
     from .workspace import WorkspacePaths
 
 logger = get_logger(__name__)
@@ -52,6 +49,7 @@ class Environment:
         model_repository: ModelRepository,
         node_mapping_repository: NodeMappingsRepository,
         workspace_config_manager: WorkspaceConfigRepository,
+        model_downloader: ModelDownloader,
     ):
         self.name = name
         self.path = path
@@ -59,6 +57,7 @@ class Environment:
         self.model_repository = model_repository
         self.node_mapping_repository = node_mapping_repository
         self.workspace_config_manager = workspace_config_manager
+        self.model_downloader = model_downloader
 
         # Workspace-level paths
         self.global_models_path = self.workspace_config_manager.get_models_directory()
@@ -128,7 +127,8 @@ class Environment:
             self.cec_path,
             self.pyproject,
             self.model_repository,
-            self.node_mapping_repository
+            self.node_mapping_repository,
+            self.model_downloader
         )
 
     @cached_property
@@ -269,8 +269,8 @@ class Environment:
                     raise CDEnvironmentError(
                         "Cannot rollback with uncommitted changes.\n"
                         "Uncommitted changes detected:\n"
-                        + (f"  • Git changes in .cec/\n" if has_git_changes else "")
-                        + (f"  • Workflow changes in ComfyUI\n" if has_workflow_changes else "")
+                        + ("  • Git changes in .cec/\n" if has_git_changes else "")
+                        + ("  • Workflow changes in ComfyUI\n" if has_workflow_changes else "")
                     )
 
                 # Strategy provided - ask for confirmation

@@ -18,6 +18,7 @@ from ..utils.model_categories import get_model_category
 
 if TYPE_CHECKING:
     from ..repositories.model_repository import ModelRepository
+    from ..repositories.workspace_config_repository import WorkspaceConfigRepository
 
 logger = get_logger(__name__)
 
@@ -48,15 +49,22 @@ class ModelDownloader:
     - Detect URL type (civitai/HF/direct)
     """
 
-    def __init__(self, model_repository: ModelRepository, models_dir: Path):
+    def __init__(
+        self,
+        model_repository: ModelRepository,
+        models_dir: Path,
+        workspace_config: WorkspaceConfigRepository | None = None
+    ):
         """Initialize ModelDownloader.
 
         Args:
             model_repository: Repository for indexing models
             models_dir: Base models directory path
+            workspace_config: Optional workspace config for API credentials
         """
         self.repository = model_repository
         self.models_dir = models_dir
+        self.workspace_config = workspace_config
         self.model_config = ModelConfig.load()
 
     def detect_url_type(self, url: str) -> str:
@@ -176,7 +184,16 @@ class ModelDownloader:
 
             # Step 3-4: Download with streaming hash calculation
             logger.info(f"Downloading from {request.url}")
-            response = requests.get(request.url, stream=True, timeout=300)
+
+            # Add Civitai auth header if URL is from Civitai and we have an API key
+            headers = {}
+            if "civitai.com" in request.url.lower() and self.workspace_config:
+                api_key = self.workspace_config.get_civitai_token()
+                if api_key:
+                    headers['Authorization'] = f'Bearer {api_key}'
+                    logger.debug("Using Civitai API key for authentication")
+
+            response = requests.get(request.url, stream=True, timeout=300, headers=headers)
             response.raise_for_status()
 
             # Extract total size from headers (may be None)

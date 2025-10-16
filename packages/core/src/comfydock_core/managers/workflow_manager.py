@@ -28,6 +28,7 @@ from ..models.workflow import (
 )
 from ..repositories.workflow_repository import WorkflowRepository
 from ..resolvers.model_resolver import ModelResolver
+from ..services.model_downloader import ModelDownloader
 from ..utils.git import is_git_url
 
 if TYPE_CHECKING:
@@ -41,12 +42,12 @@ CATEGORY_CRITICALITY_DEFAULTS = {
     "checkpoints": "flexible",
     "vae": "flexible",
     "text_encoders": "flexible",
-    "loras": "required",
+    "loras": "flexible",
     "controlnet": "required",
     "clip_vision": "required",
-    "style_models": "required",
-    "embeddings": "required",
-    "upscale_models": "optional",
+    "style_models": "flexible",
+    "embeddings": "flexible",
+    "upscale_models": "flexible",
 }
 
 
@@ -59,7 +60,8 @@ class WorkflowManager:
         cec_path: Path,
         pyproject: PyprojectManager,
         model_repository: ModelRepository,
-        node_mapping_repository: NodeMappingsRepository
+        node_mapping_repository: NodeMappingsRepository,
+        model_downloader: ModelDownloader
     ):
         self.comfyui_path = comfyui_path
         self.cec_path = cec_path
@@ -69,7 +71,7 @@ class WorkflowManager:
 
         self.comfyui_workflows = comfyui_path / "user" / "default" / "workflows"
         self.cec_workflows = cec_path / "workflows"
-        self.models_dir = comfyui_path / "models" # TODO: inject this instead?
+        self.models_dir = comfyui_path / "models"
 
         # Ensure directories exist
         self.comfyui_workflows.mkdir(parents=True, exist_ok=True)
@@ -79,12 +81,8 @@ class WorkflowManager:
         self.global_node_resolver = GlobalNodeResolver(self.node_mapping_repository)
         self.model_resolver = ModelResolver(model_repository=self.model_repository)
 
-        # Create model downloader for URL-based downloads
-        from ..services.model_downloader import ModelDownloader
-        self.downloader = ModelDownloader(
-            model_repository=self.model_repository,
-            models_dir=self.models_dir
-        )
+        # Use injected model downloader from workspace
+        self.downloader = model_downloader
 
     def _normalize_package_id(self, package_id: str) -> str:
         """Normalize GitHub URLs to registry IDs if they exist in the registry.

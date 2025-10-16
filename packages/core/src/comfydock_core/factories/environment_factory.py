@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from comfydock_core.core.environment import Environment
 
@@ -13,13 +14,12 @@ from ..models.exceptions import (
 )
 from ..utils.comfyui_ops import clone_comfyui
 
-from typing import TYPE_CHECKING
-
 if TYPE_CHECKING:
     from comfydock_core.core.workspace import WorkspacePaths
     from comfydock_core.repositories.model_repository import ModelRepository
     from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
     from comfydock_core.repositories.workspace_config_repository import WorkspaceConfigRepository
+    from comfydock_core.services.model_downloader import ModelDownloader
 
 logger = get_logger(__name__)
 
@@ -33,6 +33,7 @@ class EnvironmentFactory:
         model_repository: ModelRepository,
         node_mapping_repository: NodeMappingsRepository,
         workspace_config_manager: WorkspaceConfigRepository,
+        model_downloader: ModelDownloader,
         python_version: str = "3.12",
         comfyui_version: str | None = None,
     ) -> Environment:
@@ -58,6 +59,7 @@ class EnvironmentFactory:
             model_repository=model_repository,
             node_mapping_repository=node_mapping_repository,
             workspace_config_manager=workspace_config_manager,
+            model_downloader=model_downloader,
         )
 
         # Clone ComfyUI
