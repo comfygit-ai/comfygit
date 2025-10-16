@@ -144,6 +144,12 @@ def _add_global_commands(subparsers):
     registry_update_parser = registry_subparsers.add_parser("update", help="Update registry data from GitHub")
     registry_update_parser.set_defaults(func=global_cmds.registry_update)
 
+    # Config management
+    config_parser = subparsers.add_parser("config", help="Manage configuration settings")
+    config_parser.add_argument("--civitai-key", type=str, help="Set Civitai API key (use empty string to clear)")
+    config_parser.add_argument("--show", action="store_true", help="Show current configuration")
+    config_parser.set_defaults(func=global_cmds.config)
+
 
 def _add_env_commands(subparsers):
     """Add environment-specific commands."""

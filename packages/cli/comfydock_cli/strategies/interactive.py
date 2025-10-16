@@ -781,7 +781,6 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
                 print("   1. Get your API key from: https://civitai.com/user/account")
                 print("   2. Add it to ComfyDock: comfydock config --civitai-key <your-key>")
                 print("   3. Try downloading again")
-                print("\n   (Config command not yet implemented - coming soon!)")
 
             return None
 

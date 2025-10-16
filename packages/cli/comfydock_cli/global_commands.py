@@ -386,3 +386,120 @@ class GlobalCommands:
     # def model_find(self, args):
     #     """Find models by hash or filename (renamed from model_search)."""
     #     return self.model_search(args)
+
+    # === Config Management ===
+
+    @with_workspace_logging("config")
+    def config(self, args):
+        """Manage ComfyDock configuration settings."""
+        # Flag mode - direct operations
+        if hasattr(args, 'civitai_key') and args.civitai_key is not None:
+            self._set_civitai_key(args.civitai_key)
+            return
+
+        if hasattr(args, 'show') and args.show:
+            self._show_config()
+            return
+
+        # Interactive mode - no flags provided
+        self._interactive_config()
+
+    def _set_civitai_key(self, key: str):
+        """Set Civitai API key."""
+        if key == "":
+            self.workspace.workspace_config_manager.set_civitai_token(None)
+            print("✓ Civitai API key cleared")
+        else:
+            self.workspace.workspace_config_manager.set_civitai_token(key)
+            print("✓ Civitai API key saved")
+
+    def _show_config(self):
+        """Display current configuration."""
+        print("ComfyDock Configuration:\n")
+
+        # Civitai API Key
+        token = self.workspace.workspace_config_manager.get_civitai_token()
+        if token:
+            # Mask key showing last 4 chars
+            masked = f"••••••••{token[-4:]}" if len(token) > 4 else "••••"
+            print(f"  Civitai API Key: {masked}")
+        else:
+            print("  Civitai API Key: Not set")
+
+        # Registry cache preference
+        prefer_cache = self.workspace.workspace_config_manager.get_prefer_registry_cache()
+        print(f"  Registry Cache:  {'Enabled' if prefer_cache else 'Disabled'}")
+
+    def _interactive_config(self):
+        """Interactive configuration menu."""
+        while True:
+            # Get current config
+            civitai_token = self.workspace.workspace_config_manager.get_civitai_token()
+            prefer_cache = self.workspace.workspace_config_manager.get_prefer_registry_cache()
+
+            # Display menu
+            print("\nComfyDock Configuration\n")
+
+            # Civitai key status
+            if civitai_token:
+                masked = f"••••••••{civitai_token[-4:]}" if len(civitai_token) > 4 else "••••"
+                print(f"  1. Civitai API Key: {masked}")
+            else:
+                print("  1. Civitai API Key: Not set")
+
+            # Registry cache
+            cache_status = "Enabled" if prefer_cache else "Disabled"
+            print(f"  2. Registry Cache:  {cache_status}")
+
+            # Options
+            print("\n  [1-2] Change setting  [c] Clear a setting  [q] Quit")
+            choice = input("Choice: ").strip().lower()
+
+            if choice == 'q':
+                break
+            elif choice == '1':
+                self._interactive_set_civitai_key()
+            elif choice == '2':
+                self._interactive_toggle_registry_cache()
+            elif choice == 'c':
+                self._interactive_clear_setting()
+            else:
+                print("  Invalid choice")
+
+    def _interactive_set_civitai_key(self):
+        """Interactive Civitai API key setup."""
+        print("\n🔑 Civitai API Key Setup")
+        print("   Get your key from: https://civitai.com/user/account")
+
+        key = input("\nEnter API key (or blank to cancel): ").strip()
+        if not key:
+            print("  Cancelled")
+            return
+
+        self.workspace.workspace_config_manager.set_civitai_token(key)
+        print("✓ API key saved")
+
+    def _interactive_toggle_registry_cache(self):
+        """Toggle registry cache preference."""
+        current = self.workspace.workspace_config_manager.get_prefer_registry_cache()
+        new_value = not current
+
+        self.workspace.workspace_config_manager.set_prefer_registry_cache(new_value)
+        status = "enabled" if new_value else "disabled"
+        print(f"✓ Registry cache {status}")
+
+    def _interactive_clear_setting(self):
+        """Clear a configuration setting."""
+        print("\nClear which setting?")
+        print("  1. Civitai API Key")
+        print("\n  [1] Clear setting  [c] Cancel")
+
+        choice = input("Choice: ").strip().lower()
+
+        if choice == "1":
+            self.workspace.workspace_config_manager.set_civitai_token(None)
+            print("✓ Civitai API key cleared")
+        elif choice == "c" or choice == "":
+            print("  Cancelled")
+        else:
+            print("  Invalid choice")
