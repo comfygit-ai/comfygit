@@ -1244,3 +1244,68 @@ class WorkflowManager:
         scored.sort(key=lambda x: x.score, reverse=True)
 
         return scored[:limit]
+
+    def update_model_criticality(
+        self,
+        workflow_name: str,
+        model_identifier: str,
+        new_criticality: str
+    ) -> bool:
+        """Update criticality for a model in a workflow.
+
+        Allows changing model criticality after initial resolution without
+        re-resolving the entire workflow.
+
+        Args:
+            workflow_name: Workflow to update
+            model_identifier: Filename or hash to match
+            new_criticality: "required", "flexible", or "optional"
+
+        Returns:
+            True if model was found and updated, False otherwise
+
+        Raises:
+            ValueError: If new_criticality is not valid
+        """
+        # Validate criticality
+        if new_criticality not in ("required", "flexible", "optional"):
+            raise ValueError(f"Invalid criticality: {new_criticality}")
+
+        # Load workflow models
+        models = self.pyproject.workflows.get_workflow_models(workflow_name)
+
+        if not models:
+            return False
+
+        # Find matching model(s)
+        matches = []
+        for i, model in enumerate(models):
+            if model.hash == model_identifier or model.filename == model_identifier:
+                matches.append((i, model))
+
+        if not matches:
+            return False
+
+        # If single match, update directly
+        if len(matches) == 1:
+            idx, model = matches[0]
+            old_criticality = model.criticality
+            models[idx].criticality = new_criticality
+            self.pyproject.workflows.set_workflow_models(workflow_name, models)
+            logger.info(
+                f"Updated '{model.filename}' criticality: "
+                f"{old_criticality} → {new_criticality}"
+            )
+            return True
+
+        # Multiple matches - this shouldn't happen in practice (hash is unique, filename rarely duplicated)
+        # But handle it gracefully by updating all matches
+        for idx, model in matches:
+            models[idx].criticality = new_criticality
+
+        self.pyproject.workflows.set_workflow_models(workflow_name, models)
+        logger.info(
+            f"Updated {len(matches)} model(s) with identifier '{model_identifier}' "
+            f"to criticality '{new_criticality}'"
+        )
+        return True
