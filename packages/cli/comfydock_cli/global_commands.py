@@ -159,7 +159,8 @@ class GlobalCommands:
     @with_workspace_logging("model index list")
     def model_index_list(self, args):
         """List all indexed models."""
-        from ..utils.common import format_size
+        from comfydock_core.utils.common import format_size
+        from .pagination import paginate
 
         logger.info("Listing all indexed models")
 
@@ -169,40 +170,28 @@ class GlobalCommands:
 
             logger.info(f"Retrieved {len(models)} models from index")
 
-            print("📦 All indexed models:")
-
             if not models:
+                print("📦 All indexed models:")
                 print("   No models found")
-                print("   Run 'comfydock index model dir add <path>' to set your models directory")
+                print("   Run 'comfydock model index dir <path>' to set your models directory")
                 return
 
-            # Group models by directory for display
-            models_by_dir = {}
-            for model in models:
-                # Extract directory from relative path
-                relative_path = model.metadata.get('relative_path', '')
-                if relative_path:
-                    dir_name = relative_path.split('/')[0] if '/' in relative_path else 'root'
-                else:
-                    dir_name = 'root'
-
-                if dir_name not in models_by_dir:
-                    models_by_dir[dir_name] = []
-                models_by_dir[dir_name].append(model)
-
-            # Display models grouped by directory
-            for dir_name, dir_models in sorted(models_by_dir.items()):
-                print(f"\n   📁 {dir_name}/ ({len(dir_models)} models)")
-                for model in sorted(dir_models, key=lambda m: m.filename):
-                    size_str = format_size(model.file_size)
-                    print(f"     • {model.filename}")
-                    print(f"       Hash: {model.hash[:12]}... | Size: {size_str}")
-
-            # Show summary stats
+            # Get stats for header
             stats = self.workspace.get_model_stats()
             total_models = stats.get('total_models', 0)
             total_locations = stats.get('total_locations', 0)
-            print(f"\nTotal: {total_models} unique models, {total_locations} files")
+
+            # Define how to render a single model
+            def render_model(model):
+                size_str = format_size(model.file_size)
+                print(f"\n   {model.filename}")
+                print(f"   Size: {size_str}")
+                print(f"   Hash: {model.hash[:12]}...")
+                print(f"   Path: {model.relative_path}")
+
+            # Use pagination for results
+            header = f"📦 All indexed models ({total_models} unique, {total_locations} files):"
+            paginate(models, render_model, page_size=5, header=header)
 
         except Exception as e:
             logger.error(f"Failed to list models: {e}")
@@ -212,13 +201,13 @@ class GlobalCommands:
     @with_workspace_logging("model index find")
     def model_index_find(self, args):
         """Search for models by hash or filename."""
-        from ..utils.common import format_size
+        from comfydock_core.utils.common import format_size
+        from .pagination import paginate
 
         query = args.query
         logger.info(f"Searching models for query: '{query}'")
 
         try:
-
             # Search for models
             results = self.workspace.search_models(query)
 
@@ -228,14 +217,17 @@ class GlobalCommands:
                 print(f"No models found matching: {query}")
                 return
 
-            print(f"🔍 Found {len(results)} model(s) matching '{query}':")
-
-            for model in results:
+            # Define how to render a single model
+            def render_model(model):
                 size_str = format_size(model.file_size)
                 print(f"\n   {model.filename}")
                 print(f"   Size: {size_str}")
                 print(f"   Hash: {model.hash}")
                 print(f"   Path: {model.relative_path}")
+
+            # Use pagination for results
+            header = f"🔍 Found {len(results)} model(s) matching '{query}':"
+            paginate(results, render_model, page_size=5, header=header)
 
         except Exception as e:
             logger.error(f"Model search failed for query '{query}': {e}")
@@ -291,7 +283,7 @@ class GlobalCommands:
             print(f"✗ Failed to update registry: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_workspace_logging("model dir add")
+    @with_workspace_logging("model index dir")
     def model_dir_add(self, args):
         """Set the global models directory."""
         directory_path = args.path.resolve()
@@ -333,7 +325,7 @@ class GlobalCommands:
 
             if result is None:
                 print("✗ No models directory configured")
-                print("   Run 'comfydock index model dir add <path>' to set your models directory")
+                print("   Run 'comfydock model index dir <path>' to set your models directory")
                 return
 
             total_changes = result
@@ -364,7 +356,7 @@ class GlobalCommands:
                 print(f"   Models Directory: {exists} {models_dir}")
             else:
                 print("   Models Directory: Not configured")
-                print("   Run 'comfydock index model dir add <path>' to set your models directory")
+                print("   Run 'comfydock model index dir <path>' to set your models directory")
                 return
 
             total_models = stats.get('total_models', 0)

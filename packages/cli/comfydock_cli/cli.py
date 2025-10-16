@@ -102,51 +102,47 @@ def _add_global_commands(subparsers):
     export_parser.add_argument("path", type=Path, nargs="?", help="Path to output file")
     export_parser.set_defaults(func=global_cmds.export_env)
 
-    # Index management subcommands
-    index_parser = subparsers.add_parser("index", help="Manage workspace indexes")
-    index_subparsers = index_parser.add_subparsers(dest="index_command", help="Index commands")
+    # Model management subcommands
+    model_parser = subparsers.add_parser("model", help="Manage model index")
+    model_subparsers = model_parser.add_subparsers(dest="model_command", help="Model commands")
 
-    # index model subcommands
-    index_model_parser = index_subparsers.add_parser("model", help="Model index operations")
-    index_model_subparsers = index_model_parser.add_subparsers(dest="index_model_command", help="Model index commands")
+    # model index subcommands
+    model_index_parser = model_subparsers.add_parser("index", help="Model index operations")
+    model_index_subparsers = model_index_parser.add_subparsers(dest="model_index_command", help="Model index commands")
 
-    # index model find
-    index_model_find_parser = index_model_subparsers.add_parser("find", help="Find models by hash or filename")
-    index_model_find_parser.add_argument("query", help="Search query (hash prefix or filename)")
-    index_model_find_parser.set_defaults(func=global_cmds.model_index_find)
+    # model index find
+    model_index_find_parser = model_index_subparsers.add_parser("find", help="Find models by hash or filename")
+    model_index_find_parser.add_argument("query", help="Search query (hash prefix or filename)")
+    model_index_find_parser.set_defaults(func=global_cmds.model_index_find)
 
-    # index model list
-    index_model_list_parser = index_model_subparsers.add_parser("list", help="List all indexed models")
-    index_model_list_parser.set_defaults(func=global_cmds.model_index_list)
+    # model index list
+    model_index_list_parser = model_index_subparsers.add_parser("list", help="List all indexed models")
+    model_index_list_parser.set_defaults(func=global_cmds.model_index_list)
 
-    # index model status
-    index_model_status_parser = index_model_subparsers.add_parser("status", help="Show models directory and index status")
-    index_model_status_parser.set_defaults(func=global_cmds.model_index_status)
+    # model index status
+    model_index_status_parser = model_index_subparsers.add_parser("status", help="Show models directory and index status")
+    model_index_status_parser.set_defaults(func=global_cmds.model_index_status)
 
-    # index model sync
-    index_model_sync_parser = index_model_subparsers.add_parser("sync", help="Scan models directory and update index")
-    index_model_sync_parser.set_defaults(func=global_cmds.model_index_sync)
+    # model index sync
+    model_index_sync_parser = model_index_subparsers.add_parser("sync", help="Scan models directory and update index")
+    model_index_sync_parser.set_defaults(func=global_cmds.model_index_sync)
 
-    # index model dir subcommands
-    index_model_dir_parser = index_model_subparsers.add_parser("dir", help="Model directory management")
-    index_model_dir_subparsers = index_model_dir_parser.add_subparsers(dest="index_model_dir_command", help="Directory commands")
+    # model index dir
+    model_index_dir_parser = model_index_subparsers.add_parser("dir", help="Set global models directory to index")
+    model_index_dir_parser.add_argument("path", type=Path, help="Path to models directory")
+    model_index_dir_parser.set_defaults(func=global_cmds.model_dir_add)
 
-    # index model dir add
-    index_model_dir_add_parser = index_model_dir_subparsers.add_parser("add", help="Set global models directory")
-    index_model_dir_add_parser.add_argument("path", type=Path, help="Path to models directory")
-    index_model_dir_add_parser.set_defaults(func=global_cmds.model_dir_add)
+    # Registry management subcommands
+    registry_parser = subparsers.add_parser("registry", help="Manage node registry cache")
+    registry_subparsers = registry_parser.add_subparsers(dest="registry_command", help="Registry commands")
 
-    # index registry subcommands
-    index_registry_parser = index_subparsers.add_parser("registry", help="Node registry cache operations")
-    index_registry_subparsers = index_registry_parser.add_subparsers(dest="index_registry_command", help="Registry commands")
+    # registry status
+    registry_status_parser = registry_subparsers.add_parser("status", help="Show registry cache status")
+    registry_status_parser.set_defaults(func=global_cmds.registry_status)
 
-    # index registry status
-    index_registry_status_parser = index_registry_subparsers.add_parser("status", help="Show registry cache status")
-    index_registry_status_parser.set_defaults(func=global_cmds.registry_status)
-
-    # index registry update
-    index_registry_update_parser = index_registry_subparsers.add_parser("update", help="Update registry data from GitHub")
-    index_registry_update_parser.set_defaults(func=global_cmds.registry_update)
+    # registry update
+    registry_update_parser = registry_subparsers.add_parser("update", help="Update registry data from GitHub")
+    registry_update_parser.set_defaults(func=global_cmds.registry_update)
 
 
 def _add_env_commands(subparsers):
