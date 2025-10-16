@@ -620,7 +620,11 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
                         search_term = new_term
                         continue
                 elif choice == 'd' and context.downloader:
-                    return self._handle_download(reference, context)
+                    result = self._handle_download(reference, context)
+                    if result is not None:
+                        return result
+                    # User pressed back - continue to show menu again
+                    continue
                 elif choice == 'o':
                     return ResolvedModel(
                         workflow=context.workflow_name,
@@ -765,12 +769,19 @@ class InteractiveModelStrategy(ModelResolutionStrategy):
             else:
                 print(f"\rDownloading... {downloaded_mb:.1f} MB", end='', flush=True)
 
-        print(f"\nDownloading...")
         result = context.downloader.download(request, progress_callback=progress_callback)
         print()  # New line after progress completes
 
         if not result.success:
             print(f"✗ Download failed: {result.error}")
+
+            # Provide helpful message for Civitai authentication errors
+            if "civitai.com" in url.lower() and ("401" in str(result.error) or "unauthorized" in str(result.error).lower()):
+                print("\n💡 Civitai requires an API key for downloads.")
+                print("   Get your API key from: https://civitai.com/user/account")
+                print("   Then download manually and place it in the models directory,")
+                print("   or use a browser to download with your logged-in session.")
+
             return None
 
         # Step 5: Return resolved
