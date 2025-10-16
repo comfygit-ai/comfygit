@@ -15,7 +15,8 @@ def workflow_manager():
                 cec_path=Path("/tmp/cec"),
                 pyproject=Mock(),
                 model_repository=Mock(),
-                node_mapping_repository=Mock()
+                node_mapping_repository=Mock(),
+                model_downloader=Mock()
             )
             return manager
 
@@ -382,9 +383,11 @@ class TestOptionalUnresolvedModelPersistence:
         assert model_a_written.criticality != "optional"
 
         # Type B: Optional resolved
+        # Note: Criticality is based on category defaults, not is_optional flag
+        # upscale_models category has default criticality of "flexible"
         assert model_b_written.status == "resolved"
         assert model_b_written.hash == "hash_b"
-        assert model_b_written.criticality == "optional"
+        assert model_b_written.criticality == "flexible"
 
         # Type C: Optional unresolved (THE FIX!)
         assert model_c_written.status == "unresolved"
