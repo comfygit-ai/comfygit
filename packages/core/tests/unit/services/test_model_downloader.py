@@ -174,7 +174,8 @@ class TestModelDownloader:
         mock_get.assert_called_once_with(
             "https://example.com/new_model.safetensors",
             stream=True,
-            timeout=300
+            timeout=300,
+            headers={}
         )
 
         # Verify file was created
@@ -310,3 +311,190 @@ class TestModelDownloader:
 
         # Final call should have all bytes
         assert progress_calls[-1][0] == 10000
+
+    def test_accepts_workspace_config_parameter(self, tmp_path):
+        """Test that ModelDownloader accepts workspace_config parameter."""
+        repo = Mock()
+        workspace_config = Mock()
+
+        # Should not raise exception
+        downloader = ModelDownloader(repo, tmp_path, workspace_config=workspace_config)
+
+        assert downloader.workspace_config == workspace_config
+
+    def test_workspace_config_is_optional(self, tmp_path):
+        """Test that workspace_config parameter is optional."""
+        repo = Mock()
+
+        # Should work without workspace_config
+        downloader = ModelDownloader(repo, tmp_path)
+
+        assert downloader.workspace_config is None
+
+    @patch('requests.get')
+    def test_civitai_url_gets_auth_header_with_api_key(self, mock_get, tmp_path):
+        """Test that Civitai URLs get Authorization header when API key is configured."""
+        # Setup mock response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'content-length': '1024'}
+        mock_response.iter_content = Mock(return_value=[b"test" * 256])
+        mock_get.return_value = mock_response
+
+        # Setup workspace config with API key
+        workspace_config = Mock()
+        workspace_config.get_civitai_token.return_value = "test_api_key_12345"
+
+        repo = Mock()
+        repo.find_by_source_url.return_value = None
+        repo.calculate_short_hash.return_value = "abc123"
+
+        downloader = ModelDownloader(repo, tmp_path, workspace_config=workspace_config)
+        request = DownloadRequest(
+            url="https://civitai.com/api/download/models/123456",
+            target_path=tmp_path / "loras/model.safetensors"
+        )
+
+        result = downloader.download(request)
+
+        # Verify Authorization header was added
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args[1]
+        assert 'headers' in call_kwargs
+        assert call_kwargs['headers'] == {'Authorization': 'Bearer test_api_key_12345'}
+        assert result.success is True
+
+    @patch('requests.get')
+    def test_civitai_url_no_auth_header_without_api_key(self, mock_get, tmp_path):
+        """Test that Civitai URLs work without auth header when no API key configured."""
+        # Setup mock response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'content-length': '1024'}
+        mock_response.iter_content = Mock(return_value=[b"test" * 256])
+        mock_get.return_value = mock_response
+
+        # No workspace_config provided
+        repo = Mock()
+        repo.find_by_source_url.return_value = None
+        repo.calculate_short_hash.return_value = "abc123"
+
+        downloader = ModelDownloader(repo, tmp_path, workspace_config=None)
+        request = DownloadRequest(
+            url="https://civitai.com/api/download/models/123456",
+            target_path=tmp_path / "loras/model.safetensors"
+        )
+
+        result = downloader.download(request)
+
+        # Verify no Authorization header (empty headers dict)
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args[1]
+        assert 'headers' in call_kwargs
+        assert call_kwargs['headers'] == {}
+        assert result.success is True
+
+    @patch('requests.get')
+    def test_civitai_url_no_auth_header_when_api_key_is_none(self, mock_get, tmp_path):
+        """Test that Civitai URLs work when workspace_config returns None for API key."""
+        # Setup mock response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'content-length': '1024'}
+        mock_response.iter_content = Mock(return_value=[b"test" * 256])
+        mock_get.return_value = mock_response
+
+        # Workspace config exists but returns None for API key
+        workspace_config = Mock()
+        workspace_config.get_civitai_token.return_value = None
+
+        repo = Mock()
+        repo.find_by_source_url.return_value = None
+        repo.calculate_short_hash.return_value = "abc123"
+
+        downloader = ModelDownloader(repo, tmp_path, workspace_config=workspace_config)
+        request = DownloadRequest(
+            url="https://civitai.com/api/download/models/123456",
+            target_path=tmp_path / "loras/model.safetensors"
+        )
+
+        result = downloader.download(request)
+
+        # Verify no Authorization header (empty headers dict)
+        workspace_config.get_civitai_token.assert_called_once()
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args[1]
+        assert 'headers' in call_kwargs
+        assert call_kwargs['headers'] == {}
+        assert result.success is True
+
+    @patch('requests.get')
+    def test_non_civitai_url_no_auth_header_even_with_api_key(self, mock_get, tmp_path):
+        """Test that non-Civitai URLs don't get auth header even when API key is configured."""
+        # Setup mock response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'content-length': '1024'}
+        mock_response.iter_content = Mock(return_value=[b"test" * 256])
+        mock_get.return_value = mock_response
+
+        # Workspace config with API key
+        workspace_config = Mock()
+        workspace_config.get_civitai_token.return_value = "test_api_key_12345"
+
+        repo = Mock()
+        repo.find_by_source_url.return_value = None
+        repo.calculate_short_hash.return_value = "abc123"
+
+        downloader = ModelDownloader(repo, tmp_path, workspace_config=workspace_config)
+        request = DownloadRequest(
+            url="https://huggingface.co/user/model/blob/main/file.safetensors",
+            target_path=tmp_path / "checkpoints/model.safetensors"
+        )
+
+        result = downloader.download(request)
+
+        # Verify no Authorization header for non-Civitai URL
+        mock_get.assert_called_once()
+        call_kwargs = mock_get.call_args[1]
+        assert 'headers' in call_kwargs
+        assert call_kwargs['headers'] == {}  # Empty, no auth header
+        assert result.success is True
+
+    @patch('requests.get')
+    def test_civitai_url_case_insensitive(self, mock_get, tmp_path):
+        """Test that Civitai URL detection is case-insensitive."""
+        # Setup mock response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {'content-length': '1024'}
+        mock_response.iter_content = Mock(return_value=[b"test" * 256])
+        mock_get.return_value = mock_response
+
+        workspace_config = Mock()
+        workspace_config.get_civitai_token.return_value = "test_key"
+
+        repo = Mock()
+        repo.find_by_source_url.return_value = None
+        repo.calculate_short_hash.return_value = "abc123"
+
+        downloader = ModelDownloader(repo, tmp_path, workspace_config=workspace_config)
+
+        # Test with different case variations
+        for url in [
+            "https://CIVITAI.COM/api/download/models/123",
+            "https://CivitAI.com/api/download/models/123",
+            "https://civitai.COM/api/download/models/123"
+        ]:
+            mock_get.reset_mock()
+            request = DownloadRequest(
+                url=url,
+                target_path=tmp_path / "loras/test.safetensors"
+            )
+
+            result = downloader.download(request)
+
+            # All should get auth header
+            call_kwargs = mock_get.call_args[1]
+            assert call_kwargs['headers'] == {'Authorization': 'Bearer test_key'}
+            assert result.success is True
