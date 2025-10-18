@@ -251,32 +251,37 @@ class EnvironmentCommands:
             if not status.comparison.packages_in_sync:
                 print(f"  • Python packages out of sync")
 
-        # Git changes (only if we have displayable changes)
-        has_displayable_changes = (
-            status.git.nodes_added or
-            status.git.nodes_removed or
-            status.git.workflow_changes
-        )
+        # Git changes
+        if status.git.has_changes:
+            has_specific_changes = (
+                status.git.nodes_added or
+                status.git.nodes_removed or
+                status.git.workflow_changes
+            )
 
-        if has_displayable_changes:
-            print("\n📦 Uncommitted changes:")
-            if status.git.nodes_added:
-                for node in status.git.nodes_added[:3]:
-                    name = node['name'] if isinstance(node, dict) else node
-                    print(f"  • Added node: {name}")
-                if len(status.git.nodes_added) > 3:
-                    print(f"  • ... and {len(status.git.nodes_added) - 3} more nodes")
+            if has_specific_changes:
+                print("\n📦 Uncommitted changes:")
+                if status.git.nodes_added:
+                    for node in status.git.nodes_added[:3]:
+                        name = node['name'] if isinstance(node, dict) else node
+                        print(f"  • Added node: {name}")
+                    if len(status.git.nodes_added) > 3:
+                        print(f"  • ... and {len(status.git.nodes_added) - 3} more nodes")
 
-            if status.git.nodes_removed:
-                for node in status.git.nodes_removed[:3]:
-                    name = node['name'] if isinstance(node, dict) else node
-                    print(f"  • Removed node: {name}")
-                if len(status.git.nodes_removed) > 3:
-                    print(f"  • ... and {len(status.git.nodes_removed) - 3} more nodes")
+                if status.git.nodes_removed:
+                    for node in status.git.nodes_removed[:3]:
+                        name = node['name'] if isinstance(node, dict) else node
+                        print(f"  • Removed node: {name}")
+                    if len(status.git.nodes_removed) > 3:
+                        print(f"  • ... and {len(status.git.nodes_removed) - 3} more nodes")
 
-            if status.git.workflow_changes:
-                count = len(status.git.workflow_changes)
-                print(f"  • {count} workflow(s) changed")
+                if status.git.workflow_changes:
+                    count = len(status.git.workflow_changes)
+                    print(f"  • {count} workflow(s) changed")
+            else:
+                # Generic message for other changes (e.g., model resolutions)
+                print("\n📦 Uncommitted changes:")
+                print("  • Configuration updated")
 
         # Dev node drift (requirements changed)
         dev_drift = env.check_development_node_drift()
@@ -362,9 +367,12 @@ class EnvironmentCommands:
                 for wf_name in workflows_with_downloads[:3]:
                     suggestions.append(f"  comfydock workflow resolve \"{wf_name}\"")
 
-        # Ready to commit
+        # Ready to commit (workflow changes OR git changes)
         elif status.workflow.sync_status.has_changes and status.workflow.is_commit_safe:
             suggestions.append("Commit workflows: comfydock commit -m \"<message>\"")
+        elif status.git.has_changes:
+            # Uncommitted pyproject changes without workflow issues
+            suggestions.append("Commit changes: comfydock commit -m \"<message>\"")
 
         # Dev node updates
         if dev_drift:

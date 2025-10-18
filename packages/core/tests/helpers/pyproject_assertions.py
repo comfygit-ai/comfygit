@@ -96,6 +96,20 @@ class WorkflowModelAssertions:
             f"Expected category '{expected}', got '{actual}'"
         return self
 
+    def has_no_sources(self) -> "WorkflowModelAssertions":
+        """Assert model has no sources (cleaned after download)."""
+        sources = self.config.get("sources", [])
+        assert not sources or sources == [], \
+            f"Expected no sources, got {sources}"
+        return self
+
+    def has_no_relative_path(self) -> "WorkflowModelAssertions":
+        """Assert model has no relative_path (cleaned after download)."""
+        rel_path = self.config.get("relative_path")
+        assert rel_path is None, \
+            f"Expected no relative_path, got '{rel_path}'"
+        return self
+
     def and_workflow(self) -> WorkflowAssertions:
         """Return to workflow-level assertions."""
         return self.workflow
@@ -123,4 +137,11 @@ class ModelAssertions:
         """Assert model has specific category."""
         actual = self.config.get("category")
         assert actual == expected, f"Expected category '{expected}', got '{actual}'"
+        return self
+
+    def has_source(self, expected_url: str) -> "ModelAssertions":
+        """Assert model has specific source URL."""
+        sources = self.config.get("sources", [])
+        assert expected_url in sources, \
+            f"Expected source '{expected_url}' in {sources}"
         return self

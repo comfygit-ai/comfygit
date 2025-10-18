@@ -214,6 +214,8 @@ assertions = PyprojectAssertions(test_env)
 - `has_status(expected)` - Assert model status (resolved/unresolved)
 - `has_criticality(expected)` - Assert criticality (required/flexible/optional)
 - `has_category(expected)` - Assert category (checkpoints/loras/etc)
+- `has_no_sources()` - Assert model has no sources (cleaned after download)
+- `has_no_relative_path()` - Assert model has no relative_path (cleaned after download)
 - `and_workflow()` - Return to workflow-level assertions
 
 **Global model assertions:**
@@ -221,6 +223,7 @@ assertions = PyprojectAssertions(test_env)
 - `has_filename(expected)` - Assert filename
 - `has_relative_path(expected)` - Assert relative path
 - `has_category(expected)` - Assert category
+- `has_source(expected_url)` - Assert model has specific source URL
 
 ### Helper Design Philosophy
 
