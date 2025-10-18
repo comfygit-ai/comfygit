@@ -994,14 +994,17 @@ class WorkflowManager:
             )
             manifest_models.append(manifest_model)
 
-            # Also add to global models table
+            # Add to global models table, preserving existing sources if present
+            existing_model = self.pyproject.models.get_by_hash(model.hash)
+            existing_sources = existing_model.sources if existing_model else []
+
             global_model = ManifestModel(
                 hash=model.hash,
                 filename=model.filename,
                 size=model.file_size,
                 relative_path=model.relative_path,
                 category=model.category,
-                sources=[]
+                sources=existing_sources
             )
             self.pyproject.models.add_model(global_model)
 
@@ -1343,7 +1346,7 @@ class WorkflowManager:
         """Update hash for a model after download completes.
 
         Updates download intent (status=unresolved, sources=[URL]) to resolved state
-        by setting the hash and changing status to "resolved".
+        by atomically: 1) creating global table entry, 2) updating workflow model.
 
         Args:
             workflow_name: Workflow containing the model
@@ -1351,7 +1354,7 @@ class WorkflowManager:
             new_hash: Hash of downloaded model
 
         Raises:
-            ValueError: If model not found in workflow
+            ValueError: If model not found in workflow or repository
         """
         from comfydock_core.models.manifest import ManifestModel
 
@@ -1361,24 +1364,37 @@ class WorkflowManager:
         # Find model matching the reference
         for idx, model in enumerate(models):
             if reference in model.nodes:
-                # Update hash and status
+                # Capture download metadata before clearing
+                download_sources = model.sources if model.sources else []
+
+                # STEP 1: Get model from repository (should always exist after download)
+                resolved_model = self.model_repository.get_model(new_hash)
+                if not resolved_model:
+                    raise ValueError(
+                        f"Model {new_hash} not found in repository after download. "
+                        f"This indicates the model wasn't properly indexed."
+                    )
+
+                # STEP 2: Create global table entry FIRST (before clearing workflow model)
+                manifest_model = ManifestModel(
+                    hash=new_hash,
+                    filename=resolved_model.filename,
+                    relative_path=resolved_model.relative_path,
+                    category=model.category,
+                    size=resolved_model.file_size,
+                    sources=download_sources
+                )
+                self.pyproject.models.add_model(manifest_model)
+
+                # STEP 3: Update workflow model (clear transient fields, set hash)
                 models[idx].hash = new_hash
                 models[idx].status = "resolved"
+                models[idx].sources = []
+                models[idx].relative_path = None
 
-                # Add to global models table
-                resolved_model = self.model_repository.get_model(new_hash)
-                if resolved_model:
-                    manifest_model = ManifestModel(
-                        hash=new_hash,
-                        filename=resolved_model.filename,
-                        relative_path=resolved_model.relative_path,
-                        category=model.category,
-                        size=resolved_model.file_size
-                    )
-                    self.pyproject.models.add_model(manifest_model)
-
-                # Save updated workflow models
+                # STEP 4: Save workflow models
                 self.pyproject.workflows.set_workflow_models(workflow_name, models)
+
                 logger.info(f"Updated model '{model.filename}' with hash {new_hash}")
                 return
 

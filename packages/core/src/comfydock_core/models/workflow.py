@@ -602,8 +602,15 @@ class WorkflowAnalysisStatus:
 
     @property
     def has_issues(self) -> bool:
-        """Check if workflow has unresolved issues."""
-        return self.resolution.has_issues or bool(self.resolution.nodes_unresolved) or bool(self.uninstalled_nodes)
+        """Check if workflow has unresolved issues or pending download intents."""
+        has_download_intents = any(
+            m.match_type == "download_intent" for m in self.resolution.models_resolved
+        )
+        return (
+            self.resolution.has_issues
+            or bool(self.uninstalled_nodes)
+            or has_download_intents
+        )
 
     @property
     def issue_summary(self) -> str:
@@ -644,6 +651,11 @@ class WorkflowAnalysisStatus:
     def uninstalled_count(self) -> int:
         """Number of nodes that need installation."""
         return len(self.uninstalled_nodes)
+
+    @property
+    def download_intents_count(self) -> int:
+        """Number of models queued for download."""
+        return sum(1 for m in self.resolution.models_resolved if m.match_type == "download_intent")
 
 
 @dataclass

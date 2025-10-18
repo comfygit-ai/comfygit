@@ -163,3 +163,126 @@ class TestDetailedWorkflowStatus:
         actions = status.get_suggested_actions()
         # Commit suggestions should not come from workflow status (handled by CLI)
         assert not any("commit" in action.lower() for action in actions)
+
+
+class TestWorkflowAnalysisStatusDownloadIntents:
+    """Test WorkflowAnalysisStatus download intent detection."""
+
+    def test_has_issues_with_download_intents(self):
+        """Test that has_issues returns True when download intents are present."""
+        from comfydock_core.models.workflow import (
+            WorkflowDependencies,
+            ResolutionResult,
+            ResolvedModel,
+            WorkflowNodeWidgetRef,
+        )
+        from pathlib import Path
+
+        sync_status = WorkflowSyncStatus(synced=["wf1"])
+
+        model_ref = WorkflowNodeWidgetRef(
+            node_id="4",
+            node_type="CheckpointLoaderSimple",
+            widget_index=0,
+            widget_value="model.safetensors"
+        )
+
+        # Create resolved model with download_intent match_type
+        download_intent = ResolvedModel(
+            workflow="wf1",
+            reference=model_ref,
+            match_type="download_intent",
+            resolved_model=None,
+            model_source="https://example.com/model.safetensors",
+            target_path=Path("checkpoints/model.safetensors"),
+            is_optional=False,
+            match_confidence=1.0
+        )
+
+        analysis = WorkflowAnalysisStatus(
+            name="wf1",
+            sync_state="synced",
+            dependencies=WorkflowDependencies(workflow_name="wf1"),
+            resolution=ResolutionResult(
+                workflow_name="wf1",
+                models_resolved=[download_intent]
+            )
+        )
+
+        assert analysis.has_issues is True
+
+    def test_has_issues_without_download_intents(self):
+        """Test that has_issues returns False when no download intents."""
+        from comfydock_core.models.workflow import (
+            WorkflowDependencies,
+            ResolutionResult,
+        )
+
+        analysis = WorkflowAnalysisStatus(
+            name="wf1",
+            sync_state="synced",
+            dependencies=WorkflowDependencies(workflow_name="wf1"),
+            resolution=ResolutionResult(workflow_name="wf1")
+        )
+
+        assert analysis.has_issues is False
+
+    def test_download_intents_count(self):
+        """Test download_intents_count property."""
+        from comfydock_core.models.workflow import (
+            WorkflowDependencies,
+            ResolutionResult,
+            ResolvedModel,
+            WorkflowNodeWidgetRef,
+        )
+        from pathlib import Path
+
+        ref1 = WorkflowNodeWidgetRef(
+            node_id="4",
+            node_type="CheckpointLoaderSimple",
+            widget_index=0,
+            widget_value="model1.safetensors"
+        )
+
+        ref2 = WorkflowNodeWidgetRef(
+            node_id="10",
+            node_type="LoraLoader",
+            widget_index=0,
+            widget_value="lora.safetensors"
+        )
+
+        download1 = ResolvedModel(
+            workflow="wf1",
+            reference=ref1,
+            match_type="download_intent",
+            model_source="https://example.com/model1.safetensors",
+            target_path=Path("checkpoints/model1.safetensors")
+        )
+
+        download2 = ResolvedModel(
+            workflow="wf1",
+            reference=ref2,
+            match_type="download_intent",
+            model_source="https://example.com/lora.safetensors",
+            target_path=Path("loras/lora.safetensors")
+        )
+
+        # Add a regular resolved model
+        regular_model = ResolvedModel(
+            workflow="wf1",
+            reference=ref1,
+            match_type="exact",
+            resolved_model=None
+        )
+
+        analysis = WorkflowAnalysisStatus(
+            name="wf1",
+            sync_state="synced",
+            dependencies=WorkflowDependencies(workflow_name="wf1"),
+            resolution=ResolutionResult(
+                workflow_name="wf1",
+                models_resolved=[download1, download2, regular_model]
+            )
+        )
+
+        assert analysis.download_intents_count == 2

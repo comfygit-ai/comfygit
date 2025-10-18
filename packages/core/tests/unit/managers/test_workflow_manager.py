@@ -98,6 +98,136 @@ def test_workflows_differ_detects_real_changes():
     """Test that _workflows_differ detects actual workflow changes."""
     # This would require more setup with actual files
     # Skipping for now as it's integration-level
+
+
+def test_apply_resolution_preserves_existing_sources(workflow_manager):
+    """Test that apply_resolution preserves sources from existing models in global table."""
+    from comfydock_core.models.workflow import (
+        ResolutionResult,
+        ResolvedModel,
+        WorkflowNodeWidgetRef,
+    )
+    from comfydock_core.models.manifest import ManifestModel
+    from comfydock_core.models.shared import ModelWithLocation
+
+    # Setup: Create a model that already exists in global table with sources
+    existing_hash = "abc123"
+    existing_sources = ["https://civitai.com/model/123"]
+
+    existing_model = ManifestModel(
+        hash=existing_hash,
+        filename="model.safetensors",
+        size=1000,
+        relative_path="checkpoints/model.safetensors",
+        category="checkpoints",
+        sources=existing_sources
+    )
+
+    # Mock get_by_hash to return existing model
+    workflow_manager.pyproject.models.get_by_hash = Mock(return_value=existing_model)
+    workflow_manager.pyproject.models.add_model = Mock()
+    workflow_manager.pyproject.workflows.set_workflow_models = Mock()
+    workflow_manager.pyproject.workflows.set_node_packs = Mock()
+    workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
+    workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
+    workflow_manager.update_workflow_model_paths = Mock()
+
+    # Create resolution result with a resolved model
+    model_with_location = ModelWithLocation(
+        hash=existing_hash,
+        filename="model.safetensors",
+        relative_path="checkpoints/model.safetensors",
+        file_size=1000,
+        mtime=0.0,
+        last_seen=0
+    )
+
+    ref = WorkflowNodeWidgetRef(
+        node_id="4",
+        node_type="CheckpointLoaderSimple",
+        widget_index=0,
+        widget_value="model.safetensors"
+    )
+
+    resolved = ResolvedModel(
+        workflow="test_workflow",
+        reference=ref,
+        resolved_model=model_with_location,
+        match_type="exact",
+        match_confidence=1.0
+    )
+
+    resolution = ResolutionResult(
+        workflow_name="test_workflow",
+        models_resolved=[resolved]
+    )
+
+    # Execute apply_resolution
+    workflow_manager.apply_resolution(resolution)
+
+    # Verify that add_model was called with sources preserved
+    workflow_manager.pyproject.models.add_model.assert_called_once()
+    added_model = workflow_manager.pyproject.models.add_model.call_args[0][0]
+
+    assert added_model.sources == existing_sources, "Sources should be preserved from existing model"
+
+
+def test_apply_resolution_empty_sources_for_new_models(workflow_manager):
+    """Test that apply_resolution uses empty sources for new models."""
+    from comfydock_core.models.workflow import (
+        ResolutionResult,
+        ResolvedModel,
+        WorkflowNodeWidgetRef,
+    )
+    from comfydock_core.models.shared import ModelWithLocation
+
+    # Mock get_by_hash to return None (model doesn't exist yet)
+    workflow_manager.pyproject.models.get_by_hash = Mock(return_value=None)
+    workflow_manager.pyproject.models.add_model = Mock()
+    workflow_manager.pyproject.workflows.set_workflow_models = Mock()
+    workflow_manager.pyproject.workflows.set_node_packs = Mock()
+    workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
+    workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
+    workflow_manager.update_workflow_model_paths = Mock()
+
+    # Create resolution result
+    model_with_location = ModelWithLocation(
+        hash="newmodel123",
+        filename="newmodel.safetensors",
+        relative_path="checkpoints/newmodel.safetensors",
+        file_size=2000,
+        mtime=0.0,
+        last_seen=0
+    )
+
+    ref = WorkflowNodeWidgetRef(
+        node_id="5",
+        node_type="CheckpointLoaderSimple",
+        widget_index=0,
+        widget_value="newmodel.safetensors"
+    )
+
+    resolved = ResolvedModel(
+        workflow="test_workflow",
+        reference=ref,
+        resolved_model=model_with_location,
+        match_type="exact",
+        match_confidence=1.0
+    )
+
+    resolution = ResolutionResult(
+        workflow_name="test_workflow",
+        models_resolved=[resolved]
+    )
+
+    # Execute apply_resolution
+    workflow_manager.apply_resolution(resolution)
+
+    # Verify that add_model was called with empty sources for new model
+    workflow_manager.pyproject.models.add_model.assert_called_once()
+    added_model = workflow_manager.pyproject.models.add_model.call_args[0][0]
+
+    assert added_model.sources == [], "New models should have empty sources"
     pass
 
 
