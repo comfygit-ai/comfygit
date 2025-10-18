@@ -197,16 +197,21 @@ class ModelResolver:
                 match_confidence=1.0,
             )
 
-        # Handle optional unresolved models (no hash, no sources)
+        # Handle optional unresolved models (user explicitly marked as optional)
         if manifest_model.status == "unresolved" and not manifest_model.sources:
-            return ResolvedModel(
-                workflow=workflow_name,
-                reference=widget_ref,
-                match_type="workflow_context",
-                resolved_model=None,
-                is_optional=True,
-                match_confidence=1.0,
-            )
+            # Only treat as optional if user explicitly marked it (criticality="optional")
+            # Otherwise it's just unresolved (from interrupted resolution) - return None
+            if manifest_model.criticality == "optional":
+                return ResolvedModel(
+                    workflow=workflow_name,
+                    reference=widget_ref,
+                    match_type="workflow_context",
+                    resolved_model=None,
+                    is_optional=True,
+                    match_confidence=1.0,
+                )
+            # Not explicitly optional - this is truly unresolved, let it fall through
+            return None
 
         # Handle resolved models - look up in repository by hash
         if manifest_model.hash:
