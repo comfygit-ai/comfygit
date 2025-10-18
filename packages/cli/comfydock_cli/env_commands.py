@@ -309,6 +309,11 @@ class EnvironmentCommands:
         if wf_analysis.resolution.models_ambiguous:
             parts.append(f"{len(wf_analysis.resolution.models_ambiguous)} ambiguous models")
 
+        # Show download intents as pending work (not blocking but needs attention)
+        download_intents = [m for m in wf_analysis.resolution.models_resolved if m.match_type == "download_intent"]
+        if download_intents:
+            parts.append(f"{len(download_intents)} models queued for download")
+
         # Print compact issue line
         if parts:
             print(f"      {', '.join(parts)}")
@@ -325,7 +330,14 @@ class EnvironmentCommands:
                 print(f"  {s}")
             return
 
-        # Workflows with issues
+        # Check for workflows with download intents
+        workflows_with_downloads = []
+        for wf in status.workflow.analyzed_workflows:
+            download_intents = [m for m in wf.resolution.models_resolved if m.match_type == "download_intent"]
+            if download_intents:
+                workflows_with_downloads.append(wf.name)
+
+        # Workflows with issues (unresolved/ambiguous)
         workflows_with_issues = [w.name for w in status.workflow.workflows_with_issues]
         if workflows_with_issues:
             if len(workflows_with_issues) == 1:
@@ -340,6 +352,15 @@ class EnvironmentCommands:
             # Only suggest committing if there are uncommitted changes
             if status.git.has_changes:
                 suggestions.append("Or commit anyway: comfydock commit -m \"...\" --allow-issues")
+
+        # Workflows with queued downloads (no other issues)
+        elif workflows_with_downloads:
+            if len(workflows_with_downloads) == 1:
+                suggestions.append(f"Complete downloads: comfydock workflow resolve \"{workflows_with_downloads[0]}\"")
+            else:
+                suggestions.append(f"Complete downloads (pick one):")
+                for wf_name in workflows_with_downloads[:3]:
+                    suggestions.append(f"  comfydock workflow resolve \"{wf_name}\"")
 
         # Ready to commit
         elif status.workflow.sync_status.has_changes and status.workflow.is_commit_safe:
