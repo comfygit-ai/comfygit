@@ -129,8 +129,14 @@ class EnvironmentCommands:
     @with_env_logging("env delete")
     def delete(self, args, logger=None):
         """Delete an environment."""
-        # Check that environment exists
-        self._get_env(args)
+        # Check that environment exists (don't require active environment)
+        env_path = self.workspace.paths.environments / args.name
+        if not env_path.exists():
+            print(f"✗ Environment '{args.name}' not found")
+            print("\nAvailable environments:")
+            for env in self.workspace.list_environments():
+                print(f"  • {env.name}")
+            sys.exit(1)
 
         # Confirm deletion unless --yes is specified
         if not args.yes:
