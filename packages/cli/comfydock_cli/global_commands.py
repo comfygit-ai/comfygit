@@ -148,21 +148,206 @@ class GlobalCommands:
     @with_workspace_logging("import")
     def import_env(self, args):
         """Import a ComfyDock environment from a package."""
-        print("⚠️  Import/export functionality is not yet implemented in this MVP")
-        print("\nThis feature will allow you to:")
-        print("  - Import environments from .tar.gz packages")
-        print("  - Include pyproject.toml, uv.lock, and custom nodes")
-        print("  - Share environments between systems")
+        from pathlib import Path
+        from comfydock_core.managers.export_import_manager import ExportImportManager
+
+        if not args.path:
+            print("✗ Please specify path to import tarball")
+            print("  Usage: comfydock import <path.tar.gz>")
+            return 1
+
+        tarball_path = Path(args.path)
+        if not tarball_path.exists():
+            print(f"✗ File not found: {tarball_path}")
+            return 1
+
+        print(f"📦 Importing environment from {tarball_path.name}")
+        print()
+
+        # Ask for environment name
+        env_name = input("Environment name: ").strip()
+        if not env_name:
+            print("✗ Environment name required")
+            return 1
+
+        # Check if environment already exists
+        env_path = self.workspace.paths.environments / env_name
+        if env_path.exists():
+            print(f"✗ Environment '{env_name}' already exists")
+            return 1
+
+        # Ask for model download strategy
+        print("\nModel download strategy:")
+        print("  1. all      - Download all models with sources")
+        print("  2. required - Download only required models")
+        print("  3. skip     - Skip all downloads (can resolve later)")
+        strategy_choice = input("Choice (1-3) [1]: ").strip() or "1"
+
+        strategy_map = {"1": "all", "2": "required", "3": "skip"}
+        strategy = strategy_map.get(strategy_choice, "all")
+
+        try:
+            # Create environment directory
+            env_path.mkdir(parents=True)
+            cec_path = env_path / ".cec"
+
+            # Extract tarball
+            manager = ExportImportManager(cec_path, env_path / "ComfyUI")
+            manifest = manager.extract_import(tarball_path, cec_path)
+
+            print(f"✅ Extracted environment: {manifest.environment_name}")
+            print(f"   • {len(manifest.workflows)} workflows")
+            print(f"   • {manifest.total_nodes} nodes")
+            print(f"   • {manifest.total_models} models")
+            print()
+
+            # Initialize environment (custom flow for import - .cec already exists)
+            print("🔧 Initializing environment...")
+
+            # Instantiate Environment object
+            from comfydock_core.core.environment import Environment
+            env = Environment(
+                name=env_name,
+                path=env_path,
+                workspace_paths=self.workspace.paths,
+                model_repository=self.workspace.model_index_manager,
+                node_mapping_repository=self.workspace.node_mapping_repository,
+                workspace_config_manager=self.workspace.workspace_config_manager,
+                model_downloader=self.workspace.model_downloader,
+            )
+
+            # Clone ComfyUI (not included in export)
+            print("   Cloning ComfyUI...")
+            from comfydock_core.utils.comfyui_ops import clone_comfyui
+            import shutil
+
+            comfyui_version = clone_comfyui(env.comfyui_path, None)
+
+            # Remove ComfyUI's default models directory (will be replaced with symlink)
+            models_dir = env.comfyui_path / "models"
+            if models_dir.exists() and not models_dir.is_symlink():
+                shutil.rmtree(models_dir)
+
+            # Run uv sync to install dependencies from extracted pyproject.toml
+            print("   Installing dependencies...")
+            env.uv_manager.sync_project(verbose=False)
+
+            # Initialize git repo
+            print("   Initializing git repository...")
+            env.git_manager.initialize_environment_repo(f"Imported from {tarball_path.name}")
+
+            # Copy workflows from .cec to ComfyUI
+            print("\n📝 Setting up workflows...")
+            workflows_src = cec_path / "workflows"
+            workflows_dst = env.comfyui_path / "user" / "default" / "workflows"
+            workflows_dst.mkdir(parents=True, exist_ok=True)
+
+            if workflows_src.exists():
+                for workflow_file in workflows_src.glob("*.json"):
+                    shutil.copy2(workflow_file, workflows_dst / workflow_file.name)
+                    print(f"   Copied: {workflow_file.name}")
+
+            # Sync nodes from pyproject.toml (installs missing nodes)
+            print("\n📦 Syncing custom nodes...")
+            try:
+                sync_result = env.sync()
+                if sync_result.success:
+                    if sync_result.nodes_installed:
+                        print(f"   Installed {len(sync_result.nodes_installed)} nodes")
+                else:
+                    for error in sync_result.errors:
+                        print(f"   ⚠️  {error}")
+            except Exception as e:
+                print(f"   ⚠️  Sync failed: {e}")
+
+            # Prepare import with model strategy and resolve all workflows
+            print(f"\n🔄 Resolving workflows ({strategy} model strategy)...")
+
+            # Prepare download intents for missing models
+            if strategy != "skip":
+                env.prepare_import_with_model_strategy(strategy)
+
+            # Resolve all workflows
+            from comfydock_core.strategies.auto import AutoModelStrategy, AutoNodeStrategy
+
+            all_workflows = env.pyproject.workflows.get_all_with_resolutions()
+            for workflow_name in all_workflows.keys():
+                print(f"   • {workflow_name}")
+                try:
+                    result = env.resolve_workflow(
+                        name=workflow_name,
+                        model_strategy=AutoModelStrategy(),
+                        node_strategy=AutoNodeStrategy()
+                    )
+
+                    # Count downloads
+                    downloads = [m for m in result.models_resolved if m.match_type == 'download_intent']
+                    if downloads:
+                        print(f"     Downloaded {len(downloads)} models")
+                except Exception as e:
+                    print(f"     ⚠️  Resolution failed: {e}")
+
+            print(f"\n✅ Import complete: {env_name}")
+            print(f"   Environment ready to use!")
+            print(f"\nActivate with: comfydock use {env_name}")
+
+        except Exception as e:
+            print(f"\n✗ Import failed: {e}")
+            import traceback
+            traceback.print_exc()
+            # Cleanup on failure
+            if env_path.exists():
+                import shutil
+                shutil.rmtree(env_path)
+            return 1
+
         return 0
 
     @with_workspace_logging("export")
     def export_env(self, args):
         """Export a ComfyDock environment to a package."""
-        print("⚠️  Import/export functionality is not yet implemented in this MVP")
-        print("\nThis feature will allow you to:")
-        print("  - Export environments to .tar.gz packages")
-        print("  - Include pyproject.toml, uv.lock, and custom nodes")
-        print("  - Share environments between systems")
+        from datetime import datetime
+        from pathlib import Path
+
+        # Get active environment or from -e flag
+        try:
+            if hasattr(args, 'target_env') and args.target_env:
+                env = self.workspace.get_environment(args.target_env)
+            else:
+                env = self.workspace.get_active_environment()
+                if not env:
+                    print("✗ No active environment. Use: comfydock use <name>")
+                    print("   Or specify with: comfydock -e <name> export")
+                    return 1
+        except Exception as e:
+            print(f"✗ Error getting environment: {e}")
+            return 1
+
+        # Determine output path
+        if args.path:
+            output_path = Path(args.path)
+        else:
+            # Default: <env_name>_export_<date>.tar.gz in current directory
+            timestamp = datetime.now().strftime("%Y%m%d")
+            output_path = Path.cwd() / f"{env.name}_export_{timestamp}.tar.gz"
+
+        print(f"📦 Exporting environment: {env.name}")
+        print()
+
+        try:
+            tarball_path = env.export_environment(output_path)
+            size_mb = tarball_path.stat().st_size / (1024 * 1024)
+
+            print(f"✅ Export complete: {tarball_path.name} ({size_mb:.1f} MB)")
+            print(f"\nShare this file to distribute your complete environment!")
+
+        except ValueError as e:
+            print(f"✗ Export validation failed: {e}")
+            return 1
+        except Exception as e:
+            print(f"✗ Export failed: {e}")
+            return 1
+
         return 0
 
     # === Model Management Commands ===

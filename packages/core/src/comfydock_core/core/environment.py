@@ -814,3 +814,147 @@ class Environment:
             callbacks.on_batch_complete(success_count, len(results))
 
         return results
+
+    # =====================================================
+    # Export/Import
+    # =====================================================
+
+    def export_environment(self, output_path: Path) -> Path:
+        """Export environment as .tar.gz bundle.
+
+        Args:
+            output_path: Path for output tarball
+
+        Returns:
+            Path to created tarball
+
+        Raises:
+            ValueError: If environment has uncommitted changes or unresolved issues
+        """
+        from ..managers.export_import_manager import ExportImportManager, ExportManifest
+        from datetime import datetime
+        import platform
+
+        # Validation: Check for uncommitted git changes
+        if self.git_manager.has_uncommitted_changes():
+            raise ValueError(
+                "Cannot export with uncommitted changes. "
+                "Commit first: comfydock commit -m 'Pre-export checkpoint'"
+            )
+
+        # Validation: Check all workflows are resolved
+        status = self.workflow_manager.get_workflow_status()
+        if not status.is_commit_safe:
+            raise ValueError(
+                "Cannot export - workflows have unresolved issues. "
+                "Resolve with: comfydock workflow resolve <workflow_name>"
+            )
+
+        # Gather export metadata
+        workflows = [w.name for w in status.analyzed_workflows]
+
+        # Count models and nodes
+        total_models = sum(len(w.dependencies.found_models) for w in status.analyzed_workflows)
+        total_nodes = sum(len(w.dependencies.non_builtin_nodes) for w in status.analyzed_workflows)
+
+        # Get development nodes
+        all_nodes = self.pyproject.nodes.get_existing()
+        dev_nodes = [name for name, node in all_nodes.items() if node.source == "development"]
+
+        # Read Python version
+        python_version_file = self.cec_path / ".python-version"
+        python_version = python_version_file.read_text().strip() if python_version_file.exists() else "unknown"
+
+        # Create manifest
+        manifest = ExportManifest(
+            timestamp=datetime.now().isoformat(),
+            comfydock_version="0.5.0",  # TODO: Get from package metadata
+            environment_name=self.name,
+            workflows=workflows,
+            python_version=python_version,
+            comfyui_version=None,  # TODO: Detect ComfyUI version
+            platform=platform.system().lower(),
+            total_models=total_models,
+            total_nodes=total_nodes,
+            dev_nodes=dev_nodes
+        )
+
+        # Create export
+        manager = ExportImportManager(self.cec_path, self.comfyui_path)
+        return manager.create_export(output_path, manifest, self.pyproject)
+
+    def prepare_import_with_model_strategy(
+        self,
+        strategy: str = "all"
+    ) -> list[str]:
+        """Prepare import by converting missing models to download intents.
+
+        This is the key import method - it detects which models are missing locally
+        and temporarily converts them back to download intents in pyproject.toml.
+        The subsequent resolve_workflow() call will download them.
+
+        Args:
+            strategy: Model download strategy
+                - "all": Download all models with sources
+                - "required": Download only required models
+                - "skip": Skip all downloads (leave as optional unresolved)
+
+        Returns:
+            List of workflow names that had download intents prepared
+        """
+        logger.info(f"Preparing import with model strategy: {strategy}")
+
+        workflows_with_intents = []
+
+        # Get all workflows from pyproject
+        all_workflows = self.pyproject.workflows.get_all_with_resolutions()
+
+        for workflow_name in all_workflows.keys():
+            models = self.pyproject.workflows.get_workflow_models(workflow_name)
+            models_modified = False
+
+            for idx, model in enumerate(models):
+                # Skip if already unresolved (nothing to prepare)
+                if model.status == "unresolved":
+                    continue
+
+                # Check if model exists locally
+                if model.hash:
+                    existing = self.model_repository.get_model(model.hash)
+                    if existing:
+                        # Model exists - no download needed
+                        continue
+
+                # Model missing - check strategy
+                if strategy == "skip":
+                    # Convert to optional unresolved (no download intent)
+                    models[idx].status = "unresolved"
+                    models[idx].criticality = "optional"
+                    models[idx].hash = None
+                    models_modified = True
+                    continue
+
+                if strategy == "required" and model.criticality != "required":
+                    # Skip non-required models
+                    continue
+
+                # Convert to download intent
+                # Read sources from global table
+                if model.hash:
+                    global_model = self.pyproject.models.get_by_hash(model.hash)
+                    if global_model and global_model.sources:
+                        # Revert to download intent
+                        models[idx].status = "unresolved"
+                        models[idx].sources = global_model.sources
+                        models[idx].relative_path = global_model.relative_path
+                        models[idx].hash = None  # Clear hash - will be set after download
+                        models_modified = True
+                        logger.debug(f"Prepared download intent for {model.filename} in {workflow_name}")
+
+            # Save modified models
+            if models_modified:
+                self.pyproject.workflows.set_workflow_models(workflow_name, models)
+                workflows_with_intents.append(workflow_name)
+
+        logger.info(f"Prepared {len(workflows_with_intents)} workflows with download intents")
+        return workflows_with_intents
