@@ -1,8 +1,12 @@
 """Integration tests for export/import functionality."""
 import tempfile
 from pathlib import Path
+import sys
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from conftest import simulate_comfyui_save_workflow
 
 from comfydock_core.managers.export_import_manager import ExportImportManager, ExportManifest
 
@@ -117,3 +121,69 @@ class TestPrepareImportModels:
         # This would require a full environment setup
         # For MVP, we'll keep this as a placeholder for future enhancement
         pytest.skip("Requires full environment setup - future enhancement")
+
+
+class TestExportWithWorkflows:
+    """Test export with actual workflows and dependencies."""
+
+    def test_export_with_workflows_counts_unique_nodes(self, test_env):
+        """Test that export properly counts unique node types across workflows.
+
+        Regression test for bug: unhashable type 'WorkflowNode'
+        The export was trying to add WorkflowNode objects to a set,
+        but WorkflowNode is not hashable (not frozen, has mutable fields).
+
+        The fix extracts node.type strings instead of trying to hash WorkflowNode objects.
+        """
+        # ARRANGE - Create workflow with custom (non-builtin) nodes
+        workflow = {
+            "id": "test",
+            "nodes": [
+                {
+                    "id": "1",
+                    "type": "CustomNode1",
+                    "widgets_values": ["test"],
+                    "inputs": [],
+                    "outputs": [],
+                    "properties": {}
+                },
+                {
+                    "id": "2",
+                    "type": "CustomNode2",
+                    "widgets_values": ["test"],
+                    "inputs": [],
+                    "outputs": [],
+                    "properties": {}
+                },
+                {
+                    "id": "3",
+                    "type": "CustomNode1",  # Duplicate type - should only count once
+                    "widgets_values": ["test2"],
+                    "inputs": [],
+                    "outputs": [],
+                    "properties": {}
+                }
+            ],
+            "links": [],
+            "groups": [],
+            "config": {},
+            "extra": {}
+        }
+
+        simulate_comfyui_save_workflow(test_env, "test_workflow", workflow)
+
+        # Get workflow status (which analyzes and creates WorkflowNode objects)
+        status = test_env.workflow_manager.get_workflow_status()
+
+        # ACT - Count unique node types (the fixed code from environment.py)
+        all_node_types = set()
+        for w in status.analyzed_workflows:
+            # Extract type strings from WorkflowNode objects (can't hash WorkflowNode directly)
+            node_types = {node.type for node in w.dependencies.non_builtin_nodes}
+            all_node_types.update(node_types)
+
+        # ASSERT - Verify we got unique node types as strings
+        assert all_node_types == {"CustomNode1", "CustomNode2"}, (
+            f"Expected {{'CustomNode1', 'CustomNode2'}}, got {all_node_types}"
+        )
+        assert len(all_node_types) == 2, "Should count 2 unique node types (not 3 nodes)"

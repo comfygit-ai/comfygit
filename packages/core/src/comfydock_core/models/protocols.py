@@ -88,3 +88,70 @@ class RollbackStrategy(Protocol):
             True to proceed with rollback, False to cancel
         """
         ...
+
+
+class ImportCallbacks(Protocol):
+    """Protocol for import operation callbacks."""
+
+    def on_phase(self, phase: str, description: str) -> None:
+        """Called when entering a new import phase.
+
+        Args:
+            phase: Phase identifier (e.g., "extract", "install_deps", "sync_nodes")
+            description: Human-readable phase description
+        """
+        ...
+
+    def on_workflow_copied(self, workflow_name: str) -> None:
+        """Called when a workflow file is copied.
+
+        Args:
+            workflow_name: Name of the workflow file
+        """
+        ...
+
+    def on_node_installed(self, node_name: str) -> None:
+        """Called when a custom node is installed.
+
+        Args:
+            node_name: Name of the installed node
+        """
+        ...
+
+    def on_workflow_resolved(self, workflow_name: str, downloads: int) -> None:
+        """Called when a workflow is resolved.
+
+        Args:
+            workflow_name: Name of the workflow
+            downloads: Number of models downloaded for this workflow
+        """
+        ...
+
+    def on_error(self, error: str) -> None:
+        """Called when a non-fatal error occurs.
+
+        Args:
+            error: Error message
+        """
+        ...
+
+
+class ExportCallbacks(Protocol):
+    """Protocol for export operation callbacks."""
+
+    def on_warning(self, warning: str) -> None:
+        """Called when a warning is issued during export.
+
+        Args:
+            warning: Warning message
+        """
+        ...
+
+    def on_model_without_source(self, filename: str, hash: str) -> None:
+        """Called when a model has no source URL.
+
+        Args:
+            filename: Model filename
+            hash: Model hash
+        """
+        ...

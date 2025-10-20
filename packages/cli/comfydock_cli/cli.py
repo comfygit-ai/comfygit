@@ -95,6 +95,8 @@ def _add_global_commands(subparsers):
     # import - Import ComfyDock environment
     import_parser = subparsers.add_parser("import", help="Import ComfyDock environment (packed in .tar.gz usually)")
     import_parser.add_argument("path", type=Path, nargs="?", help="Path to input file")
+    import_parser.add_argument("--name", type=str, help="Name for imported environment (skip prompt)")
+    import_parser.add_argument("--use", action="store_true", help="Set imported environment as active")
     import_parser.set_defaults(func=global_cmds.import_env)
 
     # export - Export ComfyDock environment

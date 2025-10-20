@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tarfile
 import tempfile
 from dataclasses import dataclass, field
@@ -13,6 +14,8 @@ from ..logging.logging_config import get_logger
 
 if TYPE_CHECKING:
     from .pyproject_manager import PyprojectManager
+    from ..core.environment import Environment
+    from ..models.protocols import ImportCallbacks
 
 logger = get_logger(__name__)
 
@@ -184,3 +187,121 @@ class ExportImportManager:
                     continue
                 relative = item.relative_to(source_path)
                 tar.add(item, arcname=f"{arcname}/{relative}")
+
+    def import_bundle(
+        self,
+        env: "Environment",
+        tarball_path: Path,
+        model_strategy: str = "all",
+        callbacks: "ImportCallbacks | None" = None
+    ) -> ExportManifest:
+        """Complete import flow - extract, install dependencies, sync nodes, resolve workflows.
+
+        Args:
+            env: Target environment (must be freshly created with .cec extracted)
+            tarball_path: Path to .tar.gz bundle
+            model_strategy: "all", "required", or "skip"
+            callbacks: Optional callbacks for progress updates
+
+        Returns:
+            ExportManifest from the imported bundle
+
+        Raises:
+            ValueError: If environment already has ComfyUI or is not properly initialized
+        """
+        logger.info(f"Starting import from {tarball_path}")
+
+        # Verify environment is in correct state
+        if env.comfyui_path.exists():
+            raise ValueError("Environment already has ComfyUI - cannot import")
+
+        # Extract bundle (already done during env creation, but we need the manifest)
+        manifest_path = env.cec_path / "manifest.json"
+        if not manifest_path.exists():
+            raise ValueError("Invalid import state: manifest.json not found in .cec")
+
+        manifest = ExportManifest.from_dict(json.loads(manifest_path.read_text()))
+
+        # Phase 1: Clone ComfyUI
+        if callbacks:
+            callbacks.on_phase("clone_comfyui", "Cloning ComfyUI...")
+
+        from ..utils.comfyui_ops import clone_comfyui
+        clone_comfyui(env.comfyui_path, None)
+
+        # Remove ComfyUI's default models directory (will be replaced with symlink)
+        models_dir = env.comfyui_path / "models"
+        if models_dir.exists() and not models_dir.is_symlink():
+            shutil.rmtree(models_dir)
+
+        # Phase 2: Install dependencies
+        if callbacks:
+            callbacks.on_phase("install_deps", "Installing dependencies...")
+
+        env.uv_manager.sync_project(verbose=False)
+
+        # Phase 3: Initialize git
+        if callbacks:
+            callbacks.on_phase("init_git", "Initializing git repository...")
+
+        env.git_manager.initialize_environment_repo(f"Imported from {tarball_path.name}")
+
+        # Phase 4: Copy workflows
+        if callbacks:
+            callbacks.on_phase("copy_workflows", "Setting up workflows...")
+
+        workflows_src = env.cec_path / "workflows"
+        workflows_dst = env.comfyui_path / "user" / "default" / "workflows"
+        workflows_dst.mkdir(parents=True, exist_ok=True)
+
+        if workflows_src.exists():
+            for workflow_file in workflows_src.glob("*.json"):
+                shutil.copy2(workflow_file, workflows_dst / workflow_file.name)
+                if callbacks:
+                    callbacks.on_workflow_copied(workflow_file.name)
+
+        # Phase 5: Sync custom nodes
+        if callbacks:
+            callbacks.on_phase("sync_nodes", "Syncing custom nodes...")
+
+        try:
+            sync_result = env.sync()
+            if sync_result.success and sync_result.nodes_installed and callbacks:
+                for node_name in sync_result.nodes_installed:
+                    callbacks.on_node_installed(node_name)
+            elif not sync_result.success and callbacks:
+                for error in sync_result.errors:
+                    callbacks.on_error(f"Node sync: {error}")
+        except Exception as e:
+            if callbacks:
+                callbacks.on_error(f"Node sync failed: {e}")
+
+        # Phase 6: Prepare and resolve models
+        if callbacks:
+            callbacks.on_phase("resolve_models", f"Resolving workflows ({model_strategy} strategy)...")
+
+        if model_strategy != "skip":
+            env.prepare_import_with_model_strategy(model_strategy)
+
+        # Resolve all workflows
+        from ..strategies.auto import AutoModelStrategy, AutoNodeStrategy
+
+        all_workflows = env.pyproject.workflows.get_all_with_resolutions()
+        for workflow_name in all_workflows.keys():
+            try:
+                result = env.resolve_workflow(
+                    name=workflow_name,
+                    model_strategy=AutoModelStrategy(),
+                    node_strategy=AutoNodeStrategy()
+                )
+
+                downloads = sum(1 for m in result.models_resolved if m.match_type == 'download_intent')
+                if callbacks:
+                    callbacks.on_workflow_resolved(workflow_name, downloads)
+
+            except Exception as e:
+                if callbacks:
+                    callbacks.on_error(f"Failed to resolve {workflow_name}: {e}")
+
+        logger.info("Import completed successfully")
+        return manifest

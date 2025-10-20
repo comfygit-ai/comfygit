@@ -4,6 +4,7 @@ import json
 import shutil
 from functools import cached_property
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
 from comfydock_core.repositories.workspace_config_repository import WorkspaceConfigRepository
@@ -22,6 +23,9 @@ from ..repositories.model_repository import ModelRepository
 from ..services.model_downloader import ModelDownloader
 from ..services.registry_data_manager import RegistryDataManager
 from .environment import Environment
+
+if TYPE_CHECKING:
+    from ..models.protocols import ImportCallbacks
 
 logger = get_logger(__name__)
 
@@ -200,16 +204,16 @@ class Workspace:
         template_path: Path | None = None,
     ) -> Environment:
         """Create a new environment.
-        
+
         Args:
             name: Environment name
             python_version: Python version (e.g., "3.12")
             comfyui_version: ComfyUI version
             template_path: Optional template to copy from
-            
+
         Returns:
             Environment
-            
+
         Raises:
             CDEnvironmentExistsError: If environment already exists
             ComfyDockError: If environment creation fails
@@ -252,6 +256,61 @@ class Workspace:
                 raise
             else:
                 raise RuntimeError(f"Failed to create environment '{name}': {e}") from e
+
+    def import_environment(
+        self,
+        tarball_path: Path,
+        name: str,
+        model_strategy: str = "all",
+        callbacks: "ImportCallbacks | None" = None
+    ) -> Environment:
+        """Import environment from tarball bundle.
+
+        Args:
+            tarball_path: Path to .tar.gz bundle
+            name: Name for imported environment
+            model_strategy: "all", "required", or "skip"
+            callbacks: Optional callbacks for progress updates
+
+        Returns:
+            Environment
+
+        Raises:
+            CDEnvironmentExistsError: If environment already exists
+            ComfyDockError: If import fails
+            RuntimeError: If import fails
+        """
+        env_path = self.paths.environments / name
+
+        if env_path.exists():
+            raise CDEnvironmentExistsError(f"Environment '{name}' already exists")
+
+        try:
+            environment = EnvironmentFactory.import_from_bundle(
+                tarball_path=tarball_path,
+                name=name,
+                env_path=env_path,
+                workspace_paths=self.paths,
+                model_repository=self.model_index_manager,
+                node_mapping_repository=self.node_mapping_repository,
+                workspace_config_manager=self.workspace_config_manager,
+                model_downloader=self.model_downloader,
+                model_strategy=model_strategy,
+                callbacks=callbacks
+            )
+
+            return environment
+
+        except Exception as e:
+            logger.error(f"Failed to import environment: {e}")
+            if env_path.exists():
+                logger.debug(f"Cleaning up partial environment at {env_path}")
+                shutil.rmtree(env_path, ignore_errors=True)
+
+            if isinstance(e, ComfyDockError):
+                raise
+            else:
+                raise RuntimeError(f"Failed to import environment '{name}': {e}") from e
 
     def delete_environment(self, name: str):
         """Delete an environment permanently.

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from comfydock_core.core.workspace import Workspace
 from comfydock_core.factories.workspace_factory import WorkspaceFactory
+from comfydock_core.models.protocols import ImportCallbacks, ExportCallbacks
 
 from .logging.logging_config import get_logger
 from .logging.environment_logger import WorkspaceLogger, with_workspace_logging
@@ -149,7 +150,6 @@ class GlobalCommands:
     def import_env(self, args):
         """Import a ComfyDock environment from a package."""
         from pathlib import Path
-        from comfydock_core.managers.export_import_manager import ExportImportManager
 
         if not args.path:
             print("✗ Please specify path to import tarball")
@@ -164,17 +164,14 @@ class GlobalCommands:
         print(f"📦 Importing environment from {tarball_path.name}")
         print()
 
-        # Ask for environment name
-        env_name = input("Environment name: ").strip()
-        if not env_name:
-            print("✗ Environment name required")
-            return 1
-
-        # Check if environment already exists
-        env_path = self.workspace.paths.environments / env_name
-        if env_path.exists():
-            print(f"✗ Environment '{env_name}' already exists")
-            return 1
+        # Get environment name from args or prompt
+        if hasattr(args, 'name') and args.name:
+            env_name = args.name
+        else:
+            env_name = input("Environment name: ").strip()
+            if not env_name:
+                print("✗ Environment name required")
+                return 1
 
         # Ask for model download strategy
         print("\nModel download strategy:")
@@ -186,119 +183,91 @@ class GlobalCommands:
         strategy_map = {"1": "all", "2": "required", "3": "skip"}
         strategy = strategy_map.get(strategy_choice, "all")
 
+        # CLI callbacks for progress updates
+        class CLIImportCallbacks(ImportCallbacks):
+            def __init__(self):
+                self.manifest = None
+
+            def on_phase(self, phase: str, description: str):
+                # Add emojis based on phase
+                emoji_map = {
+                    "clone_comfyui": "🔧",
+                    "install_deps": "🔧",
+                    "init_git": "🔧",
+                    "copy_workflows": "📝",
+                    "sync_nodes": "📦",
+                    "resolve_models": "🔄"
+                }
+
+                # First phase shows initialization header
+                if phase == "clone_comfyui":
+                    print("\n🔧 Initializing environment...")
+                    print(f"   {description}")
+                elif phase in ["install_deps", "init_git"]:
+                    print(f"   {description}")
+                elif phase == "copy_workflows":
+                    print(f"\n📝 Setting up workflows...")
+                elif phase == "sync_nodes":
+                    print(f"\n📦 Syncing custom nodes...")
+                elif phase == "resolve_models":
+                    print(f"\n🔄 {description}")
+                else:
+                    emoji = emoji_map.get(phase, "")
+                    print(f"\n{emoji} {description}" if emoji else f"\n{description}")
+
+            def on_workflow_copied(self, workflow_name: str):
+                print(f"   Copied: {workflow_name}")
+
+            def on_node_installed(self, node_name: str):
+                print(f"   Installed: {node_name}")
+
+            def on_workflow_resolved(self, workflow_name: str, downloads: int):
+                print(f"   • {workflow_name}", end="")
+                if downloads:
+                    print(f" (downloaded {downloads} models)")
+                else:
+                    print()
+
+            def on_error(self, error: str):
+                print(f"   ⚠️  {error}")
+
         try:
-            # Create environment directory
-            env_path.mkdir(parents=True)
-            cec_path = env_path / ".cec"
+            # Extract and show manifest info
+            import json
+            import tarfile
 
-            # Extract tarball
-            manager = ExportImportManager(cec_path, env_path / "ComfyUI")
-            manifest = manager.extract_import(tarball_path, cec_path)
+            # Quick extract to get manifest
+            with tarfile.open(tarball_path, "r:gz") as tar:
+                manifest_member = tar.getmember("manifest.json")
+                manifest_file = tar.extractfile(manifest_member)
+                if not manifest_file:
+                    raise ValueError("Invalid tarball: manifest.json is empty")
+                manifest_data = json.loads(manifest_file.read())
 
-            print(f"✅ Extracted environment: {manifest.environment_name}")
-            print(f"   • {len(manifest.workflows)} workflows")
-            print(f"   • {manifest.total_nodes} nodes")
-            print(f"   • {manifest.total_models} models")
-            print()
+            print(f"✅ Extracted environment: {manifest_data['environment_name']}")
+            print(f"   • {len(manifest_data['workflows'])} workflows")
+            print(f"   • {manifest_data['total_nodes']} nodes")
+            print(f"   • {manifest_data['total_models']} models")
 
-            # Initialize environment (custom flow for import - .cec already exists)
-            print("🔧 Initializing environment...")
-
-            # Instantiate Environment object
-            from comfydock_core.core.environment import Environment
-            env = Environment(
+            env = self.workspace.import_environment(
+                tarball_path=tarball_path,
                 name=env_name,
-                path=env_path,
-                workspace_paths=self.workspace.paths,
-                model_repository=self.workspace.model_index_manager,
-                node_mapping_repository=self.workspace.node_mapping_repository,
-                workspace_config_manager=self.workspace.workspace_config_manager,
-                model_downloader=self.workspace.model_downloader,
+                model_strategy=strategy,
+                callbacks=CLIImportCallbacks()
             )
 
-            # Clone ComfyUI (not included in export)
-            print("   Cloning ComfyUI...")
-            from comfydock_core.utils.comfyui_ops import clone_comfyui
-            import shutil
-
-            comfyui_version = clone_comfyui(env.comfyui_path, None)
-
-            # Remove ComfyUI's default models directory (will be replaced with symlink)
-            models_dir = env.comfyui_path / "models"
-            if models_dir.exists() and not models_dir.is_symlink():
-                shutil.rmtree(models_dir)
-
-            # Run uv sync to install dependencies from extracted pyproject.toml
-            print("   Installing dependencies...")
-            env.uv_manager.sync_project(verbose=False)
-
-            # Initialize git repo
-            print("   Initializing git repository...")
-            env.git_manager.initialize_environment_repo(f"Imported from {tarball_path.name}")
-
-            # Copy workflows from .cec to ComfyUI
-            print("\n📝 Setting up workflows...")
-            workflows_src = cec_path / "workflows"
-            workflows_dst = env.comfyui_path / "user" / "default" / "workflows"
-            workflows_dst.mkdir(parents=True, exist_ok=True)
-
-            if workflows_src.exists():
-                for workflow_file in workflows_src.glob("*.json"):
-                    shutil.copy2(workflow_file, workflows_dst / workflow_file.name)
-                    print(f"   Copied: {workflow_file.name}")
-
-            # Sync nodes from pyproject.toml (installs missing nodes)
-            print("\n📦 Syncing custom nodes...")
-            try:
-                sync_result = env.sync()
-                if sync_result.success:
-                    if sync_result.nodes_installed:
-                        print(f"   Installed {len(sync_result.nodes_installed)} nodes")
-                else:
-                    for error in sync_result.errors:
-                        print(f"   ⚠️  {error}")
-            except Exception as e:
-                print(f"   ⚠️  Sync failed: {e}")
-
-            # Prepare import with model strategy and resolve all workflows
-            print(f"\n🔄 Resolving workflows ({strategy} model strategy)...")
-
-            # Prepare download intents for missing models
-            if strategy != "skip":
-                env.prepare_import_with_model_strategy(strategy)
-
-            # Resolve all workflows
-            from comfydock_core.strategies.auto import AutoModelStrategy, AutoNodeStrategy
-
-            all_workflows = env.pyproject.workflows.get_all_with_resolutions()
-            for workflow_name in all_workflows.keys():
-                print(f"   • {workflow_name}")
-                try:
-                    result = env.resolve_workflow(
-                        name=workflow_name,
-                        model_strategy=AutoModelStrategy(),
-                        node_strategy=AutoNodeStrategy()
-                    )
-
-                    # Count downloads
-                    downloads = [m for m in result.models_resolved if m.match_type == 'download_intent']
-                    if downloads:
-                        print(f"     Downloaded {len(downloads)} models")
-                except Exception as e:
-                    print(f"     ⚠️  Resolution failed: {e}")
-
-            print(f"\n✅ Import complete: {env_name}")
+            print(f"\n✅ Import complete: {env.name}")
             print(f"   Environment ready to use!")
-            print(f"\nActivate with: comfydock use {env_name}")
+
+            # Set as active if --use flag provided
+            if hasattr(args, 'use') and args.use:
+                self.workspace.set_active_environment(env.name)
+                print(f"   '{env.name}' set as active environment")
+            else:
+                print(f"\nActivate with: comfydock use {env_name}")
 
         except Exception as e:
             print(f"\n✗ Import failed: {e}")
-            import traceback
-            traceback.print_exc()
-            # Cleanup on failure
-            if env_path.exists():
-                import shutil
-                shutil.rmtree(env_path)
             return 1
 
         return 0
@@ -334,11 +303,29 @@ class GlobalCommands:
         print(f"📦 Exporting environment: {env.name}")
         print()
 
+        # Export callbacks for warnings
+        class CLIExportCallbacks(ExportCallbacks):
+            def __init__(self):
+                self.models_without_sources = []
+
+            def on_warning(self, warning: str):
+                print(f"⚠️  {warning}")
+
+            def on_model_without_source(self, filename: str, hash: str):
+                self.models_without_sources.append((filename, hash))
+
+        callbacks = CLIExportCallbacks()
+
         try:
-            tarball_path = env.export_environment(output_path)
+            tarball_path = env.export_environment(output_path, callbacks=callbacks)
             size_mb = tarball_path.stat().st_size / (1024 * 1024)
 
-            print(f"✅ Export complete: {tarball_path.name} ({size_mb:.1f} MB)")
+            print(f"\n✅ Export complete: {tarball_path.name} ({size_mb:.1f} MB)")
+
+            if callbacks.models_without_sources:
+                print(f"\n⚠️  Note: {len(callbacks.models_without_sources)} model(s) have no source URLs")
+                print("   Recipients must have these locally or resolve manually")
+
             print(f"\nShare this file to distribute your complete environment!")
 
         except ValueError as e:

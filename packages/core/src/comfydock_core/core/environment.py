@@ -27,6 +27,8 @@ if TYPE_CHECKING:
         ModelResolutionStrategy,
         NodeResolutionStrategy,
         RollbackStrategy,
+        ExportCallbacks,
+        ImportCallbacks,
     )
 
     from ..models.workflow import (
@@ -819,11 +821,16 @@ class Environment:
     # Export/Import
     # =====================================================
 
-    def export_environment(self, output_path: Path) -> Path:
+    def export_environment(
+        self,
+        output_path: Path,
+        callbacks: "ExportCallbacks | None" = None
+    ) -> Path:
         """Export environment as .tar.gz bundle.
 
         Args:
             output_path: Path for output tarball
+            callbacks: Optional callbacks for warnings/progress
 
         Returns:
             Path to created tarball
@@ -832,6 +839,7 @@ class Environment:
             ValueError: If environment has uncommitted changes or unresolved issues
         """
         from ..managers.export_import_manager import ExportImportManager, ExportManifest
+        from ..models.protocols import ExportCallbacks
         from datetime import datetime
         import platform
 
@@ -850,12 +858,33 @@ class Environment:
                 "Resolve with: comfydock workflow resolve <workflow_name>"
             )
 
+        # Check for models without sources
+        models_without_sources = []
+        for model in self.pyproject.models.get_all():
+            if not model.sources:
+                models_without_sources.append((model.hash, model.filename))
+                if callbacks:
+                    callbacks.on_model_without_source(model.filename, model.hash)
+
+        if models_without_sources and callbacks:
+            callbacks.on_warning(
+                f"{len(models_without_sources)} model(s) have no source URLs - "
+                "recipients must have them locally or resolve manually"
+            )
+
         # Gather export metadata
         workflows = [w.name for w in status.analyzed_workflows]
 
-        # Count models and nodes
-        total_models = sum(len(w.dependencies.found_models) for w in status.analyzed_workflows)
-        total_nodes = sum(len(w.dependencies.non_builtin_nodes) for w in status.analyzed_workflows)
+        # Count unique models from global table
+        total_models = len(self.pyproject.models.get_all())
+
+        # Count unique node types across all workflows
+        all_node_types = set()
+        for w in status.analyzed_workflows:
+            # Extract type strings from WorkflowNode objects (can't hash WorkflowNode directly)
+            node_types = {node.type for node in w.dependencies.non_builtin_nodes}
+            all_node_types.update(node_types)
+        total_nodes = len(all_node_types)
 
         # Get development nodes
         all_nodes = self.pyproject.nodes.get_existing()

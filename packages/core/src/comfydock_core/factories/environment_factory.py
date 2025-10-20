@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from comfydock_core.repositories.node_mappings_repository import NodeMappingsRepository
     from comfydock_core.repositories.workspace_config_repository import WorkspaceConfigRepository
     from comfydock_core.services.model_downloader import ModelDownloader
+    from comfydock_core.models.protocols import ImportCallbacks
 
 logger = get_logger(__name__)
 
@@ -108,6 +109,75 @@ class EnvironmentFactory:
             raise  # FATAL - environment won't work without models
 
         logger.info(f"Environment '{name}' created successfully")
+        return env
+
+    @staticmethod
+    def import_from_bundle(
+        tarball_path: Path,
+        name: str,
+        env_path: Path,
+        workspace_paths: "WorkspacePaths",
+        model_repository: "ModelRepository",
+        node_mapping_repository: "NodeMappingsRepository",
+        workspace_config_manager: "WorkspaceConfigRepository",
+        model_downloader: "ModelDownloader",
+        model_strategy: str = "all",
+        callbacks: "ImportCallbacks | None" = None
+    ) -> Environment:
+        """Import environment from tarball bundle.
+
+        Args:
+            tarball_path: Path to .tar.gz bundle
+            name: Name for imported environment
+            env_path: Path where environment will be created
+            workspace_paths: Workspace paths
+            model_repository: Model repository
+            node_mapping_repository: Node mapping repository
+            workspace_config_manager: Workspace config manager
+            model_downloader: Model downloader
+            model_strategy: "all", "required", or "skip"
+            callbacks: Optional callbacks for progress updates
+
+        Returns:
+            Environment
+
+        Raises:
+            CDEnvironmentExistsError: If environment path exists
+            ValueError: If tarball is invalid
+        """
+        if env_path.exists():
+            raise CDEnvironmentExistsError(f"Environment path already exists: {env_path}")
+
+        # Create environment directory and extract bundle
+        env_path.mkdir(parents=True)
+        cec_path = env_path / ".cec"
+
+        from ..managers.export_import_manager import ExportImportManager
+        manager = ExportImportManager(cec_path, env_path / "ComfyUI")
+        manager.extract_import(tarball_path, cec_path)
+
+        logger.info(f"Extracted bundle to {cec_path}")
+
+        # Create Environment object
+        env = Environment(
+            name=name,
+            path=env_path,
+            workspace_paths=workspace_paths,
+            model_repository=model_repository,
+            node_mapping_repository=node_mapping_repository,
+            workspace_config_manager=workspace_config_manager,
+            model_downloader=model_downloader,
+        )
+
+        # Run import orchestration
+        manager.import_bundle(
+            env=env,
+            tarball_path=tarball_path,
+            model_strategy=model_strategy,
+            callbacks=callbacks
+        )
+
+        logger.info(f"Environment '{name}' imported successfully")
         return env
 
     @staticmethod
