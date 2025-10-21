@@ -148,21 +148,31 @@ class GlobalCommands:
 
     @with_workspace_logging("import")
     def import_env(self, args):
-        """Import a ComfyDock environment from a package."""
+        """Import a ComfyDock environment from a tarball or git repository."""
         from pathlib import Path
+        from comfydock_core.utils.git import is_git_url
 
         if not args.path:
-            print("✗ Please specify path to import tarball")
-            print("  Usage: comfydock import <path.tar.gz>")
+            print("✗ Please specify path to import tarball or git URL")
+            print("  Usage: comfydock import <path.tar.gz|git-url>")
             return 1
 
-        tarball_path = Path(args.path)
-        if not tarball_path.exists():
-            print(f"✗ File not found: {tarball_path}")
-            return 1
+        # Detect if this is a git URL or local tarball
+        is_git = is_git_url(args.path)
 
-        print(f"📦 Importing environment from {tarball_path.name}")
-        print()
+        if is_git:
+            print(f"📦 Importing environment from git repository")
+            print(f"   URL: {args.path}")
+            if hasattr(args, 'branch') and args.branch:
+                print(f"   Branch/Tag: {args.branch}")
+            print()
+        else:
+            tarball_path = Path(args.path)
+            if not tarball_path.exists():
+                print(f"✗ File not found: {tarball_path}")
+                return 1
+            print(f"📦 Importing environment from {tarball_path.name}")
+            print()
 
         # Get environment name from args or prompt
         if hasattr(args, 'name') and args.name:
@@ -191,7 +201,9 @@ class GlobalCommands:
             def on_phase(self, phase: str, description: str):
                 # Add emojis based on phase
                 emoji_map = {
+                    "clone_repo": "📥",
                     "clone_comfyui": "🔧",
+                    "restore_comfyui": "🔧",
                     "install_deps": "🔧",
                     "init_git": "🔧",
                     "copy_workflows": "📝",
@@ -200,7 +212,9 @@ class GlobalCommands:
                 }
 
                 # First phase shows initialization header
-                if phase == "clone_comfyui":
+                if phase == "clone_repo":
+                    print(f"\n📥 {description}")
+                elif phase in ["clone_comfyui", "restore_comfyui"]:
                     print("\n🔧 Initializing environment...")
                     print(f"   {description}")
                 elif phase in ["install_deps", "init_git"]:
@@ -245,12 +259,21 @@ class GlobalCommands:
                 print("   comfydock config --civitai-key <your-token>")
 
         try:
-            env = self.workspace.import_environment(
-                tarball_path=tarball_path,
-                name=env_name,
-                model_strategy=strategy,
-                callbacks=CLIImportCallbacks()
-            )
+            if is_git:
+                env = self.workspace.import_from_git(
+                    git_url=args.path,
+                    name=env_name,
+                    model_strategy=strategy,
+                    branch=getattr(args, 'branch', None),
+                    callbacks=CLIImportCallbacks()
+                )
+            else:
+                env = self.workspace.import_environment(
+                    tarball_path=Path(args.path),
+                    name=env_name,
+                    model_strategy=strategy,
+                    callbacks=CLIImportCallbacks()
+                )
 
             print(f"\n✅ Import complete: {env.name}")
             print("   Environment ready to use!")
