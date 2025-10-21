@@ -75,6 +75,7 @@ local_config.json
 
 # Docs:
 docs/archive
+docs/contexts
 
 # Helper scripts:
 .setup.sh

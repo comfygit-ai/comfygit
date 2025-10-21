@@ -1,14 +1,9 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
 ComfyDock is a monorepo workspace using uv for Python package management. It provides unified environment management for ComfyUI through multiple coordinated packages.
 
 ### Codebase Map
-
-You can see a general overview of the structure of the project and important files by seeing docs/codebase-map.md
+- @docs/codebase-map.md
 
 ## Version Management Strategy
 
