@@ -50,6 +50,57 @@ def get_comfyui_version(comfyui_path: Path) -> str:
     return comfyui_version
 
 
+def resolve_comfyui_version(
+    version_spec: str | None,
+    github_client
+) -> tuple[str, str, str | None]:
+    """Resolve version specification to concrete version.
+
+    Args:
+        version_spec: User input ("latest", "v0.3.20", "abc123", "main", None)
+        github_client: GitHub client for API calls
+
+    Returns:
+        Tuple of (version_to_clone, version_type, commit_sha)
+        - version_to_clone: What to pass to git clone
+        - version_type: "release" | "commit" | "branch"
+        - commit_sha: Actual commit SHA (None if not yet cloned)
+
+    Examples:
+        None → ("v0.3.20", "release", None)  # Latest release
+        "latest" → ("v0.3.20", "release", None)
+        "v0.3.15" → ("v0.3.15", "release", None)
+        "abc123" → ("abc123", "commit", None)
+        "main" → ("main", "branch", None)
+    """
+    COMFYUI_REPO = "https://github.com/comfyanonymous/ComfyUI.git"
+
+    # Handle None or "latest" - fetch latest release
+    if version_spec is None or version_spec == "latest":
+        repo_info = github_client.get_repository_info(COMFYUI_REPO)
+        if repo_info and repo_info.latest_release:
+            return (repo_info.latest_release, "release", None)
+        else:
+            logger.warning("No releases found, falling back to main branch")
+            return ("main", "branch", None)
+
+    # Handle release tags (starts with 'v')
+    if version_spec.startswith('v'):
+        # Validate release exists
+        if github_client.validate_version_exists(COMFYUI_REPO, version_spec):
+            return (version_spec, "release", None)
+        else:
+            logger.warning(f"Release {version_spec} not found on GitHub")
+            raise ValueError(f"ComfyUI release {version_spec} does not exist")
+
+    # Handle branch aliases
+    if version_spec in ("main", "master"):
+        return (version_spec, "branch", None)
+
+    # Assume commit hash
+    return (version_spec, "commit", None)
+
+
 def clone_comfyui(target_path: Path, version: str | None = None) -> str | None:
     """Clone ComfyUI repository to a target path.
 

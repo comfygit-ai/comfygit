@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import os
 import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -12,6 +11,7 @@ from comfydock_core.models.shared import NodeInfo
 
 from ..logging.logging_config import get_logger
 from ..utils.common import format_size
+from .base import ContentCacheBase
 
 logger = get_logger(__name__)
 
@@ -42,7 +42,7 @@ class CachedNodeInfo:
         return cls(**data)
 
 
-class CustomNodeCacheManager:
+class CustomNodeCacheManager(ContentCacheBase):
     """Manages caching of custom node downloads."""
 
     def __init__(self, cache_base_path: Path | None = None):
@@ -51,50 +51,19 @@ class CustomNodeCacheManager:
         Args:
             cache_base_path: Base path for cache storage (defaults to platform-specific location)
         """
-        self.cache_base = cache_base_path or self._get_default_cache_path()
-        self.nodes_cache_dir = self.cache_base / "custom_nodes"
-        self.store_dir = self.nodes_cache_dir / "store"
-        self.index_file = self.nodes_cache_dir / "index.json"
-        self.lock_file = self.nodes_cache_dir / ".lock"
+        super().__init__("custom_nodes", cache_base_path)
+        self.lock_file = self.cache_dir / ".lock"
 
-        # Ensure cache directories exist
-        self._ensure_cache_dirs()
+        # Load node-specific index
+        self.node_index = self._load_node_index()
 
-        # Load or initialize index
-        self.index = self._load_index()
-
-    def _get_default_cache_path(self) -> Path:
-        """Get cache directory with precedence: env var > platform default."""
-        # Priority 1: Environment variable
-        env_cache = os.environ.get("COMFYDOCK_CACHE")
-        if env_cache:
-            return Path(env_cache)
-
-        # Priority 2: Platform-specific default
-        import platform
-
-        system = platform.system()
-
-        if system == "Windows":
-            base = os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
-            return Path(base) / "comfyui-detector"
-        elif system == "Darwin":
-            return Path.home() / "Library" / "Caches" / "comfyui-detector"
-        else:
-            xdg_cache = os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")
-            return Path(xdg_cache) / "comfyui-detector"
-
-    def _ensure_cache_dirs(self):
-        """Ensure all cache directories exist."""
-        self.store_dir.mkdir(parents=True, exist_ok=True)
-
-    def _load_index(self) -> dict[str, CachedNodeInfo]:
-        """Load the cache index from disk."""
+    def _load_node_index(self) -> dict[str, CachedNodeInfo]:
+        """Load the node-specific cache index from disk."""
         if not self.index_file.exists():
             return {}
 
         try:
-            with open(self.index_file) as f:
+            with open(self.index_file, encoding='utf-8') as f:
                 data = json.load(f)
 
             # Convert to CachedNodeInfo objects
@@ -111,19 +80,19 @@ class CustomNodeCacheManager:
             logger.error(f"Failed to load cache index: {e}")
             return {}
 
-    def _save_index(self):
-        """Save the cache index to disk."""
+    def _save_node_index(self):
+        """Save the node-specific cache index to disk."""
         try:
             # Convert to serializable format
             data = {
                 "version": "1.0",
                 "updated_at": datetime.now(timezone.utc).isoformat(),
-                "nodes": {k: v.to_dict() for k, v in self.index.items()},
+                "nodes": {k: v.to_dict() for k, v in self.node_index.items()},
             }
 
             # Write atomically
             temp_file = self.index_file.with_suffix(".tmp")
-            with open(temp_file, "w") as f:
+            with open(temp_file, "w", encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
 
             # Replace original
@@ -140,19 +109,8 @@ class CustomNodeCacheManager:
         - Ref (for git repos)
         - Install method
         """
-
-        # Only add component of node info if not None:
+        # Only add component of node info if not None
         components = [info for info in node_info.__dict__.values() if info is not None]
-
-        # components = [
-        #     node_info.name,
-        #     node_info.registry_id,
-        #     node_info.download_url,
-        #     node_info.repository,
-        #     node_info.source,
-        #     node_info.version,
-        # ]
-
         key_string = "|".join(components)
         return hashlib.sha256(key_string.encode()).hexdigest()[:16]
 
@@ -161,7 +119,7 @@ class CustomNodeCacheManager:
         cache_key = self.generate_cache_key(node_info)
 
         # Check index
-        if cache_key not in self.index:
+        if cache_key not in self.node_index:
             return False
 
         # Verify the actual files exist
@@ -187,10 +145,10 @@ class CustomNodeCacheManager:
         logger.debug(f"Generated cached path for '{node_info.name}': {content_path}")
 
         # Update access time and count
-        if cache_key in self.index:
-            self.index[cache_key].last_accessed = datetime.now(timezone.utc).isoformat()
-            self.index[cache_key].access_count += 1
-            self._save_index()
+        if cache_key in self.node_index:
+            self.node_index[cache_key].last_accessed = datetime.now(timezone.utc).isoformat()
+            self.node_index[cache_key].access_count += 1
+            self._save_node_index()
 
         return content_path
 
@@ -203,7 +161,7 @@ class CustomNodeCacheManager:
         """Cache a custom node from a source directory.
 
         Args:
-            node_spec: The node specification
+            node_info: The node specification
             source_path: Path to the extracted node content
             archive_path: Optional path to the original archive
 
@@ -211,64 +169,47 @@ class CustomNodeCacheManager:
             Path to the cached content
         """
         cache_key = self.generate_cache_key(node_info)
-        cache_dir = self.store_dir / cache_key
-        content_dir = cache_dir / "content"
-
-        # Clean up any existing cache entry
-        if cache_dir.exists():
-            shutil.rmtree(cache_dir)
-
-        cache_dir.mkdir(parents=True)
-
-        # Copy content
         logger.info(f"Caching custom node: {node_info.name}")
-        shutil.copytree(source_path, content_dir)
 
-        # Copy archive if provided
-        if archive_path and archive_path.exists():
-            archive_dest = cache_dir / "archive"
-            shutil.copy2(archive_path, archive_dest)
-
-        # Calculate size
-        size_bytes = sum(
-            f.stat().st_size for f in content_dir.rglob("*") if f.is_file()
-        )
-
-        # Generate content hash for integrity checking
-        content_hash = self._calculate_content_hash(content_dir)
-
-        # Create metadata
+        # Build metadata for base class
         metadata = {
             "node_spec": asdict(node_info),
-            "cached_at": datetime.now(timezone.utc).isoformat(),
-            "source_size_bytes": size_bytes,
-            "content_hash": content_hash,
             "has_archive": archive_path is not None,
         }
 
-        # Save metadata
-        metadata_file = cache_dir / "metadata.json"
-        with open(metadata_file, "w") as f:
-            json.dump(metadata, f, indent=2)
+        # Use base class cache_content method
+        content_dir = self.cache_content(cache_key, source_path, metadata)
 
-        # Update index
-        self.index[cache_key] = CachedNodeInfo(
+        # Copy archive if provided
+        if archive_path and archive_path.exists():
+            cache_dir = self.store_dir / cache_key
+            archive_dest = cache_dir / "archive"
+            shutil.copy2(archive_path, archive_dest)
+
+        # Get size and hash from base class
+        cache_dir = self.store_dir / cache_key
+        metadata_file = cache_dir / "metadata.json"
+        with open(metadata_file, encoding='utf-8') as f:
+            full_metadata = json.load(f)
+
+        # Update node-specific index
+        self.node_index[cache_key] = CachedNodeInfo(
             cache_key=cache_key,
             name=node_info.name,
             install_method=node_info.source,
             url=node_info.download_url or node_info.repository or "",
             ref=node_info.version,
-            cached_at=metadata["cached_at"],
-            last_accessed=metadata["cached_at"],
+            cached_at=full_metadata["cached_at"],
+            last_accessed=full_metadata["cached_at"],
             access_count=1,
-            size_bytes=size_bytes,
-            content_hash=content_hash,
-            source_info=metadata,
+            size_bytes=full_metadata["size_bytes"],
+            content_hash=full_metadata["content_hash"],
+            source_info=full_metadata,
         )
 
-        self._save_index()
+        self._save_node_index()
         logger.info(
-            f"Cached {node_info.name} ({format_size(size_bytes)}) with key: {cache_key}"
+            f"Cached {node_info.name} ({format_size(full_metadata['size_bytes'])}) with key: {cache_key}"
         )
 
         return content_dir
@@ -325,27 +266,9 @@ class CustomNodeCacheManager:
             logger.error(f"Failed to copy from cache: {e}")
             return False
 
-    def _calculate_content_hash(self, content_dir: Path) -> str:
-        """Calculate SHA256 hash of directory content for integrity checking."""
-        hasher = hashlib.sha256()
-
-        # Sort files for consistent hashing
-        for file_path in sorted(content_dir.rglob("*")):
-            if file_path.is_file():
-                # Include relative path in hash
-                rel_path = file_path.relative_to(content_dir)
-                hasher.update(str(rel_path).encode())
-
-                # Include file content
-                with open(file_path, "rb") as f:
-                    for chunk in iter(lambda: f.read(65536), b""):
-                        hasher.update(chunk)
-
-        return hasher.hexdigest()
-
     def verify_cache_integrity(self, cache_key: str) -> bool:
         """Verify the integrity of a cached node."""
-        if cache_key not in self.index:
+        if cache_key not in self.node_index:
             return False
 
         cache_dir = self.store_dir / cache_key
@@ -354,9 +277,9 @@ class CustomNodeCacheManager:
         if not content_dir.exists():
             return False
 
-        # Recalculate hash
+        # Recalculate hash using base class method
         current_hash = self._calculate_content_hash(content_dir)
-        stored_hash = self.index[cache_key].content_hash
+        stored_hash = self.node_index[cache_key].content_hash
 
         return current_hash == stored_hash
 
@@ -374,24 +297,24 @@ class CustomNodeCacheManager:
         if node_name:
             # Clear specific node
             entries_to_clear = [
-                (k, v) for k, v in self.index.items() if v.name == node_name
+                (k, v) for k, v in self.node_index.items() if v.name == node_name
             ]
         else:
             # Clear all
-            entries_to_clear = list(self.index.items())
+            entries_to_clear = list(self.node_index.items())
 
-        for cache_key, info in entries_to_clear:
+        for cache_key, _ in entries_to_clear:
             cache_dir = self.store_dir / cache_key
             if cache_dir.exists():
                 shutil.rmtree(cache_dir)
 
-            del self.index[cache_key]
+            del self.node_index[cache_key]
             cleared += 1
 
-        self._save_index()
+        self._save_node_index()
 
         return cleared
 
     def list_cached_nodes(self) -> list[CachedNodeInfo]:
         """Get a list of all cached nodes."""
-        return list(self.index.values())
+        return list(self.node_index.values())

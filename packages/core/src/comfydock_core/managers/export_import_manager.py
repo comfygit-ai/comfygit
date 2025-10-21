@@ -220,12 +220,72 @@ class ExportImportManager:
 
         manifest = ExportManifest.from_dict(json.loads(manifest_path.read_text()))
 
-        # Phase 1: Clone ComfyUI
-        if callbacks:
-            callbacks.on_phase("clone_comfyui", "Cloning ComfyUI...")
+        # Determine ComfyUI version to clone
+        # Use comfyui_version (tag/branch), NOT commit_sha (can't shallow clone commits)
+        # The commit_sha is for tracking only, not cloning
+        comfyui_version = None
+        comfyui_version_type = None
+        try:
+            pyproject_data = env.pyproject.load()
+            comfydock_config = pyproject_data.get("tool", {}).get("comfydock", {})
+            comfyui_version = comfydock_config.get("comfyui_version")
+            comfyui_version_type = comfydock_config.get("comfyui_version_type")
+        except Exception as e:
+            logger.warning(f"Could not read comfyui_version from pyproject.toml: {e}")
 
+        # Fallback to manifest if pyproject doesn't have version
+        if not comfyui_version:
+            comfyui_version = manifest.comfyui_version
+            logger.debug(f"Using comfyui_version from manifest: {comfyui_version}")
+        else:
+            version_desc = f"{comfyui_version_type} {comfyui_version}" if comfyui_version_type else comfyui_version
+            logger.debug(f"Using comfyui_version from pyproject: {version_desc}")
+
+        # Auto-detect version type if not specified (for old exports)
+        if not comfyui_version_type and comfyui_version:
+            if comfyui_version.startswith('v'):
+                comfyui_version_type = "release"
+            elif comfyui_version in ("main", "master"):
+                comfyui_version_type = "branch"
+            else:
+                comfyui_version_type = "commit"
+            logger.debug(f"Auto-detected version type: {comfyui_version_type}")
+
+        # Phase 1: Clone or restore ComfyUI from cache
+        from ..caching.comfyui_cache import ComfyUICacheManager, ComfyUISpec
         from ..utils.comfyui_ops import clone_comfyui
-        clone_comfyui(env.comfyui_path, None)
+        from ..utils.git import git_rev_parse
+
+        comfyui_cache = ComfyUICacheManager(cache_base_path=env.workspace_paths.cache)
+
+        # Create version spec for caching
+        spec = ComfyUISpec(
+            version=comfyui_version or "main",
+            version_type=comfyui_version_type or "branch",
+            commit_sha=None  # Will be set after cloning
+        )
+
+        # Check cache first
+        cached_path = comfyui_cache.get_cached_comfyui(spec)
+
+        if cached_path:
+            # Restore from cache
+            if callbacks:
+                callbacks.on_phase("restore_comfyui", f"Restoring ComfyUI {spec.version} from cache...")
+            logger.info(f"Restoring ComfyUI {spec.version} from cache")
+            shutil.copytree(cached_path, env.comfyui_path)
+        else:
+            # Clone fresh
+            if callbacks:
+                callbacks.on_phase("clone_comfyui", f"Cloning ComfyUI {spec.version}...")
+            logger.info(f"Cloning ComfyUI {spec.version}")
+            clone_comfyui(env.comfyui_path, comfyui_version)
+
+            # Get commit SHA and cache it
+            commit_sha = git_rev_parse(env.comfyui_path, "HEAD")
+            spec.commit_sha = commit_sha
+            comfyui_cache.cache_comfyui(spec, env.comfyui_path)
+            logger.info(f"Cached ComfyUI {spec.version} ({commit_sha[:7]})")
 
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = env.comfyui_path / "models"

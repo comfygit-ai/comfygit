@@ -63,18 +63,56 @@ class EnvironmentFactory:
             model_downloader=model_downloader,
         )
 
-        # Clone ComfyUI
-        logger.info("Cloning ComfyUI (this may take a moment)...")
-        try:
-            comfyui_version = clone_comfyui(env.comfyui_path, comfyui_version)
-            if comfyui_version:
-                logger.info(f"Successfully cloned ComfyUI version: {comfyui_version}")
-            else:
-                logger.warning("ComfyUI clone failed")
-                raise RuntimeError("ComfyUI clone failed")
-        except Exception as e:
-            logger.warning(f"ComfyUI clone failed: {e}")
-            raise e
+        # Resolve ComfyUI version
+        from ..clients.github_client import GitHubClient
+        from ..caching.api_cache import APICacheManager
+        from ..caching.comfyui_cache import ComfyUICacheManager, ComfyUISpec
+        from ..utils.comfyui_ops import resolve_comfyui_version
+        from ..utils.git import git_rev_parse
+
+        api_cache = APICacheManager(cache_base_path=workspace_paths.cache)
+        github_client = GitHubClient(cache_manager=api_cache)
+
+        version_to_clone, version_type, _ = resolve_comfyui_version(
+            comfyui_version,
+            github_client
+        )
+
+        # Check ComfyUI cache first
+        comfyui_cache = ComfyUICacheManager(cache_base_path=workspace_paths.cache)
+        spec = ComfyUISpec(
+            version=version_to_clone,
+            version_type=version_type,
+            commit_sha=None  # Will be set after cloning
+        )
+
+        cached_path = comfyui_cache.get_cached_comfyui(spec)
+
+        if cached_path:
+            # Restore from cache
+            logger.info(f"Restoring ComfyUI {version_type} {version_to_clone} from cache...")
+            shutil.copytree(cached_path, env.comfyui_path)
+            commit_sha = git_rev_parse(env.comfyui_path, "HEAD")
+            logger.info(f"Restored ComfyUI from cache ({commit_sha[:7]})")
+        else:
+            # Clone fresh
+            logger.info(f"Cloning ComfyUI {version_type} {version_to_clone}...")
+            try:
+                comfyui_version_output = clone_comfyui(env.comfyui_path, version_to_clone)
+                if comfyui_version_output:
+                    logger.info(f"Successfully cloned ComfyUI version: {comfyui_version_output}")
+                else:
+                    logger.warning("ComfyUI clone failed")
+                    raise RuntimeError("ComfyUI clone failed")
+            except Exception as e:
+                logger.warning(f"ComfyUI clone failed: {e}")
+                raise e
+
+            # Get actual commit SHA and cache it
+            commit_sha = git_rev_parse(env.comfyui_path, "HEAD")
+            spec.commit_sha = commit_sha
+            comfyui_cache.cache_comfyui(spec, env.comfyui_path)
+            logger.info(f"Cached ComfyUI {version_type} {version_to_clone} ({commit_sha[:7]})")
 
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = env.comfyui_path / "models"
@@ -82,8 +120,14 @@ class EnvironmentFactory:
             shutil.rmtree(models_dir)
             logger.debug("Removed ComfyUI's default models directory")
 
-        # Create initial pyproject.toml
-        config = EnvironmentFactory._create_initial_pyproject(name, python_version, comfyui_version)
+        # Create initial pyproject.toml with full version metadata
+        config = EnvironmentFactory._create_initial_pyproject(
+            name,
+            python_version,
+            version_to_clone,
+            version_type,
+            commit_sha
+        )
         env.pyproject.save(config)
 
         # Get requirements from ComfyUI and add them
@@ -181,7 +225,13 @@ class EnvironmentFactory:
         return env
 
     @staticmethod
-    def _create_initial_pyproject(name: str, python_version: str, comfyui_version: str) -> dict:
+    def _create_initial_pyproject(
+        name: str,
+        python_version: str,
+        comfyui_version: str,
+        comfyui_version_type: str = "branch",
+        comfyui_commit_sha: str | None = None
+    ) -> dict:
         """Create the initial pyproject.toml."""
         config = {
             "project": {
@@ -193,6 +243,8 @@ class EnvironmentFactory:
             "tool": {
                 "comfydock": {
                     "comfyui_version": comfyui_version,
+                    "comfyui_version_type": comfyui_version_type,
+                    "comfyui_commit_sha": comfyui_commit_sha,
                     "python_version": python_version,
                     "nodes": {}
                 }
