@@ -214,3 +214,75 @@ class UVCommandError(ComfyDockError):
         self.stderr = stderr
         self.stdout = stdout
         self.returncode = returncode
+
+
+# ===================================================
+# Model Download exceptions
+# ===================================================
+
+@dataclass
+class DownloadErrorContext:
+    """Detailed context about a download failure."""
+    provider: str  # 'civitai', 'huggingface', 'custom'
+    error_category: str  # 'auth_missing', 'auth_invalid', 'forbidden', 'not_found', 'network', 'server', 'unknown'
+    http_status: int | None
+    url: str
+    has_configured_auth: bool  # Was auth configured (even if invalid)?
+    raw_error: str  # Original error message for debugging
+
+    def get_user_message(self) -> str:
+        """Generate user-friendly error message."""
+        if self.provider == "civitai":
+            if self.error_category == "auth_missing":
+                return (
+                    f"CivitAI model requires authentication (HTTP {self.http_status}). "
+                    "No API key found. Get your key from https://civitai.com/user/account "
+                    "and add it with: comfydock config --civitai-key <your-key>"
+                )
+            elif self.error_category == "auth_invalid":
+                return (
+                    f"CivitAI authentication failed (HTTP {self.http_status}). "
+                    "Your API key may be invalid or expired. "
+                    "Update it with: comfydock config --civitai-key <your-key>"
+                )
+            elif self.error_category == "forbidden":
+                return (
+                    f"CivitAI access forbidden (HTTP {self.http_status}). "
+                    "This model may require special permissions or may not be publicly available."
+                )
+            elif self.error_category == "not_found":
+                return f"CivitAI model not found (HTTP {self.http_status}). The URL may be incorrect or the model was removed."
+
+        elif self.provider == "huggingface":
+            if self.error_category in ("auth_missing", "auth_invalid"):
+                return (
+                    f"HuggingFace model requires authentication (HTTP {self.http_status}). "
+                    "Set the HF_TOKEN environment variable with your HuggingFace token. "
+                    "Get your token from: https://huggingface.co/settings/tokens"
+                )
+            elif self.error_category == "not_found":
+                return f"HuggingFace model not found (HTTP {self.http_status}). Check the URL is correct."
+
+        # Generic provider or fallback
+        if self.error_category == "network":
+            return f"Network error downloading from {self.provider}: {self.raw_error}"
+        elif self.error_category == "server":
+            return f"Server error from {self.provider} (HTTP {self.http_status}). Try again later."
+        elif self.http_status:
+            return f"Download failed from {self.provider} (HTTP {self.http_status}): {self.raw_error}"
+        else:
+            return f"Download failed from {self.provider}: {self.raw_error}"
+
+
+class CDModelDownloadError(ComfyDockError):
+    """Model download error with provider-specific context."""
+
+    def __init__(self, message: str, context: DownloadErrorContext | None = None):
+        super().__init__(message)
+        self.context = context
+
+    def get_user_message(self) -> str:
+        """Get user-friendly error message."""
+        if self.context:
+            return self.context.get_user_message()
+        return str(self)

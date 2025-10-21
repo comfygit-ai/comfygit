@@ -13,6 +13,7 @@ from blake3 import blake3
 
 from ..configs.model_config import ModelConfig
 from ..logging.logging_config import get_logger
+from ..models.exceptions import DownloadErrorContext
 from ..models.shared import ModelWithLocation
 from ..utils.model_categories import get_model_category
 
@@ -37,6 +38,7 @@ class DownloadResult:
     success: bool
     model: ModelWithLocation | None = None
     error: str | None = None
+    error_context: "DownloadErrorContext | None" = None  # Structured error info
 
 
 class ModelDownloader:
@@ -157,6 +159,88 @@ class ModelDownloader:
 
         # Last resort: generate generic name
         return "downloaded_model.safetensors"
+
+    def _check_provider_auth(self, provider: str) -> bool:
+        """Check if authentication is configured for a provider.
+
+        Args:
+            provider: Provider type ('civitai', 'huggingface', 'custom')
+
+        Returns:
+            True if auth credentials are configured
+        """
+        if provider == "civitai":
+            if not self.workspace_config:
+                return False
+            api_key = self.workspace_config.get_civitai_token()
+            return api_key is not None and api_key.strip() != ""
+        elif provider == "huggingface":
+            # Check HF_TOKEN environment variable
+            import os
+            token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
+            return token is not None and token.strip() != ""
+        else:
+            return False
+
+    def _classify_download_error(
+        self,
+        error: Exception,
+        url: str,
+        provider: str,
+        has_auth: bool
+    ) -> DownloadErrorContext:
+        """Classify download error and create structured context.
+
+        Args:
+            error: The exception that occurred
+            url: Download URL
+            provider: Provider type
+            has_auth: Whether auth was configured
+
+        Returns:
+            DownloadErrorContext with classification
+        """
+        from urllib.error import URLError
+        from socket import timeout as SocketTimeout
+
+        http_status = None
+        error_category = "unknown"
+        raw_error = str(error)
+
+        # Classify based on exception type
+        if isinstance(error, requests.HTTPError):
+            http_status = error.response.status_code
+
+            if http_status == 401:
+                # Unauthorized - check if we have auth
+                if not has_auth:
+                    error_category = "auth_missing"
+                else:
+                    error_category = "auth_invalid"
+            elif http_status == 403:
+                # Forbidden - could be rate limit, permissions, or invalid token
+                if not has_auth and provider in ("civitai", "huggingface"):
+                    error_category = "auth_missing"
+                else:
+                    error_category = "forbidden"
+            elif http_status == 404:
+                error_category = "not_found"
+            elif http_status >= 500:
+                error_category = "server"
+            else:
+                error_category = "unknown"
+
+        elif isinstance(error, (URLError, SocketTimeout, requests.Timeout, requests.ConnectionError)):
+            error_category = "network"
+
+        return DownloadErrorContext(
+            provider=provider,
+            error_category=error_category,
+            http_status=http_status,
+            url=url,
+            has_configured_auth=has_auth,
+            raw_error=raw_error
+        )
 
     def download(
         self,
@@ -284,10 +368,48 @@ class ModelDownloader:
             logger.info(f"Successfully downloaded and indexed: {relative_path}")
             return DownloadResult(success=True, model=model)
 
+        except requests.HTTPError as e:
+            # HTTP errors with status codes - classify them
+            provider = self.detect_url_type(request.url)
+            has_auth = self._check_provider_auth(provider)
+            error_context = self._classify_download_error(e, request.url, provider, has_auth)
+
+            # Generate user-friendly message
+            user_message = error_context.get_user_message()
+            logger.error(f"Download failed: {user_message}")
+
+            return DownloadResult(
+                success=False,
+                error=user_message,
+                error_context=error_context
+            )
+
+        except (requests.Timeout, requests.ConnectionError) as e:
+            # Network errors
+            provider = self.detect_url_type(request.url)
+            error_context = self._classify_download_error(e, request.url, provider, False)
+            user_message = error_context.get_user_message()
+            logger.error(f"Download failed: {user_message}")
+
+            return DownloadResult(
+                success=False,
+                error=user_message,
+                error_context=error_context
+            )
+
         except Exception as e:
-            error_msg = f"Download failed: {str(e)}"
-            logger.error(error_msg)
-            return DownloadResult(success=False, error=error_msg)
+            # Unexpected errors - still provide some context
+            provider = self.detect_url_type(request.url)
+            has_auth = self._check_provider_auth(provider)
+            error_context = self._classify_download_error(e, request.url, provider, has_auth)
+            user_message = error_context.get_user_message()
+            logger.error(f"Unexpected download error: {user_message}")
+
+            return DownloadResult(
+                success=False,
+                error=user_message,
+                error_context=error_context
+            )
 
         finally:
             # Always clean up temp file if it still exists (download failed or was interrupted)

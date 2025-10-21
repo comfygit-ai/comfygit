@@ -8,23 +8,57 @@ Tests the enhanced create flow that:
 """
 
 import pytest
-from pathlib import Path
 from comfydock_core.utils.comfyui_ops import resolve_comfyui_version
-from comfydock_core.clients.github_client import GitHubClient
-from comfydock_core.caching.api_cache import APICacheManager
 
 
 @pytest.fixture
-def temp_cache(tmp_path):
-    """Temporary cache for testing."""
-    return tmp_path / "test_cache"
+def github_client():
+    """Mocked GitHub client for testing without network calls."""
 
+    class FakeRepositoryInfo:
+        def __init__(self):
+            self.latest_release = "v0.3.20"
+            self.default_branch = "master"
 
-@pytest.fixture
-def github_client(temp_cache):
-    """GitHub client with temporary cache."""
-    cache_manager = APICacheManager(cache_base_path=temp_cache)
-    return GitHubClient(cache_manager=cache_manager)
+    class FakeRelease:
+        def __init__(self, tag_name: str):
+            self.tag_name = tag_name
+            self.name = f"Release {tag_name}"
+            self.published_at = "2024-01-01T00:00:00Z"
+            self.prerelease = False
+            self.draft = False
+            self.html_url = f"https://github.com/comfyanonymous/ComfyUI/releases/tag/{tag_name}"
+
+    class MockGitHubClient:
+        def get_repository_info(self, repo_url: str):
+            """Return fake repository info."""
+            return FakeRepositoryInfo()
+
+        def validate_version_exists(self, repo_url: str, version: str) -> bool:
+            """Validate that a version exists (mocked)."""
+            # Only accept known release tags or branches
+            known_versions = ["v0.3.66", "v0.3.20", "v0.3.19", "v0.3.15", "master", "main", "test"]
+            return version in known_versions
+
+        def list_releases(self, repo_url: str, include_prerelease: bool = False, limit: int = 10):
+            """Return fake releases list."""
+            all_releases = [
+                FakeRelease("v0.3.66"),
+                FakeRelease("v0.3.20"),
+                FakeRelease("v0.3.19"),
+                FakeRelease("v0.3.15"),
+            ]
+            return all_releases[:limit]
+
+        def get_release_by_tag(self, repo_url: str, tag: str):
+            """Get specific release by tag (mocked)."""
+            # Return release if tag exists in our fake list
+            fake_tags = ["v0.3.66", "v0.3.20", "v0.3.19", "v0.3.15"]
+            if tag in fake_tags:
+                return FakeRelease(tag)
+            return None
+
+    return MockGitHubClient()
 
 
 def test_resolve_comfyui_version_exists(github_client):
