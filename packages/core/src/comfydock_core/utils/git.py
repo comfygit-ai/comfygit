@@ -181,10 +181,10 @@ def normalize_github_url(url: str) -> str:
 
 def parse_github_url(url: str) -> tuple[str, str, str | None] | None:
     """Parse GitHub URL to extract owner, repo name, and optional commit/ref.
-    
+
     Args:
         url: GitHub repository URL
-        
+
     Returns:
         Tuple of (owner, repo, commit) or None if invalid.
         commit will be None if no specific commit is specified.
@@ -202,6 +202,42 @@ def parse_github_url(url: str) -> tuple[str, str, str | None] | None:
         commit = github_match.group(3)  # Will be None if not present
         return (owner, repo, commit)
     return None
+
+def parse_git_url_with_subdir(url: str) -> tuple[str, str | None]:
+    """Parse git URL with optional subdirectory specification.
+
+    Supports syntax: <git_url>#<subdirectory_path>
+
+    Examples:
+        "https://github.com/user/repo"
+        → ("https://github.com/user/repo", None)
+
+        "https://github.com/user/repo#examples/example1"
+        → ("https://github.com/user/repo", "examples/example1")
+
+        "git@github.com:user/repo.git#workflows/prod"
+        → ("git@github.com:user/repo.git", "workflows/prod")
+
+    Args:
+        url: Git URL with optional #subdirectory suffix
+
+    Returns:
+        Tuple of (base_git_url, subdirectory_path or None)
+    """
+    if '#' not in url:
+        return url, None
+
+    # Split on last # to handle edge cases
+    base_url, subdir = url.rsplit('#', 1)
+
+    # Normalize subdirectory path
+    subdir = subdir.strip('/')
+
+    if not subdir:
+        # URL ended with # but no path
+        return base_url, None
+
+    return base_url, subdir
 
 def git_rev_parse(repo_path: Path, ref: str = "HEAD", abbrev_ref: bool = False) -> str | None:
     """Parse a git reference to get its value.
@@ -422,6 +458,69 @@ def git_clone(
         _git(["checkout", ref], target_path, not_found_msg=f"Reference '{ref}' does not exist")
 
     logger.info(f"Successfully cloned {url} to {target_path}")
+
+def git_clone_subdirectory(
+    url: str,
+    target_path: Path,
+    subdir: str,
+    depth: int = 1,
+    ref: str | None = None,
+    timeout: int = 30,
+) -> None:
+    """Clone a git repository and extract a specific subdirectory.
+
+    Clones the entire repository to a temporary location, validates
+    the subdirectory exists, then copies only that subdirectory to
+    the target path.
+
+    Args:
+        url: Git repository URL (without #subdir)
+        target_path: Directory to extract subdirectory contents to
+        subdir: Subdirectory path within repository (e.g., "examples/example1")
+        depth: Clone depth (1 for shallow clone)
+        ref: Optional specific ref (branch/tag/commit) to checkout
+        timeout: Command timeout in seconds
+
+    Raises:
+        OSError: If git clone fails
+        ValueError: If subdirectory doesn't exist in repository
+    """
+    import tempfile
+    import shutil
+
+    # Clone to temporary directory
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_repo = Path(temp_dir) / "repo"
+
+        logger.info(f"Cloning {url} to temporary location for subdirectory extraction")
+        git_clone(url, temp_repo, depth=depth, ref=ref, timeout=timeout)
+
+        # Validate subdirectory exists
+        subdir_path = temp_repo / subdir
+        if not subdir_path.exists():
+            # List available top-level directories for helpful error message
+            available_dirs = [d.name for d in temp_repo.iterdir() if d.is_dir() and not d.name.startswith('.')]
+            raise ValueError(
+                f"Subdirectory '{subdir}' does not exist in repository. "
+                f"Available top-level directories: {', '.join(available_dirs)}"
+            )
+
+        if not subdir_path.is_dir():
+            raise ValueError(f"Path '{subdir}' exists but is not a directory")
+
+        # Validate it's a ComfyDock environment
+        pyproject_path = subdir_path / "pyproject.toml"
+        if not pyproject_path.exists():
+            raise ValueError(
+                f"Subdirectory '{subdir}' does not contain pyproject.toml - "
+                f"not a valid ComfyDock environment"
+            )
+
+        # Copy subdirectory contents to target
+        logger.info(f"Extracting subdirectory '{subdir}' to {target_path}")
+        shutil.copytree(subdir_path, target_path, dirs_exist_ok=True)
+
+        logger.info(f"Successfully extracted {url}#{subdir} to {target_path}")
 
 def git_checkout(repo_path: Path,
                 target: str = "HEAD",

@@ -94,7 +94,7 @@ def _add_global_commands(subparsers):
 
     # import - Import ComfyDock environment
     import_parser = subparsers.add_parser("import", help="Import ComfyDock environment from tarball or git repository")
-    import_parser.add_argument("path", type=str, nargs="?", help="Path to .tar.gz file or git repository URL")
+    import_parser.add_argument("path", type=str, nargs="?", help="Path to .tar.gz file or git repository URL (use #subdirectory for subdirectory imports)")
     import_parser.add_argument("--name", type=str, help="Name for imported environment (skip prompt)")
     import_parser.add_argument("--branch", "-b", type=str, help="Git branch, tag, or commit to import (git imports only)")
     import_parser.add_argument("--use", action="store_true", help="Set imported environment as active")

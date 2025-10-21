@@ -262,18 +262,28 @@ class EnvironmentFactory:
         env_path.mkdir(parents=True, exist_ok=True)
         cec_path = env_path / ".cec"
 
-        # Clone repository to .cec
-        from ..utils.git import git_clone
+        # Parse URL for subdirectory specification
+        from ..utils.git import git_clone, git_clone_subdirectory, parse_git_url_with_subdir
 
-        git_clone(git_url, cec_path, ref=branch)
-        logger.info(f"Cloned {git_url} to {cec_path}")
+        base_url, subdir = parse_git_url_with_subdir(git_url)
 
-        # Validate it's a ComfyDock environment
-        pyproject_path = cec_path / "pyproject.toml"
-        if not pyproject_path.exists():
-            raise ValueError(
-                "Repository does not contain pyproject.toml - not a valid ComfyDock environment"
-            )
+        # Clone repository to .cec (with subdirectory extraction if specified)
+        if subdir:
+            logger.info(f"Cloning {base_url} and extracting subdirectory '{subdir}' to {cec_path}")
+            git_clone_subdirectory(base_url, cec_path, subdir, ref=branch)
+            # Note: git_clone_subdirectory validates pyproject.toml internally
+        else:
+            logger.info(f"Cloning {base_url} to {cec_path}")
+            git_clone(base_url, cec_path, ref=branch)
+
+            # Validate it's a ComfyDock environment (only for non-subdir imports)
+            pyproject_path = cec_path / "pyproject.toml"
+            if not pyproject_path.exists():
+                raise ValueError(
+                    "Repository does not contain pyproject.toml - not a valid ComfyDock environment"
+                )
+
+        logger.info(f"Successfully prepared environment from git")
 
         # Create and return Environment instance
         # NOTE: ComfyUI is not cloned yet, workflows not copied, models not resolved

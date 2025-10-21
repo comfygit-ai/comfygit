@@ -298,22 +298,29 @@ class Workspace:
         """Preview git import requirements without creating environment.
 
         Clones to temp directory, analyzes, then cleans up.
+        Supports subdirectory syntax: <git_url>#<subdirectory>
 
         Args:
-            git_url: Git repository URL
+            git_url: Git repository URL (with optional #subdirectory)
             branch: Optional branch/tag/commit
 
         Returns:
             ImportAnalysis with full breakdown
         """
         import tempfile
-        from ..utils.git import git_clone
+        from ..utils.git import git_clone, git_clone_subdirectory, parse_git_url_with_subdir
+
+        # Parse URL for subdirectory
+        base_url, subdir = parse_git_url_with_subdir(git_url)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_cec = Path(temp_dir) / ".cec"
 
-            # Clone to temp location
-            git_clone(git_url, temp_cec, ref=branch)
+            # Clone to temp location (with subdirectory extraction if specified)
+            if subdir:
+                git_clone_subdirectory(base_url, temp_cec, subdir, ref=branch)
+            else:
+                git_clone(base_url, temp_cec, ref=branch)
 
             # Analyze
             return self.import_analyzer.analyze_import(temp_cec)
