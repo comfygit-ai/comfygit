@@ -14,7 +14,7 @@ from ..infrastructure.sqlite_manager import SQLiteManager
 logger = get_logger(__name__)
 
 # Database schema version
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Models table: One entry per unique model file (by hash)
 CREATE_MODELS_TABLE = """
@@ -541,7 +541,7 @@ class ModelRepository:
             file_path: Path to model file
 
         Returns:
-            Hex-encoded short hash string
+            16-character hex-encoded hash string (64 bits)
 
         Raises:
             ComfyDockError: If hash calculation fails
@@ -572,7 +572,7 @@ class ModelRepository:
                     f.seek(-chunk_size, 2)
                     hasher.update(f.read(chunk_size))
 
-            return hasher.hexdigest()
+            return hasher.hexdigest()[:16]
 
         except Exception as e:
             raise ComfyDockError(f"Failed to calculate short hash for {file_path}: {e}")

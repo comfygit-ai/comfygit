@@ -39,7 +39,7 @@ class InteractiveModelResolver:
             for i, model in enumerate(req.candidates, 1):
                 size_gb = model.file_size / (1024**3)
                 print(f"  {i}. {model.relative_path}")
-                print(f"     Size: {size_gb:.1f} GB | Hash: {model.hash[:8]}...")
+                print(f"     Size: {size_gb:.1f} GB | Hash: {model.hash}")
 
             print("  0. Skip this model")
 
