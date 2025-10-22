@@ -629,7 +629,7 @@ class Workspace:
 
     # === Model Directory Management ===
 
-    def set_models_directory(self, path: Path) -> Path:
+    def set_models_directory(self, path: Path, progress=None) -> Path:
         """Set the global model directory and update index.
 
         When switching directories, this method:
@@ -639,6 +639,7 @@ class Workspace:
 
         Args:
             path: Path to model directory
+            progress: Optional progress callback (ModelScanProgress protocol)
 
         Returns:
             Path to added directory
@@ -656,7 +657,7 @@ class Workspace:
 
         # Scan new directory (this updates locations for existing models and adds new ones)
         # The scan's clean_stale_locations() will remove locations from the old directory
-        result = self.model_scanner.scan_directory(path)
+        result = self.model_scanner.scan_directory(path, progress=progress)
 
         # Clean up models that no longer have any valid locations
         # This removes orphaned model records while preserving metadata for models

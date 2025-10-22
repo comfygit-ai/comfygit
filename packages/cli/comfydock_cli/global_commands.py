@@ -624,6 +624,8 @@ class GlobalCommands:
     @with_workspace_logging("model index dir")
     def model_dir_add(self, args):
         """Set the global models directory."""
+        from comfydock_cli.utils.progress import create_model_sync_progress
+
         directory_path = args.path.resolve()
         logger.info(f"Setting models directory: {directory_path}")
 
@@ -638,13 +640,12 @@ class GlobalCommands:
                 print(f"✗ Path is not a directory: {directory_path}")
                 sys.exit(1)
 
-            print("   Performing initial scan...")
-
-            # Set the models directory and perform initial scan
-            self.workspace.set_models_directory(directory_path)
+            # Set the models directory and perform initial scan with progress
+            progress = create_model_sync_progress()
+            self.workspace.set_models_directory(directory_path, progress=progress)
 
             print(f"\n✓ Models directory set successfully: {directory_path}")
-            print("   Use 'comfydock index model sync' to rescan when models change")
+            print("   Use 'comfydock model index sync' to rescan when models change")
 
         except Exception as e:
             logger.error(f"Failed to set models directory '{directory_path}': {e}")
