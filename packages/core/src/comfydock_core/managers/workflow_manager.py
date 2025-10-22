@@ -21,6 +21,7 @@ from ..models.workflow import (
     ResolutionResult,
     ResolvedModel,
     ScoredMatch,
+    Workflow,
     WorkflowAnalysisStatus,
     WorkflowNode,
     WorkflowNodeWidgetRef,
@@ -615,6 +616,14 @@ class WorkflowManager:
 
         workflow_name = analysis.workflow_name
 
+        # Load workflow JSON for path comparison
+        try:
+            workflow_path = self.get_workflow_path(workflow_name)
+            workflow = WorkflowRepository.load(workflow_path)
+        except FileNotFoundError:
+            workflow = None
+            logger.warning(f"Could not load workflow '{workflow_name}' for path sync check")
+
         # Build node resolution context with per-workflow custom_node_map
         node_context = NodeResolutionContext(
             installed_packages=self.pyproject.nodes.get_existing(),
@@ -681,8 +690,17 @@ class WorkflowManager:
                 models_unresolved.append(model_ref)
             elif len(result) == 1:
                 # Clean resolution (exact match or from pyproject cache)
-                logger.debug(f"Resolved model: {result[0]}")
-                models_resolved.append(result[0])
+                resolved_model = result[0]
+
+                # Check if path needs syncing (only for builtin nodes with resolved models)
+                if workflow and resolved_model.resolved_model:
+                    resolved_model.needs_path_sync = self._check_path_needs_sync(
+                        resolved_model,
+                        workflow
+                    )
+
+                logger.debug(f"Resolved model: {resolved_model}")
+                models_resolved.append(resolved_model)
             elif len(result) > 1:
                 # Ambiguous - multiple matches
                 logger.debug(f"Ambiguous model: {result}")
@@ -1158,6 +1176,43 @@ class WorkflowManager:
         category = get_model_category(node_ref.widget_value)
         logger.debug(f"Found directory mapping for widget value '{node_ref.widget_value}': {category}")
         return category
+
+    def _check_path_needs_sync(
+        self,
+        resolved: ResolvedModel,
+        workflow: Workflow
+    ) -> bool:
+        """Check if a resolved model's path differs from workflow JSON.
+
+        Args:
+            resolved: ResolvedModel with reference and resolved_model
+            workflow: Loaded workflow JSON
+
+        Returns:
+            True if workflow path differs from expected resolved path
+        """
+        ref = resolved.reference
+        model = resolved.resolved_model
+
+        # Only check builtin nodes (custom nodes manage their own paths)
+        if not self.model_resolver.model_config.is_model_loader_node(ref.node_type):
+            return False
+
+        # Can't sync if model didn't resolve
+        if not model:
+            return False
+
+        # Get expected path after stripping base directory
+        expected_path = self._strip_base_directory_for_node(
+            ref.node_type,
+            model.relative_path
+        )
+
+        # Get current path from workflow JSON widget value
+        current_path = ref.widget_value
+
+        # Return True if paths differ
+        return current_path != expected_path
 
     def _strip_base_directory_for_node(self, node_type: str, relative_path: str) -> str:
         """Strip base directory prefix from path for BUILTIN ComfyUI node loaders.

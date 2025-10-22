@@ -1,9 +1,18 @@
 """ComfyDock MVP CLI - Workspace and Environment Management."""
+# PYTHON_ARGCOMPLETE_OK
 
 import argparse
 import sys
 from pathlib import Path
 
+import argcomplete
+
+from .completion_commands import CompletionCommands
+from .completers import (
+    environment_completer,
+    installed_node_completer,
+    workflow_completer,
+)
 from .env_commands import EnvironmentCommands
 from .global_commands import GlobalCommands
 from .logging.logging_config import setup_logging
@@ -56,7 +65,7 @@ def create_parser():
         '-e', '--env',
         help='Target environment (uses active if not specified)',
         dest='target_env'
-    )
+    ).completer = environment_completer
     parser.add_argument(
         '-v', '--verbose',
         action='store_true',
@@ -68,6 +77,9 @@ def create_parser():
     # Add all commands (workspace and environment)
     _add_global_commands(subparsers)
     _add_env_commands(subparsers)
+
+    # Enable argcomplete for tab completion
+    argcomplete.autocomplete(parser)
 
     return parser
 
@@ -173,6 +185,23 @@ def _add_global_commands(subparsers):
     config_parser.add_argument("--show", action="store_true", help="Show current configuration")
     config_parser.set_defaults(func=global_cmds.config)
 
+    # Shell completion management
+    completion_cmds = CompletionCommands()
+    completion_parser = subparsers.add_parser("completion", help="Manage shell tab completion")
+    completion_subparsers = completion_parser.add_subparsers(dest="completion_command", help="Completion commands")
+
+    # completion install
+    completion_install_parser = completion_subparsers.add_parser("install", help="Install tab completion for your shell")
+    completion_install_parser.set_defaults(func=completion_cmds.install)
+
+    # completion uninstall
+    completion_uninstall_parser = completion_subparsers.add_parser("uninstall", help="Remove tab completion from your shell")
+    completion_uninstall_parser.set_defaults(func=completion_cmds.uninstall)
+
+    # completion status
+    completion_status_parser = completion_subparsers.add_parser("status", help="Show tab completion installation status")
+    completion_status_parser.set_defaults(func=completion_cmds.status)
+
 
 def _add_env_commands(subparsers):
     """Add environment-specific commands."""
@@ -191,12 +220,12 @@ def _add_env_commands(subparsers):
 
     # use - Set active environment
     use_parser = subparsers.add_parser("use", help="Set active environment")
-    use_parser.add_argument("name", help="Environment name")
+    use_parser.add_argument("name", help="Environment name").completer = environment_completer
     use_parser.set_defaults(func=env_cmds.use)
 
     # delete - Delete environment
     delete_parser = subparsers.add_parser("delete", help="Delete environment")
-    delete_parser.add_argument("name", help="Environment name")
+    delete_parser.add_argument("name", help="Environment name").completer = environment_completer
     delete_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
     delete_parser.set_defaults(func=env_cmds.delete)
 
@@ -250,7 +279,7 @@ def _add_env_commands(subparsers):
 
     # node remove
     node_remove_parser = node_subparsers.add_parser("remove", help="Remove custom node")
-    node_remove_parser.add_argument("node_name", help="Node registry ID or name")
+    node_remove_parser.add_argument("node_name", help="Node registry ID or name").completer = installed_node_completer
     node_remove_parser.add_argument("--dev", action="store_true", help="Remove development node specifically")
     node_remove_parser.set_defaults(func=env_cmds.node_remove)
 
@@ -260,7 +289,7 @@ def _add_env_commands(subparsers):
 
     # node update
     node_update_parser = node_subparsers.add_parser("update", help="Update custom node")
-    node_update_parser.add_argument("node_name", help="Node identifier or name to update")
+    node_update_parser.add_argument("node_name", help="Node identifier or name to update").completer = installed_node_completer
     node_update_parser.add_argument("-y", "--yes", action="store_true", help="Auto-confirm updates (skip prompts)")
     node_update_parser.add_argument("--no-test", action="store_true", help="Don't test resolution")
     node_update_parser.set_defaults(func=env_cmds.node_update)
@@ -275,7 +304,7 @@ def _add_env_commands(subparsers):
 
     # workflow resolve
     workflow_resolve_parser = workflow_subparsers.add_parser("resolve", help="Resolve workflow dependencies (nodes & models)")
-    workflow_resolve_parser.add_argument("name", help="Workflow name to resolve")
+    workflow_resolve_parser.add_argument("name", help="Workflow name to resolve").completer = workflow_completer
     workflow_resolve_parser.add_argument("--auto", action="store_true", help="Auto-resolve without interaction")
     workflow_resolve_parser.add_argument("--install", action="store_true", help="Auto-install missing nodes without prompting")
     workflow_resolve_parser.add_argument("--no-install", action="store_true", help="Skip node installation prompt")

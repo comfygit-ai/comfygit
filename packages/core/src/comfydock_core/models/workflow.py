@@ -490,6 +490,7 @@ class ResolvedModel:
     match_type: str | None = None  # "exact", "case_insensitive", "filename", "ambiguous", "not_found", "download_intent"
     match_confidence: float = 1.0  # 1.0 = exact, 0.5 = fuzzy
     target_path: Path | None = None  # Where user intends to download model to (for download_intent match_type)
+    needs_path_sync: bool = False  # True if workflow path differs from resolved path
 
     @property
     def name(self) -> str:
@@ -656,6 +657,16 @@ class WorkflowAnalysisStatus:
     def download_intents_count(self) -> int:
         """Number of models queued for download."""
         return sum(1 for m in self.resolution.models_resolved if m.match_type == "download_intent")
+
+    @property
+    def models_needing_path_sync_count(self) -> int:
+        """Number of models that resolved but have wrong paths in workflow JSON."""
+        return sum(1 for m in self.resolution.models_resolved if m.needs_path_sync)
+
+    @property
+    def has_path_sync_issues(self) -> bool:
+        """Check if workflow has model paths that need syncing."""
+        return self.models_needing_path_sync_count > 0
 
 
 @dataclass
