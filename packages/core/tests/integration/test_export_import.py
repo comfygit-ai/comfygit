@@ -158,3 +158,111 @@ class TestExportWithWorkflows:
             f"Expected {{'CustomNode1', 'CustomNode2'}}, got {all_node_types}"
         )
         assert len(all_node_types) == 2, "Should count 2 unique node types (not 3 nodes)"
+
+    def test_export_rejects_uncommitted_workflows(self, test_env, tmp_path):
+        """Test that export fails when there are uncommitted workflow changes.
+
+        This prevents exporting inconsistent state where:
+        - Workflows exist in ComfyUI/ (working directory)
+        - But are NOT in .cec/workflows/ (committed state)
+        - And may/may not be in pyproject.toml (partial metadata)
+
+        The three sources of truth (ComfyUI/, .cec/, pyproject) must be synced.
+        """
+        from comfydock_core.models.exceptions import CDExportError
+
+        # ARRANGE - Create a simple workflow in ComfyUI (not committed)
+        workflow = {
+            "id": "uncommitted_wf",
+            "nodes": [
+                {
+                    "id": "1",
+                    "type": "KSampler",
+                    "widgets_values": [],
+                    "inputs": [],
+                    "outputs": [],
+                    "properties": {}
+                }
+            ],
+            "links": [],
+            "groups": [],
+            "config": {},
+            "extra": {}
+        }
+
+        simulate_comfyui_save_workflow(test_env, "new_workflow", workflow)
+
+        # Verify workflow is in "new" state (uncommitted)
+        status = test_env.status()
+        assert "new_workflow" in status.workflow.sync_status.new, \
+            "Workflow should be in 'new' state before commit"
+        assert status.workflow.sync_status.has_changes, \
+            "Should have uncommitted workflow changes"
+
+        # ACT & ASSERT - Export should fail with CDExportError
+        export_path = tmp_path / "should_fail.tar.gz"
+
+        with pytest.raises(CDExportError) as exc_info:
+            test_env.export_environment(export_path)
+
+        # Verify error has proper context
+        error = exc_info.value
+        assert error.uncommitted_workflows is not None, \
+            "Error should include uncommitted workflow list"
+        assert "new_workflow" in error.uncommitted_workflows, \
+            "Error should list the uncommitted workflow"
+        assert "uncommitted" in str(error).lower() or "commit" in str(error).lower(), \
+            "Error message should mention uncommitted/commit"
+
+    def test_export_succeeds_after_commit(self, test_env, tmp_path):
+        """Test that export succeeds after workflows are committed.
+
+        This verifies the happy path: export only works when all three
+        sources of truth are synced (ComfyUI/, .cec/, pyproject).
+        """
+        # ARRANGE - Create and commit a workflow
+        workflow = {
+            "id": "committed_wf",
+            "nodes": [
+                {
+                    "id": "1",
+                    "type": "KSampler",
+                    "widgets_values": [],
+                    "inputs": [],
+                    "outputs": [],
+                    "properties": {}
+                }
+            ],
+            "links": [],
+            "groups": [],
+            "config": {},
+            "extra": {}
+        }
+
+        simulate_comfyui_save_workflow(test_env, "my_workflow", workflow)
+
+        # Commit the workflow
+        workflow_status = test_env.workflow_manager.get_workflow_status()
+        test_env.execute_commit(workflow_status, message="Add workflow")
+
+        # Verify workflow is committed
+        status = test_env.status()
+        assert not status.workflow.sync_status.has_changes, \
+            "Should have no uncommitted changes after commit"
+        assert "my_workflow" in status.workflow.sync_status.synced, \
+            "Workflow should be in 'synced' state"
+
+        # ACT - Export should succeed
+        export_path = tmp_path / "export.tar.gz"
+        result = test_env.export_environment(export_path)
+
+        # ASSERT - Export created successfully
+        assert result.exists(), "Export file should be created"
+        assert result.stat().st_size > 0, "Export file should not be empty"
+
+        # Verify workflow is in the export
+        import tarfile
+        with tarfile.open(result, "r:gz") as tar:
+            members = [m.name for m in tar.getmembers()]
+            assert "workflows/my_workflow.json" in members, \
+                "Committed workflow should be in export"

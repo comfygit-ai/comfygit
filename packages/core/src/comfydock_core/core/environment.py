@@ -847,23 +847,42 @@ class Environment:
             Path to created tarball
 
         Raises:
-            ValueError: If environment has uncommitted changes or unresolved issues
+            CDExportError: If environment has uncommitted changes or unresolved issues
         """
         from ..managers.export_import_manager import ExportImportManager
+        from ..models.exceptions import CDExportError, ExportErrorContext
 
-        # Validation: Check for uncommitted git changes
+        # Validation: Get workflow status first for comprehensive checks
+        status = self.workflow_manager.get_workflow_status()
+
+        # Check for uncommitted workflow changes (new, modified, or deleted)
+        if status.sync_status.has_changes:
+            context = ExportErrorContext(
+                uncommitted_workflows=(
+                    status.sync_status.new +
+                    status.sync_status.modified +
+                    status.sync_status.deleted
+                )
+            )
+            raise CDExportError(
+                "Cannot export with uncommitted workflow changes",
+                context=context
+            )
+
+        # Validation: Check for uncommitted git changes in .cec/
         if self.git_manager.has_uncommitted_changes():
-            raise ValueError(
-                "Cannot export with uncommitted changes. "
-                "Commit first: comfydock commit -m 'Pre-export checkpoint'"
+            context = ExportErrorContext(uncommitted_git_changes=True)
+            raise CDExportError(
+                "Cannot export with uncommitted git changes",
+                context=context
             )
 
         # Validation: Check all workflows are resolved
-        status = self.workflow_manager.get_workflow_status()
         if not status.is_commit_safe:
-            raise ValueError(
-                "Cannot export - workflows have unresolved issues. "
-                "Resolve with: comfydock workflow resolve <workflow_name>"
+            context = ExportErrorContext(has_unresolved_issues=True)
+            raise CDExportError(
+                "Cannot export - workflows have unresolved issues",
+                context=context
             )
 
         # Check for models without sources and collect workflow usage

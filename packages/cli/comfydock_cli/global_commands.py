@@ -391,10 +391,30 @@ class GlobalCommands:
             print(f"\n✅ Export complete: {tarball_path.name} ({size_mb:.1f} MB)")
             print("\nShare this file to distribute your complete environment!")
 
-        except ValueError as e:
-            print(f"✗ Export validation failed: {e}")
-            return 1
         except Exception as e:
+            # Handle CDExportError with rich context
+            from comfydock_core.models.exceptions import CDExportError
+
+            if isinstance(e, CDExportError):
+                print(f"✗ {str(e)}")
+
+                # Show context-specific details
+                if e.context:
+                    if e.context.uncommitted_workflows:
+                        print("\n📋 Uncommitted workflows:")
+                        for wf in e.context.uncommitted_workflows:
+                            print(f"  • {wf}")
+                        print("\n💡 Commit first:")
+                        print("   comfydock commit -m 'Pre-export checkpoint'")
+                    elif e.context.uncommitted_git_changes:
+                        print("\n💡 Commit git changes first:")
+                        print("   comfydock commit -m 'Pre-export checkpoint'")
+                    elif e.context.has_unresolved_issues:
+                        print("\n💡 Resolve workflow issues first:")
+                        print("   comfydock workflow resolve <workflow_name>")
+                return 1
+
+            # Generic error handling
             print(f"✗ Export failed: {e}")
             return 1
 

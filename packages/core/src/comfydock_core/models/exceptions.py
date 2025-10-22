@@ -217,6 +217,31 @@ class UVCommandError(ComfyDockError):
 
 
 # ===================================================
+# Export/Import exceptions
+# ===================================================
+
+@dataclass
+class ExportErrorContext:
+    """Context about an export failure."""
+    uncommitted_workflows: list[str] = field(default_factory=list)
+    uncommitted_git_changes: bool = False
+    has_unresolved_issues: bool = False
+
+
+class CDExportError(ComfyDockError):
+    """Export operation failed with detailed context."""
+
+    def __init__(self, message: str, context: ExportErrorContext | None = None):
+        super().__init__(message)
+        self.context = context
+
+    @property
+    def uncommitted_workflows(self) -> list[str] | None:
+        """Get list of uncommitted workflows for backward compatibility."""
+        return self.context.uncommitted_workflows if self.context else None
+
+
+# ===================================================
 # Model Download exceptions
 # ===================================================
 
