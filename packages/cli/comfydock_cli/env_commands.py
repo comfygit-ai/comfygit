@@ -115,8 +115,11 @@ class EnvironmentCommands:
     @with_env_logging("env use")
     def use(self, args, logger=None):
         """Set the active environment."""
+        from comfydock_cli.utils.progress import create_model_sync_progress
+
         try:
-            self.workspace.set_active_environment(args.name)
+            progress = create_model_sync_progress()
+            self.workspace.set_active_environment(args.name, progress=progress)
         except Exception as e:
             if logger:
                 logger.error(f"Failed to set active environment '{args.name}': {e}", exc_info=True)
@@ -308,6 +311,10 @@ class EnvironmentCommands:
         # Build compact summary using WorkflowAnalysisStatus properties (no pyproject access!)
         parts = []
 
+        # Path sync warnings (FIRST - most actionable fix)
+        if wf_analysis.models_needing_path_sync_count > 0:
+            parts.append(f"{wf_analysis.models_needing_path_sync_count} model paths need syncing")
+
         # Use the uninstalled_count property (populated by core)
         if wf_analysis.uninstalled_count > 0:
             parts.append(f"{wf_analysis.uninstalled_count} packages needed for installation")
@@ -340,6 +347,19 @@ class EnvironmentCommands:
             for s in suggestions:
                 print(f"  {s}")
             return
+
+        # Path sync warnings (prioritize - quick fix!)
+        workflows_needing_sync = [
+            w for w in status.workflow.analyzed_workflows
+            if w.has_path_sync_issues
+        ]
+
+        if workflows_needing_sync:
+            workflow_names = [w.name for w in workflows_needing_sync]
+            if len(workflow_names) == 1:
+                suggestions.append(f"Sync model paths: comfydock workflow resolve \"{workflow_names[0]}\"")
+            else:
+                suggestions.append(f"Sync model paths in {len(workflow_names)} workflows: comfydock workflow resolve \"<name>\"")
 
         # Check for workflows with download intents
         workflows_with_downloads = []

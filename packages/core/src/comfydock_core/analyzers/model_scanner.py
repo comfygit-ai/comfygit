@@ -56,6 +56,22 @@ class ScanResult:
     errors: list[str]
 
 
+class ModelScanProgress:
+    """Callback protocol for model scan progress updates."""
+
+    def on_scan_start(self, total_files: int) -> None:
+        """Called when scan starts with total file count."""
+        pass
+
+    def on_file_processed(self, current: int, total: int, filename: str) -> None:
+        """Called after each file is processed."""
+        pass
+
+    def on_scan_complete(self, result: ScanResult) -> None:
+        """Called when scan completes."""
+        pass
+
+
 class ModelScanner:
     """Model file discovery, hashing, and indexing operations."""
 
@@ -70,12 +86,13 @@ class ModelScanner:
         self.model_config = model_config or ModelConfig.load()
         self.quiet = False
 
-    def scan_directory(self, models_dir: Path, quiet: bool = False) -> ScanResult:
+    def scan_directory(self, models_dir: Path, quiet: bool = False, progress: ModelScanProgress | None = None) -> ScanResult:
         """Scan single models directory for all model files.
 
         Args:
             models_dir: Path to models directory to scan
             quiet: Suppress logging
+            progress: Optional progress callback
 
         Returns:
             ScanResult with operation statistics
@@ -98,8 +115,12 @@ class ModelScanner:
 
         result = ScanResult(len(model_files), 0, 0, 0, 0, [])
 
+        # Notify progress of scan start
+        if progress:
+            progress.on_scan_start(len(model_files))
+
         # Process each model file
-        for file_path in model_files:
+        for idx, file_path in enumerate(model_files, 1):
             try:
                 relative_path = str(file_path.relative_to(models_dir))
                 file_stat = file_path.stat()
@@ -108,11 +129,17 @@ class ModelScanner:
                 existing = existing_locations.get(relative_path)
                 if existing and existing['mtime'] == file_stat.st_mtime:
                     result.skipped_count += 1
+                    if progress:
+                        progress.on_file_processed(idx, len(model_files), file_path.name)
                     continue
 
                 # Process the model file
                 process_result = self._process_model_file(file_path, models_dir)
                 self._update_result_counters(result, process_result)
+
+                # Notify progress after processing
+                if progress:
+                    progress.on_file_processed(idx, len(model_files), file_path.name)
 
             except Exception as e:
                 error_msg = f"Error processing {file_path}: {e}"
@@ -127,6 +154,11 @@ class ModelScanner:
 
         if not self.quiet:
             logger.info(f"Scan complete: {result.added_count} added, {result.updated_count} updated, {result.skipped_count} skipped")
+
+        # Notify progress of completion
+        if progress:
+            progress.on_scan_complete(result)
+
         return result
 
     def _process_model_file(self, file_path: Path, models_dir: Path) -> ModelProcessResult:

@@ -1,7 +1,8 @@
-"""Progress display utilities for downloads."""
+"""Progress display utilities for downloads and model scanning."""
 
 from collections.abc import Callable
 
+from comfydock_core.analyzers.model_scanner import ModelScanProgress, ScanResult
 from comfydock_core.models.shared import ModelWithLocation
 from comfydock_core.models.workflow import BatchDownloadCallbacks
 from comfydock_core.utils.common import format_size
@@ -73,3 +74,55 @@ def create_batch_download_callbacks() -> BatchDownloadCallbacks:
         on_file_complete=on_file_complete,
         on_batch_complete=on_batch_complete
     )
+
+
+class ModelSyncProgress(ModelScanProgress):
+    """CLI progress display for model scanning with conditional visibility.
+
+    Shows progress bar only when models are being processed (not just scanned).
+    """
+
+    def __init__(self):
+        self.total_files = 0
+        self.shown = False
+
+    def on_scan_start(self, total_files: int) -> None:
+        """Called when scan starts."""
+        self.total_files = total_files
+        # Show initial message - we'll update it as we go
+        if total_files > 0:
+            print("🔄 Syncing model index...", end='', flush=True)
+            self.shown = True
+
+    def on_file_processed(self, current: int, total: int, filename: str) -> None:
+        """Update progress bar."""
+        if self.shown and total > 100:  # Only show detailed progress for large directories
+            print(f"\r🔄 Syncing model index... {current}/{total} files", end='', flush=True)
+
+    def on_scan_complete(self, result: ScanResult) -> None:
+        """Show summary only if there were changes."""
+        has_changes = result.added_count > 0 or result.updated_count > 0
+
+        if self.shown:
+            if has_changes:
+                # Clear progress line and show summary
+                print("\r", end='')  # Clear line
+                changes = []
+                if result.added_count > 0:
+                    changes.append(f"{result.added_count} added")
+                if result.updated_count > 0:
+                    changes.append(f"{result.updated_count} updated")
+                print(f"✓ Model index synced: {', '.join(changes)}")
+            else:
+                # Just clear the line if no changes
+                print("\r", end='')  # Clear line
+                # Don't print anything - silent when no changes
+
+
+def create_model_sync_progress() -> ModelSyncProgress:
+    """Create progress callback for model index syncing.
+
+    Returns:
+        ModelSyncProgress instance that conditionally displays progress
+    """
+    return ModelSyncProgress()

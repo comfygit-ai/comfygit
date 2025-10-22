@@ -654,20 +654,20 @@ class GlobalCommands:
     @with_workspace_logging("model index sync")
     def model_index_sync(self, args):
         """Scan models directory and update index."""
+        from comfydock_cli.utils.progress import create_model_sync_progress
+
         logger.info("Syncing models directory")
 
         try:
-            print("🔄 Scanning models directory...")
-
-            result = self.workspace.sync_model_directory()
+            progress = create_model_sync_progress()
+            result = self.workspace.sync_model_directory(progress=progress)
 
             if result is None:
                 print("✗ No models directory configured")
                 print("   Run 'comfydock model index dir <path>' to set your models directory")
                 return
 
-            total_changes = result
-            print(f"\n✓ Sync complete: {total_changes} changes")
+            # Progress callback already handled display
 
         except Exception as e:
             logger.error(f"Failed to sync models: {e}")

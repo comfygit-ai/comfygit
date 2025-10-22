@@ -170,7 +170,7 @@ class Workspace:
 
         return sorted(environments, key=lambda e: e.name)
 
-    def get_environment(self, name: str, auto_sync: bool = True) -> Environment:
+    def get_environment(self, name: str, auto_sync: bool = True, progress=None) -> Environment:
         """Get an environment by name.
 
         Args:
@@ -178,6 +178,7 @@ class Workspace:
             auto_sync: If True, sync model index before returning environment.
                       Use True for operations that need model resolution (e.g., workflow resolve).
                       Use False for read-only operations (e.g., status, list).
+            progress: Optional progress callback for model sync (ModelScanProgress protocol)
 
         Returns:
             Environment instance if found
@@ -188,7 +189,7 @@ class Workspace:
         # Auto-sync model index if requested (for operations needing fresh model data)
         if auto_sync:
             logger.debug("Auto-syncing model index...")
-            self.sync_model_directory()
+            self.sync_model_directory(progress=progress)
 
         env_path = self.paths.environments / name
 
@@ -480,8 +481,11 @@ class Workspace:
         except OSError as e:
             raise OSError(f"Failed to delete environment '{name}': {e}") from e
 
-    def get_active_environment(self) -> Environment | None:
+    def get_active_environment(self, progress=None) -> Environment | None:
         """Get the currently active environment.
+
+        Args:
+            progress: Optional progress callback for model sync (ModelScanProgress protocol)
 
         Returns:
             Environment instance if found, None if no active environment
@@ -498,7 +502,7 @@ class Workspace:
 
             if active_name:
                 try:
-                    return self.get_environment(active_name)
+                    return self.get_environment(active_name, progress=progress)
                 except CDEnvironmentNotFoundError:
                     # Active environment was deleted - clear it
                     logger.warning(f"Active environment '{active_name}' no longer exists")
@@ -512,11 +516,12 @@ class Workspace:
         except OSError as e:
             raise OSError(f"Failed to read workspace metadata: {e}") from e
 
-    def set_active_environment(self, name: str | None):
+    def set_active_environment(self, name: str | None, progress=None):
         """Set the active environment.
 
         Args:
             name: Environment name or None to clear
+            progress: Optional progress callback for model sync (ModelScanProgress protocol)
 
         Raises:
             CDEnvironmentNotFoundError: If environment not found
@@ -526,7 +531,7 @@ class Workspace:
         # Validate environment exists if name provided
         if name is not None:
             try:
-                self.get_environment(name)
+                self.get_environment(name, progress=progress)
             except CDEnvironmentNotFoundError:
                 env_names = [e.name for e in self.list_environments()]
                 raise CDEnvironmentNotFoundError(
@@ -673,11 +678,11 @@ class Workspace:
         """Get path to tracked model directory."""
         return self.workspace_config_manager.get_models_directory()
 
-    def sync_model_directory(self) -> int:
+    def sync_model_directory(self, progress=None) -> int:
         """Sync tracked model directories.
 
         Args:
-            directory_id: Sync specific directory, or None for all
+            progress: Optional progress callback (ModelScanProgress protocol)
 
         Returns:
             Number of changes
@@ -687,7 +692,7 @@ class Workspace:
         path = self.workspace_config_manager.get_models_directory()
         logger.debug(f"Tracked directory: {path}")
         if path.exists():
-            result = self.model_scanner.scan_directory(path, quiet=True)
+            result = self.model_scanner.scan_directory(path, quiet=True, progress=progress)
             logger.debug(f"Found {result.added_count} new, {result.updated_count} updated models")
             results = result.added_count + result.updated_count
             self.workspace_config_manager.update_models_sync_time()
