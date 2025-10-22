@@ -14,7 +14,7 @@ from ..infrastructure.sqlite_manager import SQLiteManager
 logger = get_logger(__name__)
 
 # Database schema version
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Models table: One entry per unique model file (by hash)
 CREATE_MODELS_TABLE = """
@@ -28,17 +28,18 @@ CREATE TABLE IF NOT EXISTS models (
 )
 """
 
-# Model locations: All instances of each model in tracked directory
+# Model locations: All instances of each model across all directories
 CREATE_MODEL_LOCATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS model_locations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     model_hash TEXT NOT NULL,
+    base_directory TEXT NOT NULL,
     relative_path TEXT NOT NULL,
     filename TEXT NOT NULL,
     mtime REAL NOT NULL,
     last_seen INTEGER NOT NULL,
     FOREIGN KEY (model_hash) REFERENCES models(hash) ON DELETE CASCADE,
-    UNIQUE(relative_path)
+    UNIQUE(base_directory, relative_path)
 )
 """
 
@@ -95,15 +96,21 @@ CREATE INDEX IF NOT EXISTS idx_sources_type ON model_sources(source_type)
 class ModelRepository:
     """Model-specific database operations and schema management."""
 
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, current_directory: Path | None = None):
         """Initialize ModelIndexManager.
 
         Args:
             db_path: Path to SQLite database file
+            current_directory: Current models directory for filtering queries
         """
         self.db_path = db_path
         self.sqlite = SQLiteManager(db_path)
+        self.current_directory = current_directory
         self.ensure_schema()
+
+    def set_current_directory(self, directory: Path) -> None:
+        """Set the current models directory for query filtering."""
+        self.current_directory = directory
 
     def ensure_schema(self) -> None:
         """Create database schema if needed."""
@@ -204,27 +211,30 @@ class ModelRepository:
 
         logger.debug(f"Ensured model in index: {hash[:8]}...")
 
-    def add_location(self, model_hash: str, relative_path: str, filename: str, mtime: float) -> None:
+    def add_location(self, model_hash: str, base_directory: Path, relative_path: str,
+                    filename: str, mtime: float) -> None:
         """Add or update a file location for a model.
 
         Args:
             model_hash: Hash of the model this location belongs to
-            relative_path: Path relative to models directory
+            base_directory: Base directory path (e.g., /path/to/models)
+            relative_path: Path relative to base directory
             filename: Just the filename part
             mtime: File modification time
         """
         query = """
         INSERT OR REPLACE INTO model_locations
-        (model_hash, relative_path, filename, mtime, last_seen)
-        VALUES (?, ?, ?, ?, ?)
+        (model_hash, base_directory, relative_path, filename, mtime, last_seen)
+        VALUES (?, ?, ?, ?, ?, ?)
         """
 
+        base_dir_str = str(base_directory.resolve())
         self.sqlite.execute_write(
             query,
-            (model_hash, relative_path, filename, mtime, int(datetime.now().timestamp()))
+            (model_hash, base_dir_str, relative_path, filename, mtime, int(datetime.now().timestamp()))
         )
 
-        logger.debug(f"Added location: {relative_path} for model {model_hash[:8]}...")
+        logger.debug(f"Added location: {base_dir_str}/{relative_path} for model {model_hash[:8]}...")
 
     def get_model(self, hash: str) -> ModelWithLocation | None:
         """Get model by hash.
@@ -263,14 +273,22 @@ class ModelRepository:
         query = "SELECT * FROM model_locations WHERE model_hash = ? ORDER BY relative_path"
         return self.sqlite.execute_query(query, (model_hash,))
 
-    def get_all_locations(self) -> list[dict]:
-        """Get all model locations for symlink creation.
+    def get_all_locations(self, base_directory: Path | None = None) -> list[dict]:
+        """Get model locations, optionally filtered by base directory.
+
+        Args:
+            base_directory: If provided, only return locations from this directory
 
         Returns:
-            List of all location dictionaries
+            List of location dictionaries
         """
-        query = "SELECT * FROM model_locations ORDER BY relative_path"
-        return self.sqlite.execute_query(query)
+        if base_directory:
+            base_dir_str = str(base_directory.resolve())
+            query = "SELECT * FROM model_locations WHERE base_directory = ? ORDER BY relative_path"
+            return self.sqlite.execute_query(query, (base_dir_str,))
+        else:
+            query = "SELECT * FROM model_locations ORDER BY relative_path"
+            return self.sqlite.execute_query(query)
 
     def remove_location(self, relative_path: str) -> bool:
         """Remove a specific location.
@@ -286,7 +304,10 @@ class ModelRepository:
         return rows_affected > 0
 
     def clean_stale_locations(self, models_dir: Path) -> int:
-        """Remove locations for files that no longer exist.
+        """Remove locations from this directory that no longer exist on disk.
+
+        Only checks locations belonging to the specified directory.
+        Preserves locations from other directories.
 
         Args:
             models_dir: Base models directory path
@@ -294,8 +315,9 @@ class ModelRepository:
         Returns:
             Number of stale locations removed
         """
-        query = "SELECT id, relative_path FROM model_locations"
-        results = self.sqlite.execute_query(query)
+        base_dir_str = str(models_dir.resolve())
+        query = "SELECT id, relative_path FROM model_locations WHERE base_directory = ?"
+        results = self.sqlite.execute_query(query, (base_dir_str,))
 
         removed_count = 0
         for row in results:
@@ -306,25 +328,43 @@ class ModelRepository:
                 removed_count += 1
 
         if removed_count > 0:
-            logger.info(f"Cleaned up {removed_count} stale model locations")
+            logger.info(f"Cleaned up {removed_count} stale model locations from {base_dir_str}")
 
         return removed_count
 
-    def get_all_models(self) -> list[ModelWithLocation]:
-        """Get all models with their locations.
+    def get_all_models(self, base_directory: Path | None = "USE_CURRENT") -> list[ModelWithLocation]:
+        """Get all models with their locations, optionally filtered by directory.
+
+        Args:
+            base_directory: Directory to filter by. Defaults to current_directory.
+                          Pass None explicitly to get models from all directories.
 
         Returns:
             List of ModelWithLocation objects
         """
-        query = """
-        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
-               l.relative_path, l.filename, l.mtime, l.last_seen
-        FROM models m
-        JOIN model_locations l ON m.hash = l.model_hash
-        ORDER BY l.relative_path
-        """
+        if base_directory == "USE_CURRENT":
+            base_directory = self.current_directory
 
-        results = self.sqlite.execute_query(query)
+        if base_directory:
+            base_dir_str = str(base_directory.resolve())
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.base_directory = ?
+            ORDER BY l.relative_path
+            """
+            results = self.sqlite.execute_query(query, (base_dir_str,))
+        else:
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            ORDER BY l.relative_path
+            """
+            results = self.sqlite.execute_query(query)
         models = []
 
         for row in results:
@@ -338,34 +378,52 @@ class ModelRepository:
                 filename=row['filename'],
                 mtime=row['mtime'],
                 last_seen=row['last_seen'],
+                base_directory=row.get('base_directory'),
                 metadata=metadata
             )
             models.append(model)
 
         return models
 
-    def find_model_by_hash(self, hash_query: str) -> list[ModelWithLocation]:
-        """Find models by hash prefix.
+    def find_model_by_hash(self, hash_query: str, base_directory: Path | None = "USE_CURRENT") -> list[ModelWithLocation]:
+        """Find models by hash prefix, optionally filtered by directory.
 
         Args:
             hash_query: Hash or hash prefix to search for
+            base_directory: Directory to filter by. Defaults to current_directory.
+                          Pass None explicitly to search all directories.
 
         Returns:
             List of matching ModelWithLocation objects
         """
-        # Support both exact match and prefix matching
-        query = """
-        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
-               l.relative_path, l.filename, l.mtime, l.last_seen
-        FROM models m
-        JOIN model_locations l ON m.hash = l.model_hash
-        WHERE m.hash LIKE ? OR m.blake3_hash LIKE ? OR m.sha256_hash LIKE ?
-        ORDER BY l.relative_path
-        """
+        if base_directory == "USE_CURRENT":
+            base_directory = self.current_directory
 
-        # Add % for prefix matching
-        search_pattern = f"{hash_query}%"
-        results = self.sqlite.execute_query(query, (search_pattern, search_pattern, search_pattern))
+        # Support both exact match and prefix matching
+        if base_directory:
+            base_dir_str = str(base_directory.resolve())
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE (m.hash LIKE ? OR m.blake3_hash LIKE ? OR m.sha256_hash LIKE ?)
+              AND l.base_directory = ?
+            ORDER BY l.relative_path
+            """
+            search_pattern = f"{hash_query}%"
+            results = self.sqlite.execute_query(query, (search_pattern, search_pattern, search_pattern, base_dir_str))
+        else:
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE m.hash LIKE ? OR m.blake3_hash LIKE ? OR m.sha256_hash LIKE ?
+            ORDER BY l.relative_path
+            """
+            search_pattern = f"{hash_query}%"
+            results = self.sqlite.execute_query(query, (search_pattern, search_pattern, search_pattern))
 
         models = []
         for row in results:
@@ -379,33 +437,49 @@ class ModelRepository:
                 filename=row['filename'],
                 mtime=row['mtime'],
                 last_seen=row['last_seen'],
+                base_directory=row.get('base_directory'),
                 metadata=metadata
             )
             models.append(model)
 
         return models
 
-    def find_by_filename(self, filename_query: str) -> list[ModelWithLocation]:
+    def find_by_filename(self, filename_query: str, base_directory: Path | None = "USE_CURRENT") -> list[ModelWithLocation]:
         """Find models by filename pattern.
 
         Args:
             filename_query: Filename or pattern to search for
+            base_directory: Directory to filter by. Defaults to current_directory.
 
         Returns:
             List of matching ModelWithLocation objects
         """
-        query = """
-        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
-               l.relative_path, l.filename, l.mtime, l.last_seen
-        FROM models m
-        JOIN model_locations l ON m.hash = l.model_hash
-        WHERE l.filename LIKE ?
-        ORDER BY l.relative_path
-        """
+        if base_directory == "USE_CURRENT":
+            base_directory = self.current_directory
 
-        # Add wildcards for flexible matching
-        search_pattern = f"%{filename_query}%"
-        results = self.sqlite.execute_query(query, (search_pattern,))
+        if base_directory:
+            base_dir_str = str(base_directory.resolve())
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.filename LIKE ? AND l.base_directory = ?
+            ORDER BY l.relative_path
+            """
+            search_pattern = f"%{filename_query}%"
+            results = self.sqlite.execute_query(query, (search_pattern, base_dir_str))
+        else:
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.filename LIKE ?
+            ORDER BY l.relative_path
+            """
+            search_pattern = f"%{filename_query}%"
+            results = self.sqlite.execute_query(query, (search_pattern,))
 
         models = []
         for row in results:
@@ -419,6 +493,7 @@ class ModelRepository:
                 filename=row['filename'],
                 mtime=row['mtime'],
                 last_seen=row['last_seen'],
+                base_directory=row.get('base_directory'),
                 metadata=metadata
             )
             models.append(model)
@@ -481,18 +556,43 @@ class ModelRepository:
 
         logger.debug(f"Added source for {model_hash[:8]}...: {source_type} - {source_url}")
 
-    def get_stats(self) -> dict[str, int]:
-        """Get index statistics.
+    def get_stats(self, base_directory: Path | None = "USE_CURRENT") -> dict[str, int]:
+        """Get index statistics, optionally filtered by directory.
+
+        Args:
+            base_directory: Directory to filter by. Defaults to current_directory.
+                          Pass None explicitly to get stats from all directories.
 
         Returns:
             Dictionary with index statistics
         """
-        models_query = "SELECT COUNT(*) as count FROM models"
-        locations_query = "SELECT COUNT(*) as count FROM model_locations"
-        sources_query = "SELECT COUNT(*) as count FROM model_sources"
+        if base_directory == "USE_CURRENT":
+            base_directory = self.current_directory
 
-        models_result = self.sqlite.execute_query(models_query)
-        locations_result = self.sqlite.execute_query(locations_query)
+        if base_directory:
+            base_dir_str = str(base_directory.resolve())
+            models_query = """
+            SELECT COUNT(DISTINCT m.hash) as count
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.base_directory = ?
+            """
+            locations_query = "SELECT COUNT(*) as count FROM model_locations WHERE base_directory = ?"
+
+            models_result = self.sqlite.execute_query(models_query, (base_dir_str,))
+            locations_result = self.sqlite.execute_query(locations_query, (base_dir_str,))
+        else:
+            models_query = """
+            SELECT COUNT(DISTINCT m.hash) as count
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            """
+            locations_query = "SELECT COUNT(*) as count FROM model_locations"
+
+            models_result = self.sqlite.execute_query(models_query)
+            locations_result = self.sqlite.execute_query(locations_query)
+
+        sources_query = "SELECT COUNT(*) as count FROM model_sources"
         sources_result = self.sqlite.execute_query(sources_query)
 
         return {
@@ -623,26 +723,43 @@ class ModelRepository:
 
         return sha256_hash.hexdigest()
 
-    def get_by_category(self, category: str) -> list[ModelWithLocation]:
-        """Get all models in a specific category by filtering relative_path.
+    def get_by_category(self, category: str, base_directory: Path | None = "USE_CURRENT") -> list[ModelWithLocation]:
+        """Get all models in a specific category, optionally filtered by directory.
 
         Args:
             category: Category name (e.g., "checkpoints", "loras", "vae")
+            base_directory: Directory to filter by. Defaults to current_directory.
+                          Pass None explicitly to search all directories.
 
         Returns:
             List of ModelWithLocation objects in that category
         """
-        query = """
-        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
-               l.relative_path, l.filename, l.mtime, l.last_seen
-        FROM models m
-        JOIN model_locations l ON m.hash = l.model_hash
-        WHERE l.relative_path LIKE ?
-        ORDER BY l.filename
-        """
+        if base_directory == "USE_CURRENT":
+            base_directory = self.current_directory
 
-        search_pattern = f"{category}/%"
-        results = self.sqlite.execute_query(query, (search_pattern,))
+        if base_directory:
+            base_dir_str = str(base_directory.resolve())
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.relative_path LIKE ? AND l.base_directory = ?
+            ORDER BY l.filename
+            """
+            search_pattern = f"{category}/%"
+            results = self.sqlite.execute_query(query, (search_pattern, base_dir_str))
+        else:
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.relative_path LIKE ?
+            ORDER BY l.filename
+            """
+            search_pattern = f"{category}/%"
+            results = self.sqlite.execute_query(query, (search_pattern,))
 
         models = []
         for row in results:
@@ -656,31 +773,49 @@ class ModelRepository:
                 filename=row['filename'],
                 mtime=row['mtime'],
                 last_seen=row['last_seen'],
+                base_directory=row.get('base_directory'),
                 metadata=metadata
             )
             models.append(model)
 
         return models
 
-    def find_by_exact_path(self, relative_path: str) -> ModelWithLocation | None:
-        """Find model by exact relative path.
+    def find_by_exact_path(self, relative_path: str, base_directory: Path | None = "USE_CURRENT") -> ModelWithLocation | None:
+        """Find model by exact relative path, optionally filtered by directory.
 
         Args:
             relative_path: Exact relative path to match
+            base_directory: Directory to filter by. Defaults to current_directory.
+                          Pass None explicitly to search all directories.
 
         Returns:
             ModelWithLocation or None if not found
         """
-        query = """
-        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
-               l.relative_path, l.filename, l.mtime, l.last_seen
-        FROM models m
-        JOIN model_locations l ON m.hash = l.model_hash
-        WHERE l.relative_path = ?
-        LIMIT 1
-        """
+        if base_directory == "USE_CURRENT":
+            base_directory = self.current_directory
 
-        results = self.sqlite.execute_query(query, (relative_path,))
+        if base_directory:
+            base_dir_str = str(base_directory.resolve())
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.relative_path = ? AND l.base_directory = ?
+            LIMIT 1
+            """
+            results = self.sqlite.execute_query(query, (relative_path, base_dir_str))
+        else:
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.relative_path = ?
+            LIMIT 1
+            """
+            results = self.sqlite.execute_query(query, (relative_path,))
+
         if not results:
             return None
 
@@ -696,29 +831,48 @@ class ModelRepository:
             filename=row['filename'],
             mtime=row['mtime'],
             last_seen=row['last_seen'],
+            base_directory=row.get('base_directory'),
             metadata=metadata
         )
 
-    def search(self, term: str) -> list[ModelWithLocation]:
-        """Search for models by filename or path.
+    def search(self, term: str, base_directory: Path | None = "USE_CURRENT") -> list[ModelWithLocation]:
+        """Search for models by filename or path, optionally filtered by directory.
 
         Args:
             term: Search term to match against filename or path
+            base_directory: Directory to filter by. Defaults to current_directory.
+                          Pass None explicitly to search all directories.
 
         Returns:
             List of matching ModelWithLocation objects
         """
-        query = """
-        SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
-               l.relative_path, l.filename, l.mtime, l.last_seen
-        FROM models m
-        JOIN model_locations l ON m.hash = l.model_hash
-        WHERE l.filename LIKE ? OR l.relative_path LIKE ?
-        ORDER BY l.filename
-        """
+        if base_directory == "USE_CURRENT":
+            base_directory = self.current_directory
 
-        search_pattern = f"%{term}%"
-        results = self.sqlite.execute_query(query, (search_pattern, search_pattern))
+        if base_directory:
+            base_dir_str = str(base_directory.resolve())
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE (l.filename LIKE ? OR l.relative_path LIKE ?)
+              AND l.base_directory = ?
+            ORDER BY l.filename
+            """
+            search_pattern = f"%{term}%"
+            results = self.sqlite.execute_query(query, (search_pattern, search_pattern, base_dir_str))
+        else:
+            query = """
+            SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
+                   l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
+            FROM models m
+            JOIN model_locations l ON m.hash = l.model_hash
+            WHERE l.filename LIKE ? OR l.relative_path LIKE ?
+            ORDER BY l.filename
+            """
+            search_pattern = f"%{term}%"
+            results = self.sqlite.execute_query(query, (search_pattern, search_pattern))
 
         models = []
         for row in results:
@@ -732,6 +886,7 @@ class ModelRepository:
                 filename=row['filename'],
                 mtime=row['mtime'],
                 last_seen=row['last_seen'],
+                base_directory=row.get('base_directory'),
                 metadata=metadata
             )
             models.append(model)
@@ -769,7 +924,7 @@ class ModelRepository:
         """
         query = """
         SELECT m.hash, m.file_size, m.blake3_hash, m.sha256_hash, m.metadata,
-               l.relative_path, l.filename, l.mtime, l.last_seen
+               l.base_directory, l.relative_path, l.filename, l.mtime, l.last_seen
         FROM models m
         JOIN model_locations l ON m.hash = l.model_hash
         JOIN model_sources s ON m.hash = s.model_hash
@@ -793,5 +948,6 @@ class ModelRepository:
             filename=row['filename'],
             mtime=row['mtime'],
             last_seen=row['last_seen'],
+            base_directory=row.get('base_directory'),
             metadata=metadata
         )

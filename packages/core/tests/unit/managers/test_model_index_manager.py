@@ -9,7 +9,7 @@ def test_add_and_find_models(tmp_path):
     db_path = tmp_path / "test_models.db"
     base_path = tmp_path / "models"
     base_path.mkdir()
-    index_mgr = ModelRepository(db_path)
+    index_mgr = ModelRepository(db_path, current_directory=base_path)
 
     # Model info to use for testing (but we'll add directly to index)
 
@@ -28,8 +28,8 @@ def test_add_and_find_models(tmp_path):
     index_mgr.ensure_model("xyz789uvw012", 2048000, blake3_hash="xyz789uvw012")
 
     # Add locations for the models
-    index_mgr.add_location("abc123def456", model1_path, "test_model.safetensors", time.time())
-    index_mgr.add_location("xyz789uvw012", model2_path, "another_model.ckpt", time.time())
+    index_mgr.add_location("abc123def456", base_path, model1_path, "test_model.safetensors", time.time())
+    index_mgr.add_location("xyz789uvw012", base_path, model2_path, "another_model.ckpt", time.time())
 
     # Find by hash prefix
     results = index_mgr.find_model_by_hash("abc123")
@@ -50,7 +50,9 @@ def test_add_and_find_models(tmp_path):
 def test_models_by_path_and_stats(tmp_path):
     """Test filtering models by path pattern and getting statistics."""
     db_path = tmp_path / "test_types.db"
-    index_mgr = ModelRepository(db_path)
+    base_path = tmp_path / "models"
+    base_path.mkdir()
+    index_mgr = ModelRepository(db_path, current_directory=base_path)
 
     # Add models in different directories
     models_data = [
@@ -62,7 +64,7 @@ def test_models_by_path_and_stats(tmp_path):
 
     for hash_val, rel_path, filename, size in models_data:
         index_mgr.ensure_model(hash_val, size, blake3_hash=hash_val)
-        index_mgr.add_location(hash_val, rel_path, filename, time.time())
+        index_mgr.add_location(hash_val, base_path, rel_path, filename, time.time())
 
     # Get all models and filter by path
     all_locations = index_mgr.get_all_locations()
@@ -86,12 +88,14 @@ def test_models_by_path_and_stats(tmp_path):
 def test_update_and_remove_models(tmp_path):
     """Test updating model locations and removing models."""
     db_path = tmp_path / "test_updates.db"
-    index_mgr = ModelRepository(db_path)
+    base_path = tmp_path / "models"
+    base_path.mkdir()
+    index_mgr = ModelRepository(db_path, current_directory=base_path)
 
     # Add a model
     original_path = "original/update_test.safetensors"
     index_mgr.ensure_model("update_test_hash", 1024, blake3_hash="update_test_hash")
-    index_mgr.add_location("update_test_hash", original_path, "update_test.safetensors", time.time())
+    index_mgr.add_location("update_test_hash", base_path, original_path, "update_test.safetensors", time.time())
 
     # Verify it was added
     results = index_mgr.find_model_by_hash("update_test_hash")
@@ -100,7 +104,7 @@ def test_update_and_remove_models(tmp_path):
 
     # Update the path (add the model at a new location)
     new_path = "moved/update_test.safetensors"
-    index_mgr.add_location("update_test_hash", new_path, "update_test.safetensors", time.time())
+    index_mgr.add_location("update_test_hash", base_path, new_path, "update_test.safetensors", time.time())
 
     # Verify we now have the model at the new location
     updated_results = index_mgr.find_model_by_hash("update_test_hash")

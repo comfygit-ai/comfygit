@@ -129,6 +129,8 @@ def test_apply_resolution_preserves_existing_sources(workflow_manager):
     workflow_manager.pyproject.workflows.set_workflow_models = Mock()
     workflow_manager.pyproject.workflows.set_node_packs = Mock()
     workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
+    workflow_manager.pyproject.workflows.get_all_with_resolutions = Mock(return_value={"test_workflow": {}})
+    workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
     workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
     workflow_manager.update_workflow_model_paths = Mock()
 
@@ -188,6 +190,8 @@ def test_apply_resolution_empty_sources_for_new_models(workflow_manager):
     workflow_manager.pyproject.workflows.set_node_packs = Mock()
     workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
     workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
+    workflow_manager.pyproject.workflows.get_all_with_resolutions = Mock(return_value={"test_workflow": {}})
+    workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
     workflow_manager.update_workflow_model_paths = Mock()
 
     # Create resolution result
@@ -403,6 +407,8 @@ class TestOptionalUnresolvedModelPersistence:
         workflow_manager.pyproject.workflows.set_workflow_models = mock_set_workflow_models
         workflow_manager.pyproject.workflows.set_node_packs = Mock()
         workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
+        workflow_manager.pyproject.workflows.get_all_with_resolutions = Mock(return_value={"test_workflow": {}})
+        workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
         workflow_manager.pyproject.models.add_model = Mock()
         workflow_manager.pyproject.models.cleanup_orphans = Mock()
 
@@ -490,6 +496,8 @@ class TestOptionalUnresolvedModelPersistence:
         workflow_manager.pyproject.workflows.set_workflow_models = lambda w, m: written_models.extend(m)
         workflow_manager.pyproject.workflows.set_node_packs = Mock()
         workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
+        workflow_manager.pyproject.workflows.get_all_with_resolutions = Mock(return_value={"test": {}})
+        workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
         workflow_manager.pyproject.models.add_model = Mock()
         workflow_manager.pyproject.models.cleanup_orphans = Mock()
 

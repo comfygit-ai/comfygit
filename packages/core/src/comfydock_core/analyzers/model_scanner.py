@@ -107,8 +107,8 @@ class ModelScanner:
         if not self.quiet:
             logger.info(f"Scanning models directory: {models_dir}")
 
-        # Get existing locations to check for changes
-        existing_locations = {loc['relative_path']: loc for loc in self.index_manager.get_all_locations()}
+        # Get existing locations from this directory to check for changes (mtime optimization)
+        existing_locations = {loc['relative_path']: loc for loc in self.index_manager.get_all_locations(models_dir)}
 
         # Find all potential model files
         model_files = self._find_model_files(models_dir) or []
@@ -183,14 +183,14 @@ class ModelScanner:
             # Check if model already exists
             if self.index_manager.has_model(short_hash):
                 # Model exists, just add/update the location
-                self.index_manager.add_location(short_hash, relative_path, filename, file_stat.st_mtime)
+                self.index_manager.add_location(short_hash, models_dir, relative_path, filename, file_stat.st_mtime)
                 if not self.quiet:
                     logger.debug(f"Updated location for existing model: {relative_path}")
                 return ModelProcessResult.UPDATED_PATH
             else:
                 # New model - add to both tables
                 self.index_manager.ensure_model(short_hash, file_stat.st_size)
-                self.index_manager.add_location(short_hash, relative_path, filename, file_stat.st_mtime)
+                self.index_manager.add_location(short_hash, models_dir, relative_path, filename, file_stat.st_mtime)
                 if not self.quiet:
                     logger.debug(f"Added new model: {relative_path}")
                 return ModelProcessResult.ADDED

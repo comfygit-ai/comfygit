@@ -481,17 +481,45 @@ class GlobalCommands:
                 print(f"No models found matching: {query}")
                 return
 
-            # Define how to render a single model
-            def render_model(model):
+            # Group models by hash (same file in different locations)
+            from collections import defaultdict
+            from pathlib import Path
+
+            grouped = defaultdict(lambda: {'model': None, 'paths': []})
+            for model in results:
+                grouped[model.hash]['model'] = model
+                if model.base_directory:
+                    full_path = Path(model.base_directory) / model.relative_path
+                else:
+                    full_path = Path(model.relative_path)
+                grouped[model.hash]['paths'].append(full_path)
+
+            # Convert to list for pagination
+            grouped_results = list(grouped.values())
+
+            # Define how to render a single model with all its locations
+            def render_model(group):
+                model = group['model']
+                paths = group['paths']
                 size_str = format_size(model.file_size)
                 print(f"\n   {model.filename}")
                 print(f"   Size: {size_str}")
                 print(f"   Hash: {model.hash}")
-                print(f"   Path: {model.relative_path}")
+                if len(paths) == 1:
+                    print(f"   Location: {paths[0]}")
+                else:
+                    print(f"   Locations ({len(paths)}):")
+                    for path in paths:
+                        print(f"     • {path}")
 
             # Use pagination for results
-            header = f"🔍 Found {len(results)} model(s) matching '{query}':"
-            paginate(results, render_model, page_size=5, header=header)
+            unique_count = len(grouped_results)
+            total_count = len(results)
+            if unique_count == total_count:
+                header = f"🔍 Found {unique_count} model(s) matching '{query}':"
+            else:
+                header = f"🔍 Found {unique_count} unique model(s) ({total_count} locations) matching '{query}':"
+            paginate(grouped_results, render_model, page_size=5, header=header)
 
         except Exception as e:
             logger.error(f"Model search failed for query '{query}': {e}")
@@ -531,8 +559,13 @@ class GlobalCommands:
             # Locations
             print(f"\n  Locations ({len(locations)}):")
             for loc in locations:
+                from pathlib import Path
                 mtime = datetime.fromtimestamp(loc['mtime']).strftime("%Y-%m-%d %H:%M:%S")
-                print(f"    • {loc['relative_path']}")
+                if loc.get('base_directory'):
+                    full_path = Path(loc['base_directory']) / loc['relative_path']
+                    print(f"    • {full_path}")
+                else:
+                    print(f"    • {loc['relative_path']}")
                 print(f"      Modified: {mtime}")
 
             # Sources
@@ -559,14 +592,26 @@ class GlobalCommands:
         except KeyError:
             print(f"No model found matching: {identifier}")
         except ValueError:
-            # Handle ambiguous matches
+            # Handle ambiguous matches - group by hash to show unique models
+            from collections import defaultdict
             results = self.workspace.search_models(identifier)
+
+            grouped = defaultdict(list)
+            for model in results:
+                grouped[model.hash].append(model)
+
             print(f"Multiple models found matching '{identifier}':\n")
-            for idx, model in enumerate(results, 1):
-                print(f"  {idx}. {model.relative_path} ({model.hash[:12]}...)")
+            for idx, (hash_val, models) in enumerate(grouped.items(), 1):
+                model = models[0]  # Use first for display
+                location_count = f" ({len(models)} locations)" if len(models) > 1 else ""
+                print(f"  {idx}. {model.filename}{location_count}")
+                print(f"      Hash: {hash_val[:12]}...")
+                print(f"      Path: {model.relative_path}")
+
             print("\nUse more specific identifier:")
-            print(f"  Full hash: comfydock model index show {results[0].hash}")
-            print(f"  Full path: comfydock model index show {results[0].relative_path}")
+            first_model = list(grouped.values())[0][0]
+            print(f"  Full hash: comfydock model index show {first_model.hash}")
+            print(f"  Filename: comfydock model index show {first_model.filename}")
         except Exception as e:
             logger.error(f"Failed to show model details for '{identifier}': {e}")
             print(f"✗ Failed to show model: {e}", file=sys.stderr)

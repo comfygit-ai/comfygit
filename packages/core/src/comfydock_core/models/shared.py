@@ -280,6 +280,7 @@ class ModelWithLocation:
     filename: str
     mtime: float
     last_seen: int
+    base_directory: str | None = None
     blake3_hash: str | None = None
     sha256_hash: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)

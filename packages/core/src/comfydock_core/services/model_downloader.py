@@ -339,6 +339,7 @@ class ModelDownloader:
 
             self.repository.add_location(
                 model_hash=short_hash,
+                base_directory=self.models_dir,
                 relative_path=str(relative_path),
                 filename=request.target_path.name,
                 mtime=mtime

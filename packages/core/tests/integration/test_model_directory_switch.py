@@ -51,7 +51,7 @@ class TestModelDirectorySwitch:
         test_workspace.set_models_directory(models_dir_1)
 
         # Verify initial state
-        initial_stats = test_workspace.model_index_manager.get_stats()
+        initial_stats = test_workspace.get_model_stats()
         assert initial_stats["total_models"] == 3, "Should have 3 unique models"
         assert initial_stats["total_locations"] == 3, "Should have 3 file locations"
 
@@ -99,7 +99,7 @@ class TestModelDirectorySwitch:
         test_workspace.set_models_directory(models_dir_2)
 
         # ASSERT: Verify index reflects new directory state
-        final_stats = test_workspace.model_index_manager.get_stats()
+        final_stats = test_workspace.get_model_stats()
         assert final_stats["total_models"] == 2, (
             f"Should have exactly 2 models after switch. Got {final_stats['total_models']}. "
             "Orphaned models from old directory should be removed."
@@ -155,7 +155,7 @@ class TestModelDirectorySwitch:
 
         test_workspace.set_models_directory(models_dir_1)
 
-        initial_stats = test_workspace.model_index_manager.get_stats()
+        initial_stats = test_workspace.get_model_stats()
         assert initial_stats["total_models"] == 1
 
         # ACT: Switch to empty directory
@@ -164,7 +164,7 @@ class TestModelDirectorySwitch:
         test_workspace.set_models_directory(empty_dir)
 
         # ASSERT: Index should be empty
-        final_stats = test_workspace.model_index_manager.get_stats()
+        final_stats = test_workspace.get_model_stats()
         assert final_stats["total_models"] == 0, (
             "Index should be empty when switching to empty directory"
         )
@@ -192,7 +192,7 @@ class TestModelDirectorySwitch:
         test_workspace.set_models_directory(dir_1)
         test_workspace.set_models_directory(dir_2)
 
-        stats_dir2 = test_workspace.model_index_manager.get_stats()
+        stats_dir2 = test_workspace.get_model_stats()
         assert stats_dir2["total_models"] == 1
         assert len(test_workspace.model_index_manager.find_by_filename("model_in_dir2.safetensors")) == 1
         assert len(test_workspace.model_index_manager.find_by_filename("model_in_dir1.safetensors")) == 0
@@ -201,7 +201,138 @@ class TestModelDirectorySwitch:
         test_workspace.set_models_directory(dir_1)
 
         # ASSERT: Dir_1 model should be back
-        final_stats = test_workspace.model_index_manager.get_stats()
+        final_stats = test_workspace.get_model_stats()
         assert final_stats["total_models"] == 1
         assert len(test_workspace.model_index_manager.find_by_filename("model_in_dir1.safetensors")) == 1
         assert len(test_workspace.model_index_manager.find_by_filename("model_in_dir2.safetensors")) == 0
+
+    def test_metadata_preserved_when_switching_directories(self, test_workspace):
+        """Verify that hashes and sources are preserved across directory switches."""
+        # Create dir_1 with a model
+        dir_1 = test_workspace.paths.root / "dir_1"
+        dir_1.mkdir()
+        (dir_1 / "checkpoints").mkdir()
+
+        model_1 = dir_1 / "checkpoints" / "test_model.safetensors"
+        model_content = b"TEST_MODEL" + b"\x00" * (4 * 1024 * 1024)
+        model_1.write_bytes(model_content)
+
+        # Index dir_1
+        test_workspace.set_models_directory(dir_1)
+
+        # Get model hash and add metadata
+        models = test_workspace.model_index_manager.find_by_filename("test_model.safetensors")
+        assert len(models) == 1
+        original_hash = models[0].hash
+
+        # Add source metadata
+        test_workspace.model_index_manager.add_source(
+            model_hash=original_hash,
+            source_type="civitai",
+            source_url="https://civitai.com/test",
+            metadata={"model_id": 999}
+        )
+
+        # Create dir_2 (empty)
+        dir_2 = test_workspace.paths.root / "dir_2"
+        dir_2.mkdir()
+        (dir_2 / "checkpoints").mkdir()
+
+        # Switch to dir_2 (model no longer visible)
+        test_workspace.set_models_directory(dir_2)
+        stats = test_workspace.get_model_stats()
+        assert stats["total_models"] == 0, "Dir 2 is empty, so no models should be visible"
+
+        # Switch back to dir_1
+        test_workspace.set_models_directory(dir_1)
+
+        # Verify model appears again
+        models_after = test_workspace.model_index_manager.find_by_filename("test_model.safetensors")
+        assert len(models_after) == 1
+
+        # KEY ASSERTION: Hash should be preserved (no re-hashing needed)
+        assert models_after[0].hash == original_hash, (
+            "Hash should be preserved from previous indexing, not recomputed"
+        )
+
+        # KEY ASSERTION: Source metadata should be preserved
+        sources = test_workspace.model_index_manager.get_sources(original_hash)
+        assert len(sources) == 1, "Source should be preserved"
+        assert sources[0]["url"] == "https://civitai.com/test"
+        assert sources[0]["type"] == "civitai"
+
+    def test_hash_search_filters_by_current_directory(self, test_workspace):
+        """Hash-based search should only return models in the current directory."""
+        # Create two directories with different models
+        dir_1 = test_workspace.paths.root / "dir_1"
+        dir_1.mkdir()
+        (dir_1 / "checkpoints").mkdir()
+
+        model_1 = dir_1 / "checkpoints" / "model1.safetensors"
+        model_1_content = b"MODEL1" + b"\x00" * (4 * 1024 * 1024)
+        model_1.write_bytes(model_1_content)
+
+        dir_2 = test_workspace.paths.root / "dir_2"
+        dir_2.mkdir()
+        (dir_2 / "checkpoints").mkdir()
+
+        model_2 = dir_2 / "checkpoints" / "model2.safetensors"
+        model_2_content = b"MODEL2" + b"\x00" * (4 * 1024 * 1024)
+        model_2.write_bytes(model_2_content)
+
+        # Index dir_1
+        test_workspace.set_models_directory(dir_1)
+        model_1_hash = test_workspace.model_index_manager.find_by_filename("model1.safetensors")[0].hash
+
+        # Index dir_2
+        test_workspace.set_models_directory(dir_2)
+        model_2_hash = test_workspace.model_index_manager.find_by_filename("model2.safetensors")[0].hash
+
+        # Search by hash should only find model2 (current directory)
+        hash_results = test_workspace.search_models(model_2_hash[:8])
+        assert len(hash_results) == 1
+        assert hash_results[0].hash == model_2_hash
+
+        # Searching for model1's hash should return nothing (wrong directory)
+        hash_results_other = test_workspace.search_models(model_1_hash[:8])
+        assert len(hash_results_other) == 0, "Should not find models from other directory"
+
+    def test_same_model_in_multiple_directories_tracked_separately(self, test_workspace):
+        """The same model file (same hash) should be trackable in multiple directories."""
+        # Create two directories
+        dir_1 = test_workspace.paths.root / "dir_1"
+        dir_1.mkdir()
+        (dir_1 / "checkpoints").mkdir()
+
+        dir_2 = test_workspace.paths.root / "dir_2"
+        dir_2.mkdir()
+        (dir_2 / "checkpoints").mkdir()
+
+        # Same content in both directories (same hash)
+        shared_content = b"SHARED" + b"\x00" * (4 * 1024 * 1024)
+        model_1 = dir_1 / "checkpoints" / "shared.safetensors"
+        model_1.write_bytes(shared_content)
+
+        model_2 = dir_2 / "checkpoints" / "shared.safetensors"
+        model_2.write_bytes(shared_content)
+
+        # Index dir_1
+        test_workspace.set_models_directory(dir_1)
+        model_hash = test_workspace.model_index_manager.find_by_filename("shared.safetensors")[0].hash
+
+        # Index dir_2 (same model)
+        test_workspace.set_models_directory(dir_2)
+
+        # Should see 1 model in current directory
+        stats = test_workspace.get_model_stats()
+        assert stats["total_models"] == 1
+        assert stats["total_locations"] == 1
+
+        # But get_locations should show both locations
+        all_locations = test_workspace.model_index_manager.get_locations(model_hash)
+        assert len(all_locations) == 2, "Should track both locations for same model"
+
+        # Verify both directory paths are present
+        location_dirs = {loc['base_directory'] for loc in all_locations}
+        assert str(dir_1.resolve()) in location_dirs
+        assert str(dir_2.resolve()) in location_dirs

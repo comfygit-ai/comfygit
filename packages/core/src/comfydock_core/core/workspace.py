@@ -606,9 +606,13 @@ class Workspace:
         if not results:
             raise KeyError(f"No model found matching: {identifier}")
 
-        if len(results) > 1:
-            raise ValueError(f"Multiple models found matching '{identifier}': {len(results)} matches")
+        # Check if all results are the same model (same hash, different locations)
+        unique_hashes = {r.hash for r in results}
+        if len(unique_hashes) > 1:
+            # Multiple different models match - ambiguous
+            raise ValueError(f"Multiple models found matching '{identifier}': {len(unique_hashes)} different models")
 
+        # Same model, possibly multiple locations - use any result to get the model info
         model = results[0]
         sources = self.model_index_manager.get_sources(model.hash)
         locations = self.model_index_manager.get_locations(model.hash)
@@ -620,7 +624,7 @@ class Workspace:
         )
 
     def get_model_stats(self):
-        """Get model index statistics.
+        """Get model index statistics for current directory.
 
         Returns:
             Dictionary with model statistics
@@ -634,8 +638,12 @@ class Workspace:
 
         When switching directories, this method:
         1. Scans the new directory for models
-        2. Preserves metadata for models that exist in both old and new directories
-        3. Removes orphaned models that only existed in the old directory
+        2. Preserves model metadata (hashes, sources) for all known models
+        3. Updates location records to reflect the new directory
+
+        Model records without current locations are kept to preserve their
+        metadata (hashes, sources). This enables fast directory switching
+        without re-hashing or losing download sources.
 
         Args:
             path: Path to model directory
@@ -655,19 +663,16 @@ class Workspace:
         # Update config to point to new directory
         self.workspace_config_manager.set_models_directory(path)
 
-        # Scan new directory (this updates locations for existing models and adds new ones)
-        # The scan's clean_stale_locations() will remove locations from the old directory
-        result = self.model_scanner.scan_directory(path, progress=progress)
+        # Set repository's current directory for query filtering
+        self.model_index_manager.set_current_directory(path)
 
-        # Clean up models that no longer have any valid locations
-        # This removes orphaned model records while preserving metadata for models
-        # that exist in both directories (since they still have locations)
-        orphaned_count = self.model_index_manager.clear_orphaned_models()
+        # Scan new directory (updates locations for existing models, adds new ones)
+        # clean_stale_locations() removes locations not in the new directory
+        result = self.model_scanner.scan_directory(path, progress=progress)
 
         logger.info(
             f"Set models directory to {path}: "
-            f"{result.added_count} new models, {result.updated_count} updated, "
-            f"{orphaned_count} orphaned models removed"
+            f"{result.added_count} new models, {result.updated_count} updated"
         )
 
         # Update paths in all environments for the newly indexed models
