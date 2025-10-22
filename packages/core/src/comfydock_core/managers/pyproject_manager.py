@@ -1056,7 +1056,8 @@ class ModelHandler(BaseHandler):
             if model_hash in models_data:
                 return ManifestModel.from_toml_dict(model_hash, models_data[model_hash])
             return None
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Error getting model by hash {model_hash}: {e}")
             return None
 
     def remove_model(self, model_hash: str) -> bool:

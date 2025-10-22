@@ -176,7 +176,7 @@ class Environment:
         self,
         dry_run: bool = False
     ) -> SyncResult:
-        """Apply changes: sync packages and custom nodes with environment.
+        """Apply changes: sync packages, nodes, and workflows with environment.
 
         Args:
             dry_run: If True, don't actually apply changes
@@ -210,7 +210,15 @@ class Environment:
             result.errors.append(f"Node sync failed: {e}")
             result.success = False
 
-        # No workflow sync in new architecture - workflows are handled separately
+        # Restore workflows from .cec/ to ComfyUI (for git pull workflow)
+        if not dry_run:
+            try:
+                self.workflow_manager.restore_all_from_cec()
+                logger.info("Restored workflows from .cec/")
+            except Exception as e:
+                logger.warning(f"Failed to restore workflows: {e}")
+                result.errors.append(f"Workflow restore failed: {e}")
+                # Non-fatal - continue
 
         # Ensure model symlink exists
         try:
@@ -959,6 +967,24 @@ class Environment:
                 if model.hash:
                     existing = self.model_repository.get_model(model.hash)
                     if existing:
+                        # Model exists - enrich SQLite with sources from pyproject
+                        global_model = self.pyproject.models.get_by_hash(model.hash)
+                        if global_model and global_model.sources:
+                            # Get existing sources from SQLite
+                            existing_sources_list = self.model_repository.get_sources(model.hash)
+                            existing_source_urls = {s["url"] for s in existing_sources_list}
+
+                            # Add any missing sources
+                            for source_url in global_model.sources:
+                                if source_url not in existing_source_urls:
+                                    source_type = self.model_downloader.detect_url_type(source_url)
+                                    self.model_repository.add_source(
+                                        model_hash=model.hash,
+                                        source_type=source_type,
+                                        source_url=source_url
+                                    )
+                                    logger.info(f"Enriched model {global_model.filename} with source: {source_url}")
+
                         # Model exists - no download needed
                         continue
 
