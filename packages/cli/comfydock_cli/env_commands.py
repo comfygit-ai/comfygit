@@ -214,8 +214,8 @@ class EnvironmentCommands:
             for name in status.workflow.sync_status.synced:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Use has_issues property which now includes uninstalled_nodes check
-                    if wf.has_issues:
+                    # Show warning if has issues OR path sync needed
+                    if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (synced)")
                         self._print_workflow_issues(wf)
                     else:
@@ -224,8 +224,8 @@ class EnvironmentCommands:
             for name in status.workflow.sync_status.new:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Use has_issues property which now includes uninstalled_nodes check
-                    if wf.has_issues:
+                    # Show warning if has issues OR path sync needed
+                    if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (new)")
                         self._print_workflow_issues(wf)
                     else:
@@ -234,8 +234,8 @@ class EnvironmentCommands:
             for name in status.workflow.sync_status.modified:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Use has_issues property which now includes uninstalled_nodes check
-                    if wf.has_issues:
+                    # Show warning if has issues OR path sync needed
+                    if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (modified)")
                         self._print_workflow_issues(wf)
                     else:

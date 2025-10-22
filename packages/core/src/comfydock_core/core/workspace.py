@@ -101,7 +101,17 @@ class Workspace:
     @cached_property
     def model_index_manager(self) -> ModelRepository:
         db_path = self.paths.cache / "models.db"
-        return ModelRepository(db_path)
+        repo = ModelRepository(db_path)
+
+        # Initialize current_directory from config if available
+        try:
+            current_dir = self.workspace_config_manager.get_models_directory()
+            repo.set_current_directory(current_dir)
+        except ComfyDockError:
+            # No models directory configured yet - filtering disabled
+            pass
+
+        return repo
 
     @cached_property
     def node_mapping_repository(self) -> NodeMappingsRepository:
@@ -696,6 +706,10 @@ class Workspace:
         logger.info("Syncing models directory...")
         results = 0
         path = self.workspace_config_manager.get_models_directory()
+
+        # Ensure repository filters by current directory
+        self.model_index_manager.set_current_directory(path)
+
         logger.debug(f"Tracked directory: {path}")
         if path.exists():
             result = self.model_scanner.scan_directory(path, quiet=True, progress=progress)

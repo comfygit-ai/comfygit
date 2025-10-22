@@ -603,7 +603,11 @@ class WorkflowAnalysisStatus:
 
     @property
     def has_issues(self) -> bool:
-        """Check if workflow has unresolved issues or pending download intents."""
+        """Check if workflow has unresolved issues or pending download intents.
+
+        Note: Path sync issues are NOT included here as they're auto-fixable
+        and don't prevent commits. They're tracked separately via has_path_sync_issues.
+        """
         has_download_intents = any(
             m.match_type == "download_intent" for m in self.resolution.models_resolved
         )

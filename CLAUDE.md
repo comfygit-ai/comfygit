@@ -2,8 +2,10 @@
 
 ComfyDock is a monorepo workspace using uv for Python package management. It provides unified environment management for ComfyUI through multiple coordinated packages.
 
-### Codebase Map
+### Codebase Maps
 - @docs/codebase-map.md
+- @packages/core/docs/codebase-map.md
+- @packages/cli/docs/codebase-map.md
 
 ## Version Management Strategy
 

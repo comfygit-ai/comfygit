@@ -157,6 +157,12 @@ class TestAutoResolvedModelsCommit:
 
         # Simulate user saving initial workflow and committing
         simulate_comfyui_save_workflow(test_env, "test_workflow", workflow_v1)
+
+        # Resolve workflow to fix path sync issues before committing
+        deps = test_env.workflow_manager.analyze_workflow("test_workflow")
+        resolution = test_env.workflow_manager.resolve_workflow(deps)
+        test_env.workflow_manager.apply_resolution(resolution)
+
         workflow_status = test_env.workflow_manager.get_workflow_status()
         test_env.execute_commit(workflow_status=workflow_status, message="Initial commit with 2 models")
 
@@ -184,6 +190,11 @@ class TestAutoResolvedModelsCommit:
         workflow_v2["links"].append([2, 2, 0, 3, 0, "MODEL"])
 
         simulate_comfyui_save_workflow(test_env, "test_workflow", workflow_v2)
+
+        # Resolve workflow to fix path sync issues before committing
+        deps = test_env.workflow_manager.analyze_workflow("test_workflow")
+        resolution = test_env.workflow_manager.resolve_workflow(deps)
+        test_env.workflow_manager.apply_resolution(resolution)
 
         # Commit the changes
         workflow_status = test_env.workflow_manager.get_workflow_status()

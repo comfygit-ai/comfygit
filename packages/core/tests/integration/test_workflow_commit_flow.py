@@ -116,6 +116,11 @@ class TestWorkflowCommitFlow:
         # Action 1: Simulate user saving workflow in ComfyUI
         simulate_comfyui_save_workflow(test_env, "test_workflow", workflow_data)
 
+        # Action 1b: Resolve workflow to fix any path sync issues
+        deps = test_env.workflow_manager.analyze_workflow("test_workflow")
+        resolution = test_env.workflow_manager.resolve_workflow(deps)
+        test_env.workflow_manager.apply_resolution(resolution)
+
         # Action 2: Commit
         workflow_status = test_env.workflow_manager.get_workflow_status()
         test_env.execute_commit(
