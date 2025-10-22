@@ -1026,7 +1026,23 @@ class WorkflowManager:
         # Write all models to workflow
         self.pyproject.workflows.set_workflow_models(workflow_name, manifest_models)
 
-        # Clean up orphaned models
+        # Clean up deleted workflows from pyproject.toml
+        # This handles both:
+        # 1. Committed workflows that were deleted (in .cec, in pyproject, not in ComfyUI)
+        # 2. Resolved-but-not-committed workflows (in pyproject, not in .cec, not in ComfyUI)
+        workflows_in_pyproject = set(self.pyproject.workflows.get_all_with_resolutions().keys())
+        workflows_in_comfyui = set()
+        if self.comfyui_workflows.exists():
+            for workflow_file in self.comfyui_workflows.glob("*.json"):
+                workflows_in_comfyui.add(workflow_file.stem)
+
+        workflows_to_remove = workflows_in_pyproject - workflows_in_comfyui
+        if workflows_to_remove:
+            removed_count = self.pyproject.workflows.remove_workflows(list(workflows_to_remove))
+            if removed_count > 0:
+                logger.info(f"Cleaned up {removed_count} deleted workflow(s) from pyproject.toml")
+
+        # Clean up orphaned models (must run AFTER workflow sections are removed)
         self.pyproject.models.cleanup_orphans()
 
         # Phase 3: Update workflow JSON with resolved paths

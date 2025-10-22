@@ -960,6 +960,36 @@ class WorkflowHandler(BaseHandler):
         logger.debug(f"Removed custom_node_map entry for workflow '{workflow_name}': {node_type}")
         return True
 
+    def remove_workflows(self, workflow_names: list[str]) -> int:
+        """Remove workflow sections from pyproject.toml.
+
+        Args:
+            workflow_names: List of workflow names to remove
+
+        Returns:
+            Number of workflows removed
+        """
+        if not workflow_names:
+            return 0
+
+        config = self.load()
+        workflows = config.get('tool', {}).get('comfydock', {}).get('workflows', {})
+
+        removed_count = 0
+        for name in workflow_names:
+            if name in workflows:
+                del workflows[name]
+                removed_count += 1
+                logger.debug(f"Removed workflow section: {name}")
+
+        if removed_count > 0:
+            # Clean up empty workflows section
+            self.clean_empty_sections(config, 'tool', 'comfydock', 'workflows')
+            self.save(config)
+            logger.info(f"Removed {removed_count} workflow section(s) from pyproject.toml")
+
+        return removed_count
+
 
 class ModelHandler(BaseHandler):
     """Handles global model manifest in pyproject.toml.
