@@ -234,10 +234,16 @@ class EnvironmentCommands:
             for name in status.workflow.sync_status.modified:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
+                    # Check if workflow has missing models
+                    missing_for_wf = [m for m in status.missing_models if name in m.workflow_names]
+
                     # Show warning if has issues OR path sync needed
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (modified)")
                         self._print_workflow_issues(wf)
+                    elif missing_for_wf:
+                        print(f"  ⬇️  {name} (updates available)")
+                        print(f"      {len(missing_for_wf)} model(s) need downloading")
                     else:
                         print(f"  📝 {name} (modified)")
 
@@ -339,6 +345,14 @@ class EnvironmentCommands:
     def _show_smart_suggestions(self, status, dev_drift):
         """Show contextual suggestions based on current state."""
         suggestions = []
+
+        # Missing models - highest priority
+        if status.missing_models:
+            suggestions.append("Download missing models: comfydock repair")
+            print("\n💡 Next:")
+            for s in suggestions:
+                print(f"  {s}")
+            return
 
         # Environment drift - highest priority
         if not status.comparison.is_synced:
@@ -760,6 +774,24 @@ class EnvironmentCommands:
             if preview['packages_to_sync']:
                 print("  • Sync Python packages")
 
+            # Show model download preview
+            if preview.get('models_downloadable'):
+                print(f"\n  Models:")
+                count = len(preview['models_downloadable'])
+                print(f"    • Download {count} missing model(s):")
+                for missing_info in preview['models_downloadable'][:5]:
+                    workflows = ', '.join(missing_info.workflow_names[:2])
+                    if len(missing_info.workflow_names) > 2:
+                        workflows += f", +{len(missing_info.workflow_names) - 2} more"
+                    print(f"      - {missing_info.model.filename} ({missing_info.criticality}, for {workflows})")
+                if count > 5:
+                    print(f"      ... and {count - 5} more")
+
+            if preview.get('models_unavailable'):
+                print(f"\n  ⚠️  Models unavailable:")
+                for missing_info in preview['models_unavailable'][:3]:
+                    print(f"      - {missing_info.model.filename} (no sources)")
+
             response = input("\nContinue? (y/N): ")
             if response.lower() != 'y':
                 print("Cancelled")
@@ -767,14 +799,41 @@ class EnvironmentCommands:
 
         print(f"⚙️ Applying changes to: {env.name}")
 
-        # Apply changes with interactive model resolver
+        # Create download callbacks for progress
+        from comfydock_core.models.workflow import BatchDownloadCallbacks
+
+        def on_file_start(filename, idx, total):
+            print(f"   [{idx}/{total}] Downloading {filename}...")
+
+        def on_file_complete(filename, success, error):
+            if success:
+                print(f"   ✓ {filename}")
+            else:
+                print(f"   ✗ {filename}: {error}")
+
+        callbacks = BatchDownloadCallbacks(
+            on_file_start=on_file_start,
+            on_file_complete=on_file_complete
+        )
+
+        # Apply changes with model download support
         try:
-            sync_result = env.sync()
+            model_strategy = getattr(args, 'models', 'all')
+            sync_result = env.sync(model_strategy=model_strategy, callbacks=callbacks)
 
             # Check for errors
             if not sync_result.success:
                 for error in sync_result.errors:
                     print(f"⚠️  {error}", file=sys.stderr)
+
+            # Show model download summary
+            if sync_result.models_downloaded:
+                print(f"\n✓ Downloaded {len(sync_result.models_downloaded)} model(s)")
+
+            if sync_result.models_failed:
+                print(f"\n⚠️  {len(sync_result.models_failed)} model(s) failed:")
+                for filename, error in sync_result.models_failed[:3]:
+                    print(f"   • {filename}: {error}")
 
         except Exception as e:
             if logger:

@@ -19,6 +19,10 @@ class SyncResult:
     # Model paths
     model_paths_configured: bool = False
 
+    # Model downloads
+    models_downloaded: List[str] = field(default_factory=list)  # Filenames
+    models_failed: List[tuple[str, str]] = field(default_factory=list)  # (filename, error)
+
     # Overall status
     success: bool = True
     errors: List[str] = field(default_factory=list)

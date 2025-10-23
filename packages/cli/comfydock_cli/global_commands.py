@@ -782,8 +782,8 @@ class GlobalCommands:
                 # Auto-suggest based on URL/filename
                 suggested_path = downloader.suggest_path(url, node_type=None, filename_hint=None)
 
-            # Path confirmation (unless --yes)
-            if not args.yes:
+            # Path confirmation loop (unless --yes)
+            while not args.yes:
                 print(f"\n📥 Downloading from: {url}")
                 print(f"   Model will be saved to: {suggested_path}")
                 print("\n   [Y] Continue  [m] Change path  [c] Cancel")
@@ -797,9 +797,14 @@ class GlobalCommands:
                     new_path = input("\nEnter path (relative to models dir): ").strip()
                     if new_path:
                         suggested_path = Path(new_path)
+                        continue  # Show menu again with updated path
                     else:
                         print("✗ Download cancelled")
                         return
+                elif choice in ['y', '']:
+                    break  # Confirmed, proceed to download
+                else:
+                    print("Invalid choice. Please enter Y, m, or c.")
 
             # Create download request
             target_path = models_dir / suggested_path
@@ -966,6 +971,9 @@ class GlobalCommands:
     def _show_config(self):
         """Display current configuration."""
         print("ComfyDock Configuration:\n")
+
+        # Workspace path
+        print(f"  Workspace Path:  {self.workspace.paths.root}")
 
         # Civitai API Key
         token = self.workspace.workspace_config_manager.get_civitai_token()

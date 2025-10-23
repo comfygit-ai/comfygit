@@ -244,6 +244,12 @@ def _add_env_commands(subparsers):
     # repair - Repair environment drift (manual edits or git operations)
     repair_parser = subparsers.add_parser("repair", help="Repair environment to match pyproject.toml")
     repair_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+    repair_parser.add_argument(
+        "--models",
+        choices=["all", "required", "skip"],
+        default="all",
+        help="Model download strategy: all (default), required only, or skip"
+    )
     repair_parser.set_defaults(func=env_cmds.repair)
 
     # commit - Commit unsaved changes

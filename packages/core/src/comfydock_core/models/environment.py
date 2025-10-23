@@ -3,9 +3,12 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import List
+from typing import List, TYPE_CHECKING
 
 from .workflow import DetailedWorkflowStatus
+
+if TYPE_CHECKING:
+    from .manifest import ManifestModel
 
 
 @dataclass
@@ -90,6 +93,19 @@ class EnvironmentState:
     python_version: str
 
 
+@dataclass
+class MissingModelInfo:
+    """Information about a model that's in pyproject but not in local index."""
+    model: "ManifestModel"  # From global models table
+    workflow_names: list[str]  # Which workflows need it
+    criticality: str  # "required", "flexible", "optional" (worst case across workflows)
+    can_download: bool  # Has sources available
+
+    @property
+    def is_required(self) -> bool:
+        return self.criticality == "required"
+
+
 # === Semantic Value Objects ===
 
 
@@ -140,6 +156,7 @@ class EnvironmentStatus:
     comparison: EnvironmentComparison
     git: GitStatus
     workflow: DetailedWorkflowStatus
+    missing_models: list[MissingModelInfo] = field(default_factory=list)
 
     @classmethod
     def create(
@@ -147,14 +164,24 @@ class EnvironmentStatus:
         comparison: EnvironmentComparison,
         git_status: GitStatus,
         workflow_status: DetailedWorkflowStatus,
+        missing_models: list[MissingModelInfo] | None = None,
     ) -> "EnvironmentStatus":
         """Factory method to create EnvironmentStatus from components."""
-        return cls(comparison=comparison, git=git_status, workflow=workflow_status)
+        return cls(
+            comparison=comparison,
+            git=git_status,
+            workflow=workflow_status,
+            missing_models=missing_models or []
+        )
 
     @property
     def is_synced(self) -> bool:
-        """Check if environment is fully synced (nodes, packages, and workflows)."""
-        return self.comparison.is_synced and self.workflow.sync_status.is_synced
+        """Check if environment is fully synced (nodes, packages, workflows, and models)."""
+        return (
+            self.comparison.is_synced and
+            self.workflow.sync_status.is_synced and
+            not self.missing_models
+        )
 
     # === Semantic Methods ===
 
@@ -248,4 +275,9 @@ class EnvironmentStatus:
             'nodes_to_remove': self.comparison.extra_nodes,
             'nodes_to_update': self.comparison.version_mismatches,
             'packages_to_sync': not self.comparison.packages_in_sync,
+            'workflows_to_restore': self.workflow.sync_status.modified,
+            'models_missing': self.missing_models,
+            'models_downloadable': [m for m in self.missing_models if m.can_download],
+            'models_unavailable': [m for m in self.missing_models if not m.can_download],
+            'models_required': [m for m in self.missing_models if m.is_required],
         }
