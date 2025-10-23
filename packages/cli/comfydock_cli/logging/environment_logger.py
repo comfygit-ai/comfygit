@@ -60,12 +60,15 @@ class EnvironmentLogger:
         # Remove any existing environment handler
         cls._remove_env_handler()
 
+        # ALWAYS use directory structure for consistency
+        log_dir = cls._workspace_path / "logs" / env_name
+        log_dir.mkdir(parents=True, exist_ok=True)
+
         # Check if compressed logging is enabled via env var
         enable_compressed = os.environ.get('COMFYDOCK_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
 
         if enable_compressed:
-            # Use dual-output handler (full.log + compressed.log)
-            log_dir = cls._workspace_path / "logs" / env_name
+            # Dual-output handler (full.log + compressed.log)
             handler = CompressedDualHandler(
                 log_dir=log_dir,
                 env_name=env_name,
@@ -75,8 +78,8 @@ class EnvironmentLogger:
                 encoding='utf-8'
             )
         else:
-            # Legacy: single flat file
-            log_file = cls._workspace_path / "logs" / f"{env_name}.log"
+            # Single file in directory
+            log_file = log_dir / "full.log"
             handler = RotatingFileHandler(
                 log_file,
                 maxBytes=cls.MAX_BYTES,
@@ -263,14 +266,33 @@ class WorkspaceLogger:
         # Remove any existing workspace handler
         cls._remove_workspace_handler()
 
-        # Create rotating file handler for workspace
-        log_file = cls._workspace_path / "logs" / "workspace" / "workspace.log"
-        handler = RotatingFileHandler(
-            log_file,
-            maxBytes=cls.MAX_BYTES,
-            backupCount=cls.BACKUP_COUNT,
-            encoding='utf-8'
-        )
+        # Use consistent directory structure
+        log_dir = cls._workspace_path / "logs" / "workspace"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check if compressed logging is enabled via env var
+        enable_compressed = os.environ.get('COMFYDOCK_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
+
+        if enable_compressed:
+            # Dual-output handler (full.log + compressed.log)
+            handler = CompressedDualHandler(
+                log_dir=log_dir,
+                env_name='workspace',  # For header
+                compression_level='medium',
+                maxBytes=cls.MAX_BYTES,
+                backupCount=cls.BACKUP_COUNT,
+                encoding='utf-8'
+            )
+        else:
+            # Single file in directory (renamed to full.log for consistency)
+            log_file = log_dir / "full.log"
+            handler = RotatingFileHandler(
+                log_file,
+                maxBytes=cls.MAX_BYTES,
+                backupCount=cls.BACKUP_COUNT,
+                encoding='utf-8'
+            )
+
         handler.setLevel(logging.DEBUG)
 
         # Set formatter

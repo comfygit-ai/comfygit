@@ -45,6 +45,11 @@ class CompressedDualHandler(RotatingFileHandler):
         full_log = log_dir / 'full.log'
         super().__init__(full_log, maxBytes=maxBytes, backupCount=backupCount, encoding=encoding)
 
+        # Store instance variables for rotation
+        self.env_name = env_name
+        self.compression_level = compression_level
+        self.encoding = encoding
+
         # Open compressed.log
         self.compressed_path = log_dir / 'compressed.log'
         self.compressed_file = open(self.compressed_path, 'a', encoding=encoding)
@@ -85,6 +90,46 @@ class CompressedDualHandler(RotatingFileHandler):
 
         except Exception:
             self.handleError(record)
+
+    def doRollover(self) -> None:
+        """Override to rotate both full.log and compressed.log together."""
+        import os
+
+        # First, rotate full.log using parent
+        super().doRollover()
+
+        # Close current compressed file
+        if self.compressed_file:
+            # Write dictionary before closing
+            dictionary = self.compressor.get_dictionary()
+            if dictionary:
+                self.compressed_file.write(dictionary)
+            self.compressed_file.close()
+
+        # Rotate compressed backups: .3→.4, .2→.3, .1→.2
+        for i in range(self.backupCount - 1, 0, -1):
+            sfn = f"{self.compressed_path}.{i}"
+            dfn = f"{self.compressed_path}.{i + 1}"
+            if os.path.exists(sfn):
+                if os.path.exists(dfn):
+                    os.remove(dfn)
+                os.rename(sfn, dfn)
+
+        # Rename current compressed.log → compressed.log.1
+        dfn = f"{self.compressed_path}.1"
+        if os.path.exists(dfn):
+            os.remove(dfn)
+        if os.path.exists(self.compressed_path):
+            os.rename(self.compressed_path, dfn)
+
+        # Reopen compressed.log for new session
+        self.compressed_file = open(self.compressed_path, 'a', encoding=self.encoding)
+
+        # Create new compressor for new session
+        self.compressor = LogCompressor(compression_level=self.compression_level)
+
+        # Write header to new compressed log
+        self._write_compressed_header(self.env_name, self.compression_level)
 
     def close(self) -> None:
         """Close both log files and write dictionary."""

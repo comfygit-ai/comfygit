@@ -30,6 +30,43 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _validate_environment_name(name: str) -> None:
+    """Validate environment name is safe and not reserved.
+
+    Args:
+        name: Environment name to validate
+
+    Raises:
+        CDEnvironmentError: If name is invalid or reserved
+    """
+    from ..models.exceptions import CDEnvironmentError
+
+    RESERVED_NAMES = {'workspace', 'logs', 'models', '.comfydock'}
+
+    # Ensure not empty first
+    if not name or not name.strip():
+        raise CDEnvironmentError("Environment name cannot be empty")
+
+    # Check reserved names (case-insensitive)
+    if name.lower() in RESERVED_NAMES:
+        raise CDEnvironmentError(
+            f"Environment name '{name}' is reserved. "
+            f"Please choose a different name."
+        )
+
+    # Prevent path traversal and separators (check before hidden dir check)
+    if '/' in name or '\\' in name or '..' in name:
+        raise CDEnvironmentError(
+            f"Environment name cannot contain path separators"
+        )
+
+    # Prevent hidden directories
+    if name.startswith('.'):
+        raise CDEnvironmentError(
+            f"Environment name cannot start with '.'"
+        )
+
+
 class WorkspacePaths:
     """All paths for the workspace."""
 
@@ -236,9 +273,13 @@ class Workspace:
 
         Raises:
             CDEnvironmentExistsError: If environment already exists
+            CDEnvironmentError: If name is reserved or invalid
             ComfyDockError: If environment creation fails
             RuntimeError: If environment creation fails
         """
+        # Validate name first
+        _validate_environment_name(name)
+
         env_path = self.paths.environments / name
 
         if env_path.exists():
@@ -360,9 +401,13 @@ class Workspace:
 
         Raises:
             CDEnvironmentExistsError: If environment already exists
+            CDEnvironmentError: If name is reserved or invalid
             ComfyDockError: If import fails
             RuntimeError: If import fails
         """
+        # Validate name first
+        _validate_environment_name(name)
+
         env_path = self.paths.environments / name
 
         if env_path.exists():
@@ -423,10 +468,14 @@ class Workspace:
 
         Raises:
             CDEnvironmentExistsError: If environment already exists
+            CDEnvironmentError: If name is reserved or invalid
             ValueError: If repository is invalid
             ComfyDockError: If import fails
             RuntimeError: If import fails
         """
+        # Validate name first
+        _validate_environment_name(name)
+
         env_path = self.paths.environments / name
 
         if env_path.exists():
