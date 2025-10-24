@@ -445,6 +445,15 @@ class Environment:
     # Node Management
     # =====================================================
 
+    def list_nodes(self) -> list[NodeInfo]:
+        """List all custom nodes in this environment.
+
+        Returns:
+            List of NodeInfo objects for all installed custom nodes
+        """
+        nodes_dict = self.pyproject.nodes.get_existing()
+        return list(nodes_dict.values())
+
     def add_node(self, identifier: str, is_development: bool = False, no_test: bool = False, force: bool = False) -> NodeInfo:
         """Add a custom node to the environment.
 

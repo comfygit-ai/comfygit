@@ -731,27 +731,15 @@ class EnvironmentCommands:
         """List custom nodes in the environment."""
         env = self._get_env(args)
 
-        # Load pyproject.toml and list nodes
-        config = env.pyproject.load()
-        nodes = config.get('tool', {}).get('comfydock', {}).get('nodes', {})
+        nodes = env.list_nodes()
 
         if not nodes:
             print("No custom nodes installed")
             return
 
         print(f"Custom nodes in '{env.name}':")
-
-        # List regular nodes
-        for node_name, info in nodes.items():
-            if node_name == 'development':
-                continue  # Skip development section
-            source = info.get('source', 'unknown')
-            print(f"  • {node_name} ({source})")
-
-        # List development nodes
-        dev_nodes = nodes.get('development', {})
-        for dev_name, _dev_info in dev_nodes.items():
-            print(f"  • {dev_name} (development)")
+        for node in nodes:
+            print(f"  • {node.registry_id or node.name} ({node.source})")
 
     @with_env_logging("env node update")
     def node_update(self, args, logger=None):
