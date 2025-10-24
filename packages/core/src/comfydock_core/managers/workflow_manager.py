@@ -1013,10 +1013,11 @@ class WorkflowManager:
             # Determine criticality with smart defaults
             criticality = self._get_default_criticality(model.category)
 
-            # Fetch sources from repository
+            # Fetch sources from repository to enrich global table
             sources_from_repo = self.model_repository.get_sources(model.hash)
             sources = [s['url'] for s in sources_from_repo]
 
+            # Workflow model: lightweight reference (no sources - hash is the key)
             manifest_model = ManifestWorkflowModel(
                 hash=model.hash,
                 filename=model.filename,
@@ -1024,18 +1025,18 @@ class WorkflowManager:
                 criticality=criticality,
                 status="resolved",
                 nodes=refs,
-                sources=sources
+                sources=[]  # Empty - sources stored in global table only
             )
             manifest_models.append(manifest_model)
 
-            # Add to global models table with sources
+            # Global table: enrich with sources from SQLite
             global_model = ManifestModel(
                 hash=model.hash,
                 filename=model.filename,
                 size=model.file_size,
                 relative_path=model.relative_path,
                 category=model.category,
-                sources=sources
+                sources=sources  # From SQLite - authoritative source
             )
             self.pyproject.models.add_model(global_model)
 

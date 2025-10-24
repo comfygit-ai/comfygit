@@ -1,16 +1,14 @@
 """
-Integration tests for model source preservation bug.
+Integration tests for model source preservation.
 
-BUG: When models are resolved from local index (which has source URLs),
-the sources are NOT written to pyproject.toml. This breaks collaboration
-because other devs can't download the models.
+FIXED: Sources from SQLite repository are now correctly written to global models table,
+but NOT to workflow models (which are lightweight references).
 
 Expected behavior:
 - Model has source in SQLite repository ✓
 - Model is resolved from repository ✓
-- Sources are written to pyproject.toml ✗ (BUG - currently writes empty sources=[])
-
-These tests should FAIL until the fix is implemented.
+- Sources are written to global models table in pyproject.toml ✓
+- Sources are NOT in workflow models (workflow models only have hash reference) ✓
 """
 
 from helpers.model_index_builder import ModelIndexBuilder
@@ -24,14 +22,13 @@ class TestModelSourcePreservation:
 
     def test_progressive_resolution_preserves_sources_from_repository(self, test_env, test_workspace):
         """
-        BUG TEST: Progressive resolution should write sources to pyproject.
+        Progressive resolution writes sources to global table, not workflow models.
 
         Scenario:
         1. Download model with source URL (adds to repository with source)
         2. Use model in workflow
         3. Resolve workflow progressively
-        4. EXPECTED: pyproject.toml should have source URLs from repository
-        5. ACTUAL (BUG): pyproject.toml has sources=[]
+        4. EXPECTED: Global table has sources, workflow model only has hash
         """
         # ARRANGE - Create model with source in repository
         builder = ModelIndexBuilder(test_workspace)
@@ -70,41 +67,38 @@ class TestModelSourcePreservation:
         )
         simulate_comfyui_save_workflow(test_env, "test_workflow", workflow)
 
-        # ACT - Resolve workflow (progressive mode - calls _write_single_model_resolution)
+        # ACT - Resolve workflow (progressive mode)
         deps = test_env.workflow_manager.analyze_workflow("test_workflow")
         resolution = test_env.workflow_manager.resolve_workflow(deps)
 
         # Apply resolution writes to pyproject
         test_env.workflow_manager.apply_resolution(resolution)
 
-        # ASSERT - BUG: Sources should be in pyproject but are currently empty
+        # ASSERT - Correct behavior: sources in global table, not workflow models
         assertions = PyprojectAssertions(test_env)
 
-        # Check workflow model has sources
+        # Check workflow model does NOT have sources (lightweight reference)
         workflow_model = (
             assertions
             .has_workflow("test_workflow")
             .has_model_with_filename("test_lora.safetensors")
         )
-        # This will FAIL until bug is fixed:
-        assert test_url in workflow_model.config.get("sources", []), \
-            f"BUG: Expected source '{test_url}' in workflow model, got {workflow_model.config.get('sources', [])}"
+        assert workflow_model.config.get("sources", []) == [], \
+            f"Workflow model should not have sources (lightweight reference), got {workflow_model.config.get('sources', [])}"
 
-        # Check global model table has sources
+        # Check global model table HAS sources
         global_model = assertions.has_global_model(model_hash)
-        # This will FAIL until bug is fixed:
         global_model.has_source(test_url)
 
     def test_bulk_resolution_preserves_sources_from_repository(self, test_env, test_workspace):
         """
-        BUG TEST: Bulk resolution should write sources to pyproject.
+        Bulk resolution writes sources to global table, not workflow models.
 
         Scenario:
         1. Create multiple models with sources in repository
         2. Create workflow using these models
         3. Resolve workflow in bulk (apply_resolution path)
-        4. EXPECTED: All model sources should be in pyproject
-        5. ACTUAL (BUG): sources=[] for all models
+        4. EXPECTED: Global table has all sources, workflow models only have hashes
         """
         # ARRANGE - Create two models with sources
         builder = ModelIndexBuilder(test_workspace)
@@ -142,46 +136,46 @@ class TestModelSourcePreservation:
         resolution = test_env.workflow_manager.resolve_workflow(deps)
         test_env.workflow_manager.apply_resolution(resolution)
 
-        # ASSERT - Both models should have sources (will FAIL)
+        # ASSERT - Correct behavior: sources in global table, not workflow models
         assertions = PyprojectAssertions(test_env)
 
-        # Check checkpoint has source
-        checkpoint_model = (
+        # Check checkpoint workflow model does NOT have sources
+        checkpoint_wf_model = (
             assertions
             .has_workflow("multi_model")
             .has_model_with_filename("checkpoint.safetensors")
         )
-        assert checkpoint_url in checkpoint_model.config.get("sources", []), \
-            f"BUG: Checkpoint missing source. Got sources: {checkpoint_model.config.get('sources', [])}"
+        assert checkpoint_wf_model.config.get("sources", []) == [], \
+            f"Checkpoint workflow model should not have sources"
 
-        # Check lora has source
-        lora_model = (
+        # Check lora workflow model does NOT have sources
+        lora_wf_model = (
             assertions
             .has_workflow("multi_model")
             .has_model_with_filename("lora.safetensors")
         )
-        assert lora_url in lora_model.config.get("sources", []), \
-            f"BUG: Lora missing source. Got sources: {lora_model.config.get('sources', [])}"
+        assert lora_wf_model.config.get("sources", []) == [], \
+            f"Lora workflow model should not have sources"
 
-        # Check global models table
+        # Check global models table HAS sources
         assertions.has_global_model(checkpoint_hash).has_source(checkpoint_url)
         assertions.has_global_model(lora_hash).has_source(lora_url)
 
-    def test_collaboration_scenario_fails_without_sources(self, test_env, test_workspace):
+    def test_collaboration_scenario_succeeds_with_sources(self, test_env, test_workspace):
         """
-        BUG TEST: Real-world collaboration scenario that fails.
+        Real-world collaboration scenario now works correctly.
 
         Dev A scenario:
         1. Dev A downloads model (has source in their repository)
         2. Dev A uses model in workflow
         3. Dev A commits workflow
-        4. pyproject.toml is pushed to git
+        4. pyproject.toml is pushed to git (with sources in global table)
 
         Dev B scenario:
         5. Dev B pulls pyproject.toml
         6. Dev B runs repair/import
-        7. EXPECTED: Models download using sources from pyproject
-        8. ACTUAL (BUG): No sources in pyproject, can't download
+        7. EXPECTED: Models download using sources from pyproject global table
+        8. ACTUAL: Works! Sources are in global table, Dev B can download
         """
         # DEV A - Download and use model
         builder = ModelIndexBuilder(test_workspace)
@@ -212,12 +206,12 @@ class TestModelSourcePreservation:
         pyproject_config = test_env.pyproject.load()
         global_models = pyproject_config.get("tool", {}).get("comfydock", {}).get("models", {})
 
-        # BUG: This model should have sources but doesn't
+        # Verify model is in global table WITH sources
         assert model_hash in global_models, "Model should be in global table"
         committed_model = global_models[model_hash]
 
-        # This assertion will FAIL - proving the bug
+        # Sources should be in global table - Dev B can download!
         committed_sources = committed_model.get("sources", [])
         assert model_url in committed_sources, \
-            f"BUG: Model committed without source! Dev B won't be able to download it. " \
+            f"Model should have source in global table for collaboration. " \
             f"Sources in pyproject: {committed_sources}, Expected: ['{model_url}']"
