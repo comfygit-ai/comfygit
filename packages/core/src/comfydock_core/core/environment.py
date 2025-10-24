@@ -509,6 +509,49 @@ class Environment:
         """
         return self.node_manager.remove_node(identifier)
 
+    def remove_nodes_with_progress(
+        self,
+        node_ids: list[str],
+        callbacks: "NodeInstallCallbacks | None" = None
+    ) -> tuple[int, list[tuple[str, str]]]:
+        """Remove multiple nodes with callback support for progress tracking.
+
+        Args:
+            node_ids: List of node identifiers to remove
+            callbacks: Optional callbacks for progress feedback
+
+        Returns:
+            Tuple of (success_count, failed_nodes)
+            where failed_nodes is a list of (node_id, error_message) tuples
+
+        Raises:
+            CDNodeNotFoundError: If a node is not found
+        """
+        if callbacks and callbacks.on_batch_start:
+            callbacks.on_batch_start(len(node_ids))
+
+        success_count = 0
+        failed = []
+
+        for idx, node_id in enumerate(node_ids):
+            if callbacks and callbacks.on_node_start:
+                callbacks.on_node_start(node_id, idx + 1, len(node_ids))
+
+            try:
+                self.remove_node(node_id)
+                success_count += 1
+                if callbacks and callbacks.on_node_complete:
+                    callbacks.on_node_complete(node_id, True, None)
+            except Exception as e:
+                failed.append((node_id, str(e)))
+                if callbacks and callbacks.on_node_complete:
+                    callbacks.on_node_complete(node_id, False, str(e))
+
+        if callbacks and callbacks.on_batch_complete:
+            callbacks.on_batch_complete(success_count, len(node_ids))
+
+        return success_count, failed
+
     def update_node(self, identifier: str, confirmation_strategy=None, no_test: bool = False):
         """Update a node based on its source type.
 

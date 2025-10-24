@@ -238,3 +238,74 @@ class TestStatusUninstalledNodes:
         expected_uninstalled = {'node-19', 'node-20', 'node-21'}
         assert packages_needed == expected_uninstalled, \
             f"Uninstalled packages should be {expected_uninstalled}, got {packages_needed}"
+
+    def test_status_shows_uninstalled_nodes_for_new_uncommitted_workflow(self, test_env, workflow_fixtures):
+        """
+        Test that status correctly shows uninstalled nodes for NEW workflows BEFORE commit.
+
+        This is the exact bug from the user report:
+        1. User adds a new workflow to ComfyUI with custom nodes
+        2. User runs `cfd status`
+        3. Status says "new, ready to commit" (no issues shown)
+        4. User commits the workflow
+        5. User runs `cfd status` again
+        6. NOW it shows "1 packages needed for installation"
+
+        Root cause: For NEW workflows (not yet in pyproject.toml), the code looks for
+        the workflow's node list in pyproject, but it doesn't exist yet! So it thinks
+        there are 0 nodes needed.
+
+        Expected: Status should use the resolution result (nodes_resolved) for new
+        workflows instead of pyproject.toml.
+        """
+        # ARRANGE: Use an existing workflow with a known custom node
+        workflow = load_workflow_fixture(workflow_fixtures, "with_custom_node")
+
+        # Save to ComfyUI (making it a "new" workflow)
+        simulate_comfyui_save_workflow(test_env, "DepthCrafterExample", workflow)
+
+        # ACT: Get status BEFORE committing (this is when the bug manifests)
+        workflow_status = test_env.workflow_manager.get_workflow_status()
+
+        # ASSERT: Find our new workflow
+        new_workflow = next(
+            (wf for wf in workflow_status.analyzed_workflows if wf.name == "DepthCrafterExample"),
+            None
+        )
+
+        assert new_workflow is not None, "DepthCrafterExample should be in analyzed workflows"
+        assert new_workflow.sync_state == "new", "Workflow should be in 'new' state"
+
+        # BUG: Current implementation looks in pyproject for workflow's node list,
+        # but new workflows don't have an entry yet!
+        # So uninstalled_nodes will be empty even though the node isn't installed.
+
+        # The workflow HAS custom nodes
+        assert len(new_workflow.dependencies.non_builtin_nodes) > 0, \
+            "Workflow has custom nodes"
+
+        # Check if nodes were resolved or are unresolved
+        # (Depending on test registry, node may or may not resolve)
+        if len(new_workflow.resolution.nodes_resolved) > 0:
+            # FIXED: For resolved nodes, uninstalled_nodes should be populated
+            # from resolution.nodes_resolved for NEW workflows
+            assert len(new_workflow.uninstalled_nodes) > 0, \
+                f"Fixed: New workflow should show uninstalled nodes from resolution, got {new_workflow.uninstalled_nodes}"
+
+            # Verify it contains the resolved package IDs
+            resolved_ids = {r.package_id for r in new_workflow.resolution.nodes_resolved if r.package_id}
+            assert all(node_id in resolved_ids for node_id in new_workflow.uninstalled_nodes), \
+                "Uninstalled nodes should match resolved package IDs"
+
+            # has_issues should return True (uninstalled nodes present)
+            assert new_workflow.has_issues, \
+                "Workflow should have issues (uninstalled nodes)"
+        else:
+            # Node didn't resolve (not in test registry), so it's in nodes_unresolved
+            # This is also an "issue" but tracked separately
+            assert len(new_workflow.resolution.nodes_unresolved) > 0, \
+                "Unresolved nodes should be tracked"
+            # uninstalled_nodes will be empty (can't install what we can't resolve)
+            # But has_issues should still be True due to unresolved nodes
+            assert new_workflow.has_issues, \
+                "Workflow should have issues (unresolved nodes)"

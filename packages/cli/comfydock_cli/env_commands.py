@@ -582,29 +582,69 @@ class EnvironmentCommands:
 
     @with_env_logging("env node add")
     def node_add(self, args, logger=None):
-        """Add a custom node - directly modifies pyproject.toml."""
+        """Add custom node(s) - directly modifies pyproject.toml."""
         env = self._get_env(args)
 
+        # Batch mode: multiple nodes
+        if len(args.node_names) > 1:
+            print(f"📦 Adding {len(args.node_names)} nodes...")
+
+            # Create callbacks for progress display
+            def on_node_start(node_id, idx, total):
+                print(f"  [{idx}/{total}] Installing {node_id}...", end=" ", flush=True)
+
+            def on_node_complete(node_id, success, error):
+                if success:
+                    print("✓")
+                else:
+                    print(f"✗ ({error})")
+
+            from comfydock_core.models.workflow import NodeInstallCallbacks
+            callbacks = NodeInstallCallbacks(
+                on_node_start=on_node_start,
+                on_node_complete=on_node_complete
+            )
+
+            # Install nodes with progress feedback
+            installed_count, failed_nodes = env.install_nodes_with_progress(
+                args.node_names,
+                callbacks=callbacks
+            )
+
+            if installed_count > 0:
+                print(f"\n✅ Installed {installed_count}/{len(args.node_names)} nodes")
+
+            if failed_nodes:
+                print(f"\n⚠️  Failed to install {len(failed_nodes)} nodes:")
+                for node_id, error in failed_nodes:
+                    print(f"  • {node_id}: {error}")
+
+            print(f"\nRun 'comfydock -e {env.name} env status' to review changes")
+            return
+
+        # Single node mode (original behavior)
+        node_name = args.node_names[0]
+
         if args.dev:
-            print(f"📦 Adding development node: {args.node_name}")
+            print(f"📦 Adding development node: {node_name}")
         else:
-            print(f"📦 Adding node: {args.node_name}")
+            print(f"📦 Adding node: {node_name}")
 
         # Directly add the node
         try:
-            node_info = env.add_node(args.node_name, is_development=args.dev, no_test=args.no_test, force=args.force)
+            node_info = env.add_node(node_name, is_development=args.dev, no_test=args.no_test, force=args.force)
         except CDNodeConflictError as e:
             # Use formatter to render error with CLI commands
             formatted = NodeErrorFormatter.format_conflict_error(e)
             if logger:
-                logger.error(f"Node conflict for '{args.node_name}': {e}", exc_info=True)
-            print(f"✗ Cannot add node '{args.node_name}'", file=sys.stderr)
+                logger.error(f"Node conflict for '{node_name}': {e}", exc_info=True)
+            print(f"✗ Cannot add node '{node_name}'", file=sys.stderr)
             print(formatted, file=sys.stderr)
             sys.exit(1)
         except Exception as e:
             if logger:
-                logger.error(f"Node add failed for '{args.node_name}': {e}", exc_info=True)
-            print(f"✗ Failed to add node '{args.node_name}'", file=sys.stderr)
+                logger.error(f"Node add failed for '{node_name}': {e}", exc_info=True)
+            print(f"✗ Failed to add node '{node_name}'", file=sys.stderr)
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -617,18 +657,58 @@ class EnvironmentCommands:
 
     @with_env_logging("env node remove")
     def node_remove(self, args, logger=None):
-        """Remove a custom node - handles filesystem immediately."""
+        """Remove custom node(s) - handles filesystem immediately."""
         env = self._get_env(args)
 
-        print(f"🗑 Removing node: {args.node_name}")
+        # Batch mode: multiple nodes
+        if len(args.node_names) > 1:
+            print(f"🗑 Removing {len(args.node_names)} nodes...")
+
+            # Create callbacks for progress display
+            def on_node_start(node_id, idx, total):
+                print(f"  [{idx}/{total}] Removing {node_id}...", end=" ", flush=True)
+
+            def on_node_complete(node_id, success, error):
+                if success:
+                    print("✓")
+                else:
+                    print(f"✗ ({error})")
+
+            from comfydock_core.models.workflow import NodeInstallCallbacks
+            callbacks = NodeInstallCallbacks(
+                on_node_start=on_node_start,
+                on_node_complete=on_node_complete
+            )
+
+            # Remove nodes with progress feedback
+            removed_count, failed_nodes = env.remove_nodes_with_progress(
+                args.node_names,
+                callbacks=callbacks
+            )
+
+            if removed_count > 0:
+                print(f"\n✅ Removed {removed_count}/{len(args.node_names)} nodes")
+
+            if failed_nodes:
+                print(f"\n⚠️  Failed to remove {len(failed_nodes)} nodes:")
+                for node_id, error in failed_nodes:
+                    print(f"  • {node_id}: {error}")
+
+            print(f"\nRun 'comfydock -e {env.name} env status' to review changes")
+            return
+
+        # Single node mode (original behavior)
+        node_name = args.node_names[0]
+
+        print(f"🗑 Removing node: {node_name}")
 
         # Remove the node (handles filesystem imperatively)
         try:
-            result = env.remove_node(args.node_name)
+            result = env.remove_node(node_name)
         except Exception as e:
             if logger:
-                logger.error(f"Node remove failed for '{args.node_name}': {e}", exc_info=True)
-            print(f"✗ Failed to remove node '{args.node_name}'", file=sys.stderr)
+                logger.error(f"Node remove failed for '{node_name}': {e}", exc_info=True)
+            print(f"✗ Failed to remove node '{node_name}'", file=sys.stderr)
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
 

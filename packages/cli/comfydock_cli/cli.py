@@ -276,16 +276,16 @@ def _add_env_commands(subparsers):
     node_subparsers = node_parser.add_subparsers(dest="node_command", help="Node commands")
 
     # node add
-    node_add_parser = node_subparsers.add_parser("add", help="Add custom node")
-    node_add_parser.add_argument("node_name", help="Node directory name or registry ID")
+    node_add_parser = node_subparsers.add_parser("add", help="Add custom node(s)")
+    node_add_parser.add_argument("node_names", nargs="+", help="Node directory name(s) or registry ID(s)")
     node_add_parser.add_argument("--dev", action="store_true", help="Track existing local development node")
     node_add_parser.add_argument("--no-test", action="store_true", help="Don't test resolution")
     node_add_parser.add_argument("--force", action="store_true", help="Force overwrite existing directory")
     node_add_parser.set_defaults(func=env_cmds.node_add)
 
     # node remove
-    node_remove_parser = node_subparsers.add_parser("remove", help="Remove custom node")
-    node_remove_parser.add_argument("node_name", help="Node registry ID or name").completer = installed_node_completer
+    node_remove_parser = node_subparsers.add_parser("remove", help="Remove custom node(s)")
+    node_remove_parser.add_argument("node_names", nargs="+", help="Node registry ID(s) or name(s)").completer = installed_node_completer
     node_remove_parser.add_argument("--dev", action="store_true", help="Remove development node specifically")
     node_remove_parser.set_defaults(func=env_cmds.node_remove)
 

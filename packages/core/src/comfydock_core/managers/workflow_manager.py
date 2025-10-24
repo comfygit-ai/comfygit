@@ -519,10 +519,19 @@ class WorkflowManager:
         resolution = self.resolve_workflow(dependencies)
 
         # Phase 3: Calculate uninstalled nodes (for CLI display)
-        # Get workflow's declared node requirements from pyproject.toml
+        # Check if workflow has an entry in pyproject.toml
         workflows_config = self.pyproject.workflows.get_all_with_resolutions()
         workflow_config = workflows_config.get(name, {})
-        workflow_needs = set(workflow_config.get('nodes', []))
+        pyproject_nodes = set(workflow_config.get('nodes', []))
+
+        # For NEW workflows not yet in pyproject, use resolution result
+        # For workflows already in pyproject (modified, synced, or new from git), use pyproject
+        if sync_state == "new" and not pyproject_nodes:
+            # Use resolved nodes from current analysis (not yet committed)
+            workflow_needs = set(r.package_id for r in resolution.nodes_resolved if r.package_id)
+        else:
+            # Use pyproject for all other cases
+            workflow_needs = pyproject_nodes
 
         # Get actually installed nodes
         installed = set(self.pyproject.nodes.get_existing().keys())
