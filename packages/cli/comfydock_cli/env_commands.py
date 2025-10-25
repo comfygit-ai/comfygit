@@ -1167,6 +1167,267 @@ class EnvironmentCommands:
             print("✗ Reset failed", file=sys.stderr)
             sys.exit(1)
 
+    # === Git remote operations ===
+
+    @with_env_logging("env pull")
+    def pull(self, args, logger=None):
+        """Pull from remote and repair environment."""
+        env = self._get_env(args)
+
+        # Check for uncommitted changes first
+        if env.has_committable_changes() and not getattr(args, 'force', False):
+            print("⚠️  You have uncommitted changes")
+            print()
+            print("💡 Options:")
+            print("  • Commit: comfydock commit -m 'message'")
+            print("  • Discard: comfydock rollback")
+            print("  • Force: comfydock pull --force")
+            sys.exit(1)
+
+        # Check remote exists
+        if not env.git_manager.has_remote(args.remote):
+            print(f"✗ Remote '{args.remote}' not configured")
+            print()
+            print("💡 Set up a remote first:")
+            print(f"   comfydock remote add {args.remote} <url>")
+            sys.exit(1)
+
+        try:
+            print(f"📥 Pulling from {args.remote}...")
+
+            # Create callbacks for node and model progress (reuse repair command patterns)
+            from comfydock_core.models.workflow import BatchDownloadCallbacks, NodeInstallCallbacks
+            from .utils.progress import create_progress_callback
+
+            # Node installation callbacks
+            def on_node_start(node_id, idx, total):
+                print(f"  [{idx}/{total}] Installing {node_id}...", end=" ", flush=True)
+
+            def on_node_complete(node_id, success, error):
+                if success:
+                    print("✓")
+                else:
+                    print(f"✗ ({error})")
+
+            node_callbacks = NodeInstallCallbacks(
+                on_node_start=on_node_start,
+                on_node_complete=on_node_complete
+            )
+
+            # Model download callbacks
+            def on_file_start(filename, idx, total):
+                print(f"   [{idx}/{total}] Downloading {filename}...")
+
+            def on_file_complete(filename, success, error):
+                print()  # New line after progress bar
+                if success:
+                    print(f"   ✓ {filename}")
+                else:
+                    print(f"   ✗ {filename}: {error}")
+
+            model_callbacks = BatchDownloadCallbacks(
+                on_file_start=on_file_start,
+                on_file_progress=create_progress_callback(),
+                on_file_complete=on_file_complete
+            )
+
+            # Pull and repair with progress callbacks
+            result = env.pull_and_repair(
+                remote=args.remote,
+                model_strategy=getattr(args, 'models', 'all'),
+                model_callbacks=model_callbacks,
+                node_callbacks=node_callbacks
+            )
+
+            # Extract sync result for summary
+            sync_result = result.get('sync_result')
+
+            print(f"\n✓ Pulled changes from {args.remote}")
+
+            # Show summary of what was synced (like repair command)
+            if sync_result:
+                summary_items = []
+                if sync_result.nodes_installed:
+                    summary_items.append(f"Installed {len(sync_result.nodes_installed)} node(s)")
+                if sync_result.nodes_removed:
+                    summary_items.append(f"Removed {len(sync_result.nodes_removed)} node(s)")
+                if sync_result.models_downloaded:
+                    summary_items.append(f"Downloaded {len(sync_result.models_downloaded)} model(s)")
+
+                if summary_items:
+                    for item in summary_items:
+                        print(f"   • {item}")
+
+            print("\n⚙️  Environment synced successfully")
+
+        except KeyboardInterrupt:
+            # User pressed Ctrl+C - git changes already rolled back by core
+            if logger:
+                logger.warning("Pull interrupted by user")
+            print("\n⚠️  Pull interrupted - git changes rolled back", file=sys.stderr)
+            sys.exit(1)
+        except ValueError as e:
+            # Merge conflicts
+            if logger:
+                logger.error(f"Pull failed: {e}", exc_info=True)
+
+            # Check if it's a merge conflict
+            error_str = str(e)
+            if "Merge conflict" in error_str or "conflict" in error_str.lower():
+                print(f"\n✗ Merge conflict detected", file=sys.stderr)
+                print()
+                print("💡 To resolve:")
+                print(f"   1. cd {env.cec_path}")
+                print("   2. git status  # See conflicted files")
+                print("   3. Edit conflicts and resolve")
+                print("   4. git add <resolved-files>")
+                print("   5. git commit")
+                print("   6. comfydock repair  # Sync environment")
+            else:
+                print(f"✗ Pull failed: {e}", file=sys.stderr)
+            sys.exit(1)
+        except OSError as e:
+            # Network, auth, or other git errors
+            if logger:
+                logger.error(f"Pull failed: {e}", exc_info=True)
+
+            # Check if it's a merge conflict (OSError from git_merge)
+            error_str = str(e)
+            if "Merge conflict" in error_str or "conflict" in error_str.lower():
+                print(f"\n✗ Merge conflict detected", file=sys.stderr)
+                print()
+                print("💡 To resolve:")
+                print(f"   1. cd {env.cec_path}")
+                print("   2. git status  # See conflicted files")
+                print("   3. Edit conflicts and resolve")
+                print("   4. git add <resolved-files>")
+                print("   5. git commit")
+                print("   6. comfydock repair  # Sync environment")
+            else:
+                print(f"✗ Pull failed: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            if logger:
+                logger.error(f"Pull failed: {e}", exc_info=True)
+            print(f"✗ Pull failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @with_env_logging("env push")
+    def push(self, args, logger=None):
+        """Push commits to remote."""
+        env = self._get_env(args)
+
+        # Check for uncommitted changes
+        if env.has_committable_changes():
+            print("⚠️  You have uncommitted changes")
+            print()
+            print("💡 Commit first:")
+            print("   comfydock commit -m 'your message'")
+            sys.exit(1)
+
+        # Check remote exists
+        if not env.git_manager.has_remote(args.remote):
+            print(f"✗ Remote '{args.remote}' not configured")
+            print()
+            print("💡 Set up a remote first:")
+            print(f"   comfydock remote add {args.remote} <url>")
+            sys.exit(1)
+
+        try:
+            force = getattr(args, 'force', False)
+
+            if force:
+                print(f"📤 Force pushing to {args.remote}...")
+            else:
+                print(f"📤 Pushing to {args.remote}...")
+
+            # Push (with force flag if specified)
+            push_output = env.push_commits(remote=args.remote, force=force)
+
+            if force:
+                print(f"   ✓ Force pushed commits to {args.remote}")
+            else:
+                print(f"   ✓ Pushed commits to {args.remote}")
+
+            # Show remote URL
+            from comfydock_core.utils.git import git_remote_get_url
+            remote_url = git_remote_get_url(env.cec_path, args.remote)
+            if remote_url:
+                print()
+                print(f"💾 Remote: {remote_url}")
+
+        except ValueError as e:
+            # No remote or workflow issues
+            if logger:
+                logger.error(f"Push failed: {e}", exc_info=True)
+            print(f"✗ Push failed: {e}", file=sys.stderr)
+            sys.exit(1)
+        except OSError as e:
+            # Network, auth, or git errors
+            if logger:
+                logger.error(f"Push failed: {e}", exc_info=True)
+            print(f"✗ Push failed: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            if logger:
+                logger.error(f"Push failed: {e}", exc_info=True)
+            print(f"✗ Push failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @with_env_logging("env remote")
+    def remote(self, args, logger=None):
+        """Manage git remotes."""
+        env = self._get_env(args)
+
+        subcommand = args.remote_command
+
+        try:
+            if subcommand == "add":
+                # Add remote
+                if not args.name or not args.url:
+                    print("✗ Usage: comfydock remote add <name> <url>")
+                    sys.exit(1)
+
+                env.git_manager.add_remote(args.name, args.url)
+                print(f"✓ Added remote '{args.name}': {args.url}")
+
+            elif subcommand == "remove":
+                # Remove remote
+                if not args.name:
+                    print("✗ Usage: comfydock remote remove <name>")
+                    sys.exit(1)
+
+                env.git_manager.remove_remote(args.name)
+                print(f"✓ Removed remote '{args.name}'")
+
+            elif subcommand == "list":
+                # List remotes
+                remotes = env.git_manager.list_remotes()
+
+                if not remotes:
+                    print("No remotes configured")
+                    print()
+                    print("💡 Add a remote:")
+                    print("   comfydock remote add origin <url>")
+                else:
+                    print("Remotes:")
+                    for name, url, remote_type in remotes:
+                        print(f"  {name}\t{url} ({remote_type})")
+
+            else:
+                print(f"✗ Unknown remote command: {subcommand}")
+                print("   Usage: comfydock remote [add|remove|list]")
+                sys.exit(1)
+
+        except ValueError as e:
+            print(f"✗ {e}", file=sys.stderr)
+            sys.exit(1)
+        except OSError as e:
+            if logger:
+                logger.error(f"Remote operation failed: {e}", exc_info=True)
+            print(f"✗ {e}", file=sys.stderr)
+            sys.exit(1)
+
     # === Workflow management ===
 
     @with_env_logging("workflow list", get_env_name=lambda self, args: self._get_env(args).name)
@@ -1317,9 +1578,10 @@ class EnvironmentCommands:
                     print("\nYou can try installing them manually:")
                     print("  comfydock node add <node-id>")
             else:
-                print("\nℹ️  Skipped node installation. To install later:")
-                print(f"  • Re-run: comfydock workflow resolve \"{args.name}\"")
-                print("  • Or install individually: comfydock node add <node-id>")
+                print("\nℹ️  Skipped node installation")
+                # print("\nℹ️  Skipped node installation. To install later:")
+                # print(f"  • Re-run: comfydock workflow resolve \"{args.name}\"")
+                # print("  • Or install individually: comfydock node add <node-id>")
 
         # Display final results - check issues first
         uninstalled = env.get_uninstalled_nodes(workflow_name=args.name)

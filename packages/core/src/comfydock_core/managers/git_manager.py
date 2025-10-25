@@ -536,3 +536,108 @@ __pycache__/
             "total_versions": len(versions),
             "latest_message": versions[-1]["message"] if versions else None,
         }
+
+    # =============================================================================
+    # Pull/Push/Remote Operations
+    # =============================================================================
+
+    def pull(self, remote: str = "origin", branch: str | None = None, ff_only: bool = False) -> dict:
+        """Pull from remote (fetch + merge).
+
+        Args:
+            remote: Remote name (default: origin)
+            branch: Branch to pull (default: current branch)
+            ff_only: Only allow fast-forward merges (default: False)
+
+        Returns:
+            Dict with keys: 'fetch_output', 'merge_output', 'branch'
+
+        Raises:
+            ValueError: If no remote, detached HEAD, or merge conflicts
+            OSError: If fetch/merge fails
+        """
+        from ..utils.git import git_pull
+
+        logger.info(f"Pulling {remote}/{branch or 'current branch'}")
+
+        result = git_pull(self.repo_path, remote, branch, ff_only=ff_only)
+
+        return result
+
+    def push(self, remote: str = "origin", branch: str | None = None, force: bool = False) -> str:
+        """Push commits to remote.
+
+        Args:
+            remote: Remote name (default: origin)
+            branch: Branch to push (default: current branch)
+            force: Use --force-with-lease (default: False)
+
+        Returns:
+            Push output
+
+        Raises:
+            ValueError: If no remote or detached HEAD
+            OSError: If push fails
+        """
+        from ..utils.git import git_push, git_current_branch
+
+        # Get current branch if not specified
+        if not branch:
+            branch = git_current_branch(self.repo_path)
+
+        logger.info(f"Pushing to {remote}/{branch}" + (" (force)" if force else ""))
+
+        return git_push(self.repo_path, remote, branch, force=force)
+
+    def add_remote(self, name: str, url: str) -> None:
+        """Add a git remote.
+
+        Args:
+            name: Remote name (e.g., "origin")
+            url: Remote URL
+
+        Raises:
+            OSError: If remote already exists
+        """
+        from ..utils.git import git_remote_add
+
+        logger.info(f"Adding remote '{name}': {url}")
+        git_remote_add(self.repo_path, name, url)
+
+    def remove_remote(self, name: str) -> None:
+        """Remove a git remote.
+
+        Args:
+            name: Remote name (e.g., "origin")
+
+        Raises:
+            ValueError: If remote doesn't exist
+        """
+        from ..utils.git import git_remote_remove
+
+        logger.info(f"Removing remote '{name}'")
+        git_remote_remove(self.repo_path, name)
+
+    def list_remotes(self) -> list[tuple[str, str, str]]:
+        """List all git remotes.
+
+        Returns:
+            List of tuples: [(name, url, type), ...]
+        """
+        from ..utils.git import git_remote_list
+
+        return git_remote_list(self.repo_path)
+
+    def has_remote(self, name: str = "origin") -> bool:
+        """Check if a remote exists.
+
+        Args:
+            name: Remote name (default: origin)
+
+        Returns:
+            True if remote exists
+        """
+        from ..utils.git import git_remote_get_url
+
+        url = git_remote_get_url(self.repo_path, name)
+        return bool(url)

@@ -10,6 +10,13 @@
 5. ✅ **Atomic pull operations** - Auto-rollback git changes if sync fails/cancelled (prevents half-pulled state)
 6. ✅ **Enhanced test coverage** - Added edge case tests (21 total: 11 happy path + 10 edge cases)
 
+**UX Improvements (Latest):**
+7. ✅ **Removed KeyboardInterrupt from core** - Moved to CLI layer, core library is now UI-agnostic
+8. ✅ **Added progress callbacks to pull** - Shows real-time node installation and model download progress
+9. ✅ **Improved merge conflict UX** - Better error messages with step-by-step resolution guidance
+10. ✅ **Auto-sync summary** - Shows count of installed nodes, downloaded models, synced workflows after pull
+11. ✅ **Force push support** - Added `--force` flag using `--force-with-lease` for safer force pushes
+
 ## Overview
 
 Add `comfydock pull`, `comfydock push`, and `comfydock remote` commands to provide git-aware workflow management with automatic environment synchronization.
@@ -74,25 +81,32 @@ comfydock pull [-r/--remote origin] [--models all|required|skip] [--force] [-e e
 
 #### `comfydock push`
 ```bash
-comfydock push [-r/--remote origin] [-e env]
+comfydock push [-r/--remote origin] [--force] [-e env]
 ```
 
 **Behavior:**
 1. Check for uncommitted changes → **Error if any exist**
 2. Check remote exists → Error with setup guidance
 3. Auto-detect current branch
-4. `git push origin <current_branch>`
+4. `git push origin <current_branch>` (or `git push --force-with-lease` if `--force`)
 5. Print summary with remote URL
 
 **Important:** NO `-m/--message` flag! Users MUST run `comfydock commit -m "msg"` first.
 
 **Note:** Workflow issue validation happens during `comfydock commit`, so push assumes committed changes are ready.
 
+**Force Push:**
+- `--force` flag uses `--force-with-lease` for safer force pushing
+- Automatically fetches remote refs before pushing (silently updates remote state)
+- Useful for overwriting remote when setting up new environment from old repo
+- Prevents accidental overwrites if remote ref changed between fetch and push
+- If fetch fails, continues with force push anyway (user explicitly requested it)
+
 **Error Cases:**
 - Uncommitted changes exist → "Run: comfydock commit -m 'message' first"
 - No changes to push → "Already up to date"
 - No remote configured → Guide user to add remote
-- Push rejected (conflicts) → Guide to pull first
+- Push rejected (conflicts) → Guide to pull first (or use `--force`)
 - Authentication failure → Guide to SSH/HTTPS setup
 
 ---

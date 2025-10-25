@@ -296,6 +296,118 @@ class Environment:
 
         return result
 
+    def pull_and_repair(
+        self,
+        remote: str = "origin",
+        branch: str | None = None,
+        model_strategy: str = "all",
+        model_callbacks=None,
+        node_callbacks=None,
+    ) -> dict:
+        """Pull from remote and auto-repair environment (atomic operation).
+
+        If sync fails, git changes are rolled back automatically.
+        This ensures the environment is never left in a half-pulled state.
+
+        Args:
+            remote: Remote name (default: origin)
+            branch: Branch to pull (default: current)
+            model_strategy: Model download strategy ("all", "required", "skip")
+            model_callbacks: Optional callbacks for model download progress
+            node_callbacks: Optional callbacks for node installation progress
+
+        Returns:
+            Dict with pull results and sync_result
+
+        Raises:
+            CDEnvironmentError: If uncommitted changes exist or sync fails
+            ValueError: If merge conflicts
+            OSError: If pull or repair fails
+        """
+        from ..models.exceptions import CDEnvironmentError
+        from ..utils.git import git_rev_parse, git_reset_hard
+
+        # Check for uncommitted changes
+        if self.git_manager.has_uncommitted_changes():
+            raise CDEnvironmentError(
+                "Cannot pull with uncommitted changes.\n"
+                "  • Commit: comfydock commit -m 'message'\n"
+                "  • Discard: comfydock rollback"
+            )
+
+        # Capture pre-pull state for atomic rollback
+        pre_pull_commit = git_rev_parse(self.cec_path, "HEAD")
+
+        try:
+            # Pull (fetch + merge)
+            logger.info("Pulling from remote...")
+            pull_result = self.git_manager.pull(remote, branch)
+
+            # Auto-repair (restores workflows, installs nodes, downloads models)
+            logger.info("Syncing environment after pull...")
+            sync_result = self.sync(
+                model_strategy=model_strategy,
+                model_callbacks=model_callbacks,
+                node_callbacks=node_callbacks
+            )
+
+            # Check for sync failures
+            if not sync_result.success:
+                logger.error("Sync failed - rolling back git changes")
+                git_reset_hard(self.cec_path, pre_pull_commit)
+                raise CDEnvironmentError(
+                    "Sync failed after pull. Git changes rolled back.\n"
+                    f"Errors: {', '.join(sync_result.errors)}"
+                )
+
+            # Return both pull result and sync result for CLI to display
+            return {
+                **pull_result,
+                'sync_result': sync_result
+            }
+
+        except Exception as e:
+            # Any failure during sync - rollback git changes
+            # (merge conflicts raise before this point, so don't rollback those)
+            if "Merge conflict" not in str(e):
+                logger.error(f"Pull failed: {e} - rolling back git changes")
+                git_reset_hard(self.cec_path, pre_pull_commit)
+            raise
+
+    def push_commits(self, remote: str = "origin", branch: str | None = None, force: bool = False) -> str:
+        """Push commits to remote (requires clean working directory).
+
+        Args:
+            remote: Remote name (default: origin)
+            branch: Branch to push (default: current)
+            force: Use --force-with-lease for force push (default: False)
+
+        Returns:
+            Push output
+
+        Raises:
+            CDEnvironmentError: If uncommitted changes exist
+            ValueError: If no remote or detached HEAD
+            OSError: If push fails
+        """
+        from ..models.exceptions import CDEnvironmentError
+
+        # Check for uncommitted git changes (not workflow sync state)
+        # Push only cares about git state in .cec/, not whether workflows are synced to ComfyUI
+        if self.git_manager.has_uncommitted_changes():
+            raise CDEnvironmentError(
+                "Cannot push with uncommitted changes.\n"
+                "  Run: comfydock commit -m 'message' first"
+            )
+
+        # Note: Workflow issue validation happens during commit (execute_commit checks is_commit_safe).
+        # By the time we reach push, all committed changes have already been validated.
+        # No need to re-check workflow issues here.
+
+        # Push
+        logger.info("Pushing commits to remote...")
+        return self.git_manager.push(remote, branch, force=force)
+
     def rollback(
         self,
         target: str | None = None,

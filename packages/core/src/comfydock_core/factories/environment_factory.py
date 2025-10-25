@@ -272,6 +272,20 @@ class EnvironmentFactory:
             logger.info(f"Cloning {base_url} and extracting subdirectory '{subdir}' to {cec_path}")
             git_clone_subdirectory(base_url, cec_path, subdir, ref=branch)
             # Note: git_clone_subdirectory validates pyproject.toml internally
+
+            # Subdirectory imports lose git history, need to init new repo
+            from ..utils.git import git_init, git_remote_get_url
+            if not (cec_path / ".git").exists():
+                logger.info("Initializing git repository for subdirectory import")
+                git_init(cec_path)
+
+                # WARNING: Do NOT auto-add remote for subdirectory imports!
+                # The base_url points to the parent repo, not a valid push target for this subdirectory.
+                # User must manually set up their own remote if they want to push back to a separate repo.
+                logger.warning(
+                    f"Subdirectory import from {base_url}#{subdir} - no remote configured. "
+                    "Set up a remote manually if you want to push changes: comfydock remote add origin <url>"
+                )
         else:
             logger.info(f"Cloning {base_url} to {cec_path}")
             git_clone(base_url, cec_path, ref=branch)
@@ -282,6 +296,18 @@ class EnvironmentFactory:
                 raise ValueError(
                     "Repository does not contain pyproject.toml - not a valid ComfyDock environment"
                 )
+
+            # Auto-add the clone URL as 'origin' remote
+            # Note: git clone automatically sets up 'origin', but we validate it exists
+            from ..utils.git import git_remote_get_url, git_remote_add
+
+            origin_url = git_remote_get_url(cec_path, "origin")
+            if not origin_url:
+                # Should not happen after git clone, but add as safety
+                logger.info(f"Adding 'origin' remote: {base_url}")
+                git_remote_add(cec_path, "origin", base_url)
+            else:
+                logger.info(f"Remote 'origin' already configured: {origin_url}")
 
         logger.info(f"Successfully prepared environment from git")
 

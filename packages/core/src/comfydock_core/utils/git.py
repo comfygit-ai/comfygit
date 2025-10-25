@@ -678,3 +678,310 @@ def git_ls_files(repo_path: Path) -> str:
     """
     result = _git(["ls-files"], repo_path)
     return result.stdout
+
+# =============================================================================
+# Pull/Push/Remote Operations
+# =============================================================================
+
+def git_fetch(
+    repo_path: Path,
+    remote: str = "origin",
+    timeout: int = 30,
+) -> str:
+    """Fetch from remote.
+
+    Args:
+        repo_path: Path to git repository
+        remote: Remote name (default: origin)
+        timeout: Command timeout in seconds
+
+    Returns:
+        Fetch output
+
+    Raises:
+        ValueError: If remote doesn't exist
+        OSError: If fetch fails (network, auth, etc.)
+    """
+    # Validate remote exists first
+    remote_url = git_remote_get_url(repo_path, remote)
+    if not remote_url:
+        raise ValueError(
+            f"Remote '{remote}' not configured. "
+            f"Add with: comfydock remote add {remote} <url>"
+        )
+
+    cmd = ["fetch", remote]
+    result = _git(cmd, repo_path)
+    return result.stdout
+
+
+def git_merge(
+    repo_path: Path,
+    ref: str,
+    ff_only: bool = False,
+    timeout: int = 30,
+) -> str:
+    """Merge a ref into current branch.
+
+    Args:
+        repo_path: Path to git repository
+        ref: Ref to merge (e.g., "origin/main")
+        ff_only: Only allow fast-forward merges (default: False)
+        timeout: Command timeout in seconds
+
+    Returns:
+        Merge output
+
+    Raises:
+        ValueError: If merge would conflict (when ff_only=True)
+        OSError: If merge fails (including merge conflicts)
+    """
+    cmd = ["merge"]
+    if ff_only:
+        cmd.append("--ff-only")
+    cmd.append(ref)
+
+    try:
+        result = _git(cmd, repo_path)
+        return result.stdout
+    except OSError as e:
+        # _git() converts CDProcessError to OSError, but we can access the original via __cause__
+        original_error = e.__cause__ if isinstance(e.__cause__, CDProcessError) else None
+
+        # Check both error message and stderr for conflict indicators
+        error_str = str(e).lower()
+        stderr_str = ""
+        returncode = None
+
+        if original_error:
+            stderr_str = (original_error.stderr or "").lower()
+            returncode = original_error.returncode
+
+        combined_error = error_str + " " + stderr_str
+
+        if ff_only and "not possible to fast-forward" in combined_error:
+            raise ValueError(
+                f"Cannot fast-forward merge {ref}. "
+                "Remote has diverged - resolve manually."
+            ) from e
+
+        # Check for merge conflict indicators (git uses "CONFLICT" in stderr)
+        # Exit code 1 from git merge typically indicates a conflict
+        if "conflict" in combined_error or returncode == 1:
+            raise OSError(
+                f"Merge conflict with {ref}. Resolve manually:\n"
+                "  1. cd <env>/.cec\n"
+                "  2. git status\n"
+                "  3. Resolve conflicts and commit"
+            ) from e
+        raise
+
+
+def git_pull(
+    repo_path: Path,
+    remote: str = "origin",
+    branch: str | None = None,
+    ff_only: bool = False,
+    timeout: int = 30,
+) -> dict:
+    """Fetch and merge from remote (pull operation).
+
+    Args:
+        repo_path: Path to git repository
+        remote: Remote name (default: origin)
+        branch: Branch name (default: auto-detect current branch)
+        ff_only: Only allow fast-forward merges (default: False)
+        timeout: Command timeout in seconds
+
+    Returns:
+        Dict with keys: 'fetch_output', 'merge_output', 'branch'
+
+    Raises:
+        ValueError: If remote doesn't exist, detached HEAD, or merge conflicts
+        OSError: If fetch/merge fails
+    """
+    # Auto-detect current branch if not specified
+    if not branch:
+        branch = git_current_branch(repo_path)
+
+    # Fetch first
+    fetch_output = git_fetch(repo_path, remote, timeout)
+
+    # Then merge
+    merge_ref = f"{remote}/{branch}"
+    merge_output = git_merge(repo_path, merge_ref, ff_only, timeout)
+
+    return {
+        'fetch_output': fetch_output,
+        'merge_output': merge_output,
+        'branch': branch,
+    }
+
+
+def git_push(
+    repo_path: Path,
+    remote: str = "origin",
+    branch: str | None = None,
+    force: bool = False,
+    timeout: int = 30,
+) -> str:
+    """Push commits to remote.
+
+    Args:
+        repo_path: Path to git repository
+        remote: Remote name (default: origin)
+        branch: Branch to push (default: current branch)
+        force: Use --force-with-lease (default: False)
+        timeout: Command timeout in seconds
+
+    Returns:
+        Push output
+
+    Raises:
+        ValueError: If remote doesn't exist
+        OSError: If push fails (auth, conflicts, network)
+    """
+    # Validate remote exists
+    remote_url = git_remote_get_url(repo_path, remote)
+    if not remote_url:
+        raise ValueError(
+            f"Remote '{remote}' not configured. "
+            f"Add with: comfydock remote add {remote} <url>"
+        )
+
+    # If force pushing, fetch first to update remote refs for --force-with-lease
+    if force:
+        try:
+            git_fetch(repo_path, remote, timeout)
+        except Exception:
+            # If fetch fails, continue anyway - user wants to force push
+            pass
+
+    cmd = ["push", remote]
+
+    if branch:
+        cmd.append(branch)
+
+    if force:
+        cmd.append("--force-with-lease")
+
+    try:
+        result = _git(cmd, repo_path)
+        return result.stdout
+    except CDProcessError as e:
+        error_msg = str(e).lower()
+        if "permission denied" in error_msg or "authentication" in error_msg:
+            raise OSError(
+                "Authentication failed. Check SSH key or HTTPS credentials."
+            ) from e
+        elif "rejected" in error_msg:
+            raise OSError(
+                "Push rejected - remote has changes. Run: comfydock pull first"
+            ) from e
+        raise OSError(f"Push failed: {e}") from e
+
+
+def git_current_branch(repo_path: Path) -> str:
+    """Get current branch name.
+
+    Args:
+        repo_path: Path to git repository
+
+    Returns:
+        Branch name (e.g., "main")
+
+    Raises:
+        ValueError: If in detached HEAD state
+    """
+    result = _git(["rev-parse", "--abbrev-ref", "HEAD"], repo_path)
+    branch = result.stdout.strip()
+
+    if branch == "HEAD":
+        raise ValueError(
+            "Detached HEAD state - cannot pull/push. "
+            "Checkout a branch: git checkout main"
+        )
+
+    return branch
+
+
+def git_reset_hard(repo_path: Path, commit: str) -> None:
+    """Reset repository to specific commit, discarding all changes.
+
+    Used for atomic rollback when pull+repair fails.
+
+    Args:
+        repo_path: Path to git repository
+        commit: Commit SHA to reset to
+
+    Raises:
+        OSError: If git reset fails
+    """
+    _git(["reset", "--hard", commit], repo_path)
+
+
+def git_remote_add(repo_path: Path, name: str, url: str) -> None:
+    """Add a git remote.
+
+    Args:
+        repo_path: Path to git repository
+        name: Remote name (e.g., "origin")
+        url: Remote URL
+
+    Raises:
+        OSError: If remote already exists or add fails
+    """
+    # Check if remote already exists
+    existing_url = git_remote_get_url(repo_path, name)
+    if existing_url:
+        raise OSError(f"Remote '{name}' already exists: {existing_url}")
+
+    _git(["remote", "add", name, url], repo_path)
+
+
+def git_remote_remove(repo_path: Path, name: str) -> None:
+    """Remove a git remote.
+
+    Args:
+        repo_path: Path to git repository
+        name: Remote name (e.g., "origin")
+
+    Raises:
+        ValueError: If remote doesn't exist
+        OSError: If removal fails
+    """
+    # Check if remote exists
+    existing_url = git_remote_get_url(repo_path, name)
+    if not existing_url:
+        raise ValueError(f"Remote '{name}' not found")
+
+    _git(["remote", "remove", name], repo_path)
+
+
+def git_remote_list(repo_path: Path) -> list[tuple[str, str, str]]:
+    """List all git remotes.
+
+    Args:
+        repo_path: Path to git repository
+
+    Returns:
+        List of tuples: [(name, url, type), ...]
+        Example: [("origin", "https://...", "fetch"), ("origin", "https://...", "push")]
+    """
+    result = _git(["remote", "-v"], repo_path, check=False)
+
+    if result.returncode != 0:
+        return []
+
+    remotes = []
+    for line in result.stdout.strip().split('\n'):
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) >= 3:
+            name = parts[0]
+            url = parts[1]
+            remote_type = parts[2].strip('()')
+            remotes.append((name, url, remote_type))
+
+    return remotes
