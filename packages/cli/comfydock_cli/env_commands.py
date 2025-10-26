@@ -344,13 +344,12 @@ class EnvironmentCommands:
 
     def _show_smart_suggestions(self, status, dev_drift):
         """Show contextual suggestions based on current state."""
-        env = self._get_env(type('Args', (), {'target_env': None})())  # Get current env
         suggestions = []
 
         # Differentiate workflow-related nodes from orphan nodes
         uninstalled_workflow_nodes = set()
         for wf in status.workflow.analyzed_workflows:
-            uninstalled_workflow_nodes.update(env.get_uninstalled_nodes(wf.name))
+            uninstalled_workflow_nodes.update(wf.uninstalled_nodes)
 
         orphan_missing_nodes = set(status.comparison.missing_nodes) - uninstalled_workflow_nodes
         has_orphan_nodes = bool(orphan_missing_nodes or status.comparison.extra_nodes)

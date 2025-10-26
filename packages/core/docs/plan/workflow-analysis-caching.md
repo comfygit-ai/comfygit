@@ -1,33 +1,51 @@
-# Workflow Analysis Caching Implementation Plan
+# Workflow Analysis & Resolution Caching Implementation Plan
 
 ## Problem Statement
 
-Currently, every `status`, `commit`, or `workflow resolve` command rescans all workflow JSON files and re-analyzes dependencies, even when workflows haven't changed. This leads to poor performance as the number of workflows scales:
+Currently, every `status`, `commit`, or `workflow resolve` command:
+1. **Re-parses** all workflow JSON files (even when unchanged)
+2. **Re-resolves** all custom nodes and models (even when already in pyproject.toml)
+
+This leads to poor performance as the number of workflows scales:
 
 **Performance Impact:**
-- 1 workflow (100 nodes): ~200ms per scan
-- 10 workflows (1000 nodes): ~2s per scan
-- 50 workflows (5000 nodes): ~10s+ per scan
+- 1 workflow (100 nodes): ~250ms per command (100ms parse + 150ms resolve)
+- 10 workflows (1000 nodes): ~2.5s per command
+- 50 workflows (5000 nodes): ~12s+ per command
 
 **Wasted Work:**
-- Re-parsing JSON (1000+ nodes for large workflows)
+- Re-parsing JSON (1000+ workflow nodes for large workflows)
 - Re-classifying every node as builtin/custom
 - Re-extracting model references from widget values
-- Re-resolving nodes (even if already in pyproject.toml)
-- Re-resolving models (even if already in pyproject.toml)
+- **Re-resolving custom nodes** (loading 37k global mappings, checking pyproject)
+- **Re-resolving models** (querying model index, checking pyproject)
+
+**The Critical Gap in Current Implementation:**
+The existing cache implementation (already in codebase) only caches WorkflowDependencies (the parsing phase). It does NOT cache ResolutionResult (the resolution phase). This means:
+- ✅ Workflow JSON parsing is cached (~100ms saved)
+- ❌ Node resolution still runs every time (~150ms wasted)
+- ❌ Model resolution still runs every time (~50ms wasted)
+- ❌ Global mappings loaded on every status (~200ms wasted on first workflow)
 
 **User Impact:**
 - Users run `status` multiple times while working → every scan is slow
 - `commit` after `status` rescans everything → double penalty
 - Iterative workflow development → constant rescanning
+- **Most time is spent re-resolving, not re-parsing**
 
-## Solution: Content-Addressed SQLite Cache with Session Optimization
+---
 
-Implement a persistent cache that:
-1. **Stores workflow analysis results** in SQLite database
-2. **Uses content hashing** for accurate invalidation
-3. **Optimizes with mtime + size** heuristic for fast common case
-4. **Maintains session cache** for multi-scan within same CLI invocation
+## Solution: Full Workflow Analysis + Resolution Caching with Context-Aware Invalidation
+
+Enhance the existing cache to store BOTH analysis AND resolution results, with smart invalidation based on workflow-specific changes to pyproject.toml.
+
+### Key Concepts
+
+**Terminology Clarification:**
+- **Workflow Node** = A single element in a workflow (e.g., "Mute / Bypass Repeater (rgthree)")
+- **Custom Node Package** = A ComfyUI extension/plugin (e.g., "rgthree-comfy" git repo)
+- **Resolution** = Mapping workflow nodes → custom node packages (using registries, pyproject, etc.)
+- **Model** = AI model file referenced by workflow (e.g., "v1-5-pruned-emaonly.safetensors")
 
 ### Architecture Overview
 
@@ -38,14 +56,16 @@ Implement a persistent cache that:
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ WorkflowManager.analyze_workflow(name)                         │
+│ WorkflowManager.analyze_workflow_cached(name)                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  1. Check session cache (in-memory)          ← Same invocation │
 │  2. Check SQLite cache (persistent)          ← Across commands │
-│     - Fast path: mtime + size match          (~1µs)            │
-│     - Fallback: content hash comparison      (~20ms)           │
-│  3. Cache miss → Full analysis               (~200-500ms)      │
-│  4. Store in both caches                                        │
+│     - Phase 1: Workflow mtime + size         (~1µs)            │
+│     - Phase 2: Pyproject mtime check         (~1µs)            │
+│     - Phase 3: Resolution context hash       (~7ms)            │
+│     - Phase 4: Workflow content hash         (~20ms)           │
+│  3. Cache miss → Full analysis + resolution  (~250ms)          │
+│  4. Store BOTH analysis AND resolution                          │
 └─────────────────────────────────────────────────────────────────┘
                  │
                  ▼
@@ -54,861 +74,693 @@ Implement a persistent cache that:
 ├─────────────────────────────────────────────────────────────────┤
 │  workflow_cache table:                                          │
 │    - environment_name + workflow_name (PK)                      │
-│    - content_hash (normalized workflow hash)                    │
+│    - workflow_hash (normalized workflow content)                │
 │    - workflow_mtime + workflow_size (fast check)                │
-│    - dependencies_json (serialized WorkflowDependencies)        │
+│    - resolution_context_hash (workflow-specific pyproject)      │
+│    - pyproject_mtime (fast reject path)                         │
+│    - dependencies_json (WorkflowDependencies)                   │
+│    - resolution_json (ResolutionResult) ← NEW                   │
+│    - comfydock_version (global invalidator)                     │
 │    - cached_at (timestamp)                                      │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## Implementation Plan
+---
 
-### Phase 1: Core Cache Infrastructure
+## What Needs to Be Cached
 
-#### 1.1 Create Workflow Hash Utility
+### Current Implementation (Phase 1 - DONE ✅)
+```python
+@dataclass
+class WorkflowDependencies:
+    workflow_name: str
+    builtin_nodes: list[WorkflowNode]       # ✅ Cached
+    non_builtin_nodes: list[WorkflowNode]   # ✅ Cached
+    found_models: list[WorkflowNodeWidgetRef]  # ✅ Cached
+```
 
-**File:** `packages/core/src/comfydock_core/utils/workflow_hash.py` (NEW)
+**This caches the PARSING result** (~100ms saved)
 
-**Purpose:** Compute content-based hash for workflows with normalization
+### What's Missing (Phase 2 - TO BE IMPLEMENTED)
+```python
+@dataclass
+class ResolutionResult:
+    workflow_name: str
+    nodes_resolved: list[ResolvedNodePackage]      # ❌ NOT cached
+    nodes_unresolved: list[WorkflowNode]           # ❌ NOT cached
+    nodes_ambiguous: list[list[ResolvedNodePackage]]  # ❌ NOT cached
+    models_resolved: list[ResolvedModel]           # ❌ NOT cached
+    models_unresolved: list[WorkflowNodeWidgetRef] # ❌ NOT cached
+    models_ambiguous: list[list[ResolvedModel]]    # ❌ NOT cached
+```
 
-**Key Functions:**
-- `compute_workflow_hash(workflow_path: Path) -> str`
-  - Load workflow JSON via WorkflowRepository
-  - Normalize volatile fields (UI state, revision counters, random seeds)
-  - Compute blake3 hash (16-char hex = 64-bit)
-  - Returns: `"a1b2c3d4e5f6g7h8"`
-
-- `_normalize_workflow_for_hashing(workflow: dict) -> dict`
-  - **Reuse existing logic** from `workflow_manager.py:_normalize_workflow_for_comparison()`
-  - Remove: `extra.ds`, `extra.frontendVersion`, `revision`
-  - Normalize: KSampler seed values when `randomize`/`increment` mode set
-  - Sort keys for deterministic JSON serialization
-
-**Dependencies:**
-- `blake3` (already in project)
-- `WorkflowRepository.load_raw_json()` (@packages/core/src/comfydock_core/repositories/workflow_repository.py:41)
-- Extract normalization from `WorkflowManager._normalize_workflow_for_comparison()` (@packages/core/src/comfydock_core/managers/workflow_manager.py:356)
-
-**Rationale:**
-- Content hashing ensures 100% accuracy (no false positives)
-- Normalization prevents cache misses from UI-only changes
-- blake3 is fast (~20ms for 1MB workflow) and already available
-- 64-bit hash provides sufficient collision resistance for workflow scale
+**This is the RESOLUTION result** (~200ms wasted by not caching)
 
 ---
 
-#### 1.2 Create SQLite Cache Repository
+## Resolution Context: What Affects Resolution Results
 
-**File:** `packages/core/src/comfydock_core/caching/workflow_cache.py` (NEW)
+Resolution results depend on external state beyond the workflow file itself. We need to track this "resolution context" to know when to invalidate the cache.
 
-**Purpose:** Persistent storage for workflow analysis results
+### 1. Custom Node Resolution Inputs
 
-**Database Schema:**
+#### 1.1 Custom Node Mappings (from pyproject.toml)
+**Location:** `[tool.comfydock.workflows.<workflow_name>.custom_node_map]`
+
+```toml
+[tool.comfydock.workflows.my_workflow.custom_node_map]
+"Mute / Bypass Repeater (rgthree)" = "rgthree-comfy"
+"Optional Node" = false  # marked as optional
+```
+
+**Impact:** Priority 1 resolution - overrides all other methods
+**Invalidation:** Change to ANY mapping for nodes in THIS workflow
+
+#### 1.2 Declared Custom Node Packages (from pyproject.toml)
+**Source:** `PyprojectManager.nodes.get_existing()`
+
+Returns custom node packages declared in `[project.dependencies]` or `[tool.uv.sources]`
+
+**Impact:** When multiple packages could provide a node, prefer already-declared ones
+**Invalidation:** Change to package declarations for nodes THIS workflow uses
+
+#### 1.3 Node Properties (embedded in workflow JSON)
+**Source:** `WorkflowNode.properties.cnr_id`
+
+```json
+{
+  "properties": {
+    "cnr_id": "rgthree-comfy",
+    "ver": "f754c4765849aa748abb35a1f030a5ed6474a69b"
+  }
+}
+```
+
+**Impact:** Priority 2 resolution - embedded package ID
+**Invalidation:** Part of workflow content hash (already handled ✅)
+
+#### 1.4 Global Node Mappings (static data)
+**Source:** `global_node_mappings.json.gz` (37,437 node signatures → 3,706 packages)
+
+**Impact:** Priority 3 resolution - fallback lookup
+**Invalidation:** Only changes with comfydock version upgrade
+
+### 2. Model Resolution Inputs
+
+#### 2.1 Previous Model Resolutions (from pyproject.toml)
+**Location:** `[tool.comfydock.workflows.<workflow_name>.models]`
+
+```toml
+[[tool.comfydock.workflows.my_workflow.models]]
+hash = "b83fd660ccfcf796"
+relative_path = "checkpoints/v1-5.safetensors"
+status = "resolved"
+nodes = [{node_id = "4", node_type = "CheckpointLoaderSimple", ...}]
+```
+
+**Impact:** Priority 0 resolution - return cached model resolution
+**Invalidation:** Change to ANY model entry for THIS workflow
+
+#### 2.2 Model Repository Index (SQLite database)
+**Source:** `ModelRepository.get_all_models()`
+
+**Impact:** Fallback strategies (exact path, case-insensitive, filename match)
+**Invalidation:** New models added/removed that match THIS workflow's references
+
+### 3. What Doesn't Need Invalidation
+
+- **Global node mappings** - static data, only changes with package upgrade
+- **Model config** - static data, only changes with package upgrade
+- **Node properties** - embedded in workflow JSON (already in content hash)
+
+**Solution:** Include `comfydock_core.__version__` as global invalidator
+
+---
+
+## Resolution Context Hashing Strategy
+
+Instead of invalidating ALL workflows when pyproject.toml changes, compute a **workflow-specific** hash of only the parts that affect THIS workflow.
+
+### Context Hash Components
+
+```python
+def compute_resolution_context_hash(
+    dependencies: WorkflowDependencies,
+    workflow_name: str
+) -> str:
+    """Compute hash of resolution context for this specific workflow.
+
+    Only includes pyproject data that affects THIS workflow's resolution.
+    """
+    context = {}
+
+    # 1. Custom node mappings for nodes in THIS workflow
+    node_types = {n.type for n in dependencies.non_builtin_nodes}
+    custom_map = pyproject.workflows.get_custom_node_map(workflow_name)
+    context["custom_mappings"] = {
+        node_type: custom_map[node_type]
+        for node_type in node_types
+        if node_type in custom_map
+    }
+
+    # 2. Declared packages for nodes THIS workflow uses
+    # (Need to map node types to packages first)
+    declared_packages = pyproject.nodes.get_existing()
+
+    relevant_packages = set()
+    for node in dependencies.non_builtin_nodes:
+        # Check custom mapping
+        if node.type in context["custom_mappings"]:
+            pkg = context["custom_mappings"][node.type]
+            if isinstance(pkg, str):
+                relevant_packages.add(pkg)
+        # Check cnr_id in properties
+        elif node.properties and node.properties.get('cnr_id'):
+            relevant_packages.add(node.properties['cnr_id'])
+
+    context["declared_packages"] = {
+        pkg: {
+            "version": declared_packages[pkg].version,
+            "git_ref": declared_packages[pkg].git_ref
+        }
+        for pkg in relevant_packages
+        if pkg in declared_packages
+    }
+
+    # 3. Model entries from pyproject for THIS workflow
+    workflow_models = pyproject.workflows.get_workflow_models(workflow_name)
+    model_pyproject_data = {}
+    for manifest_model in workflow_models:
+        for ref in manifest_model.nodes:
+            ref_key = f"{ref.node_id}_{ref.widget_index}"
+            model_pyproject_data[ref_key] = {
+                "hash": manifest_model.hash,
+                "status": manifest_model.status,
+                "criticality": manifest_model.criticality,
+                "sources": manifest_model.sources
+            }
+    context["workflow_models_pyproject"] = model_pyproject_data
+
+    # 4. Model index subset (only models THIS workflow references)
+    model_index_subset = {}
+    for model_ref in dependencies.found_models:
+        filename = Path(model_ref.widget_value).name
+        models = model_repository.find_by_filename(filename)
+        if models:
+            model_index_subset[filename] = [m.hash for m in models]
+    context["model_index_subset"] = model_index_subset
+
+    # 5. Comfydock version (global invalidator)
+    context["comfydock_version"] = comfydock_core.__version__
+
+    # Hash the normalized context
+    context_json = json.dumps(context, sort_keys=True)
+    return blake3(context_json.encode()).hexdigest()[:16]
+```
+
+### Cache Lookup Strategy with Context Checking
+
+```python
+def get_cached_workflow_analysis(
+    env_name: str,
+    workflow_name: str,
+    workflow_path: Path
+) -> CachedWorkflowAnalysis | None:
+    """Get cached analysis + resolution with smart invalidation."""
+
+    # Phase 1: Session cache check
+    session_key = f"{env_name}:{workflow_name}"
+    if session_key in self._session_cache:
+        return self._session_cache[session_key]
+
+    # Phase 2: Check workflow mtime + size (fast path)
+    stat = workflow_path.stat()
+    cached = self._query_by_mtime_size(env_name, workflow_name, stat)
+
+    if not cached:
+        # Workflow file changed - check content hash
+        workflow_hash = compute_workflow_hash(workflow_path)
+        cached = self._query_by_content_hash(env_name, workflow_name, workflow_hash)
+
+        if not cached:
+            return None  # Cache miss - workflow content changed
+
+    # Phase 3: Workflow content matched, now check resolution context
+
+    # Quick reject: If pyproject.toml hasn't been touched, context can't have changed
+    pyproject_mtime = self.pyproject_path.stat().st_mtime
+    if pyproject_mtime == cached.pyproject_mtime:
+        # Nothing changed - instant hit
+        self._session_cache[session_key] = cached
+        return cached
+
+    # Pyproject changed - need to check if it affects THIS workflow
+    current_context_hash = compute_resolution_context_hash(
+        cached.dependencies,
+        workflow_name
+    )
+
+    if current_context_hash == cached.resolution_context_hash:
+        # Pyproject changed but not for THIS workflow - still valid
+        # Update pyproject_mtime to avoid future recomputation
+        self._update_pyproject_mtime(env_name, workflow_name, pyproject_mtime)
+        self._session_cache[session_key] = cached
+        return cached
+
+    # Context changed - resolution is stale
+    # Return dependencies (still valid) but signal resolution needed
+    return CachedWorkflowAnalysis(
+        dependencies=cached.dependencies,
+        resolution=None,  # Stale - needs re-resolution
+        needs_reresolution=True
+    )
+```
+
+---
+
+## Updated Database Schema
+
 ```sql
 CREATE TABLE IF NOT EXISTS workflow_cache (
     workflow_name TEXT NOT NULL,
     environment_name TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
-    workflow_mtime REAL NOT NULL,      -- Fast invalidation check
-    workflow_size INTEGER NOT NULL,    -- Fast invalidation check
-    dependencies_json TEXT NOT NULL,   -- Serialized WorkflowDependencies
-    cached_at INTEGER NOT NULL,        -- Unix timestamp
+
+    -- Workflow content tracking
+    workflow_hash TEXT NOT NULL,              -- Content hash (normalized)
+    workflow_mtime REAL NOT NULL,             -- Fast path check
+    workflow_size INTEGER NOT NULL,           -- Fast path check
+
+    -- Resolution context tracking (NEW)
+    resolution_context_hash TEXT NOT NULL,    -- Workflow-specific pyproject hash
+    pyproject_mtime REAL NOT NULL,            -- Fast reject path
+    comfydock_version TEXT NOT NULL,          -- Global invalidator
+
+    -- Cached data
+    dependencies_json TEXT NOT NULL,          -- WorkflowDependencies
+    resolution_json TEXT NOT NULL,            -- ResolutionResult (NEW)
+
+    -- Metadata
+    cached_at INTEGER NOT NULL,
+
     PRIMARY KEY (environment_name, workflow_name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_workflow_hash
-ON workflow_cache(environment_name, content_hash);
+ON workflow_cache(environment_name, workflow_hash);
+
+CREATE INDEX IF NOT EXISTS idx_resolution_context
+ON workflow_cache(environment_name, resolution_context_hash);
 ```
-
-**Class: `WorkflowCacheRepository`**
-
-Methods:
-- `__init__(db_path: Path)`
-  - Initialize SQLiteManager
-  - Create schema (versioned like model_repository)
-  - Initialize session cache dict
-
-- `get(env_name: str, workflow_name: str, workflow_path: Path) -> WorkflowDependencies | None`
-  - **Phase 1:** Check session cache (same CLI invocation)
-    - Key: `f"{env_name}:{workflow_name}"`
-    - Return if found
-
-  - **Phase 2:** Fast heuristic check (mtime + size)
-    ```python
-    stat = workflow_path.stat()
-    query = """
-        SELECT content_hash, dependencies_json
-        FROM workflow_cache
-        WHERE environment_name = ? AND workflow_name = ?
-          AND workflow_mtime = ? AND workflow_size = ?
-    """
-    # If match → deserialize and return
-    ```
-
-  - **Phase 3:** Content hash fallback
-    ```python
-    current_hash = compute_workflow_hash(workflow_path)
-    query = """
-        SELECT dependencies_json
-        FROM workflow_cache
-        WHERE environment_name = ? AND workflow_name = ?
-          AND content_hash = ?
-    """
-    # If match → deserialize, update session cache, return
-    ```
-
-  - **Return:** `None` on cache miss
-
-- `set(env_name: str, workflow_name: str, workflow_path: Path, dependencies: WorkflowDependencies)`
-  - Compute content hash
-  - Get file stats (mtime, size)
-  - Serialize WorkflowDependencies to JSON
-  - INSERT OR REPLACE into database
-  - Update session cache
-
-- `invalidate(env_name: str, workflow_name: str | None = None)`
-  - Delete specific workflow or all workflows in environment
-  - Clear session cache
-
-- `get_stats(env_name: str | None = None) -> dict`
-  - Return cache statistics (hit rate, entry count, total size)
-  - Useful for debugging and monitoring
-
-**Dependencies:**
-- `SQLiteManager` (@packages/core/src/comfydock_core/infrastructure/sqlite_manager.py)
-- `WorkflowDependencies` (@packages/core/src/comfydock_core/models/workflow.py:473)
-- `compute_workflow_hash()` from workflow_hash.py
-
-**Serialization Strategy:**
-```python
-# Store
-dependencies_json = json.dumps(asdict(dependencies))
-
-# Load
-dependencies = WorkflowDependencies(**json.loads(dependencies_json))
-```
-
-**Rationale:**
-- SQLite provides ACID guarantees (no corruption)
-- Indexed queries are O(log n) fast
-- Consistent with existing model_repository pattern
-- Session cache eliminates redundant SQLite queries within same command
-- mtime + size heuristic provides ~1µs fast path for 99% of cases
 
 ---
 
-### Phase 2: Integration with WorkflowManager
+## Cache Invalidation Scenarios
 
-#### 2.1 Inject Cache into WorkflowManager
+### Scenario 1: User adds unrelated custom node package
+```
+Workflow A uses: ["rgthree-comfy"]
+Workflow B uses: ["comfyui-depthflow-nodes"]
+
+User runs: comfydock add comfyui-animatediff
+```
+
+**Workflow A context:**
+```python
+{
+    "declared_packages": {"rgthree-comfy": {...}},  # unchanged
+    "workflow_models_pyproject": {...}  # unchanged
+}
+```
+**Result:** Hash UNCHANGED → Cache HIT ✅
+
+### Scenario 2: User updates git ref for package workflow uses
+```
+Workflow A uses custom node from: rgthree-comfy @ abc123
+
+User edits pyproject: rgthree-comfy @ def456
+```
+
+**Workflow A context:**
+```python
+{
+    "declared_packages": {
+        "rgthree-comfy": {"git_ref": "def456"}  # CHANGED
+    }
+}
+```
+**Result:** Hash CHANGED → Re-resolve ✅
+
+### Scenario 3: User marks model as optional
+```
+Workflow A model entry changes:
+  criticality: null → "optional"
+```
+
+**Workflow A context:**
+```python
+{
+    "workflow_models_pyproject": {
+        "ref_10_0": {"criticality": "optional"}  # CHANGED
+    }
+}
+```
+**Result:** Hash CHANGED → Re-resolve ✅
+
+### Scenario 4: User downloads new model
+```
+Workflow A references: "v1-5.safetensors" (currently missing)
+
+User downloads: v1-5.safetensors
+```
+
+**Workflow A context:**
+```python
+{
+    "model_index_subset": {
+        "v1-5.safetensors": ["abc123"]  # NEW
+    }
+}
+```
+**Result:** Hash CHANGED → Re-resolve ✅
+
+---
+
+## Implementation Plan
+
+### Phase 1: Enhance Cache Schema (v1 → v2 migration)
+
+**File:** `packages/core/src/comfydock_core/caching/workflow_cache.py`
+
+**Changes:**
+1. Update schema to v2 with new fields:
+   - `resolution_context_hash TEXT NOT NULL`
+   - `pyproject_mtime REAL NOT NULL`
+   - `resolution_json TEXT NOT NULL`
+   - `comfydock_version TEXT NOT NULL`
+
+2. Add migration logic:
+```python
+def migrate_schema(self, from_version: int, to_version: int):
+    if from_version < 2:
+        # Drop v1 cache (resolution not cached - safe to rebuild)
+        self.sqlite.execute_write("DROP TABLE IF EXISTS workflow_cache")
+        self._create_v2_schema()
+```
+
+3. Update `set()` method to store resolution:
+```python
+def set(
+    self,
+    env_name: str,
+    workflow_name: str,
+    workflow_path: Path,
+    dependencies: WorkflowDependencies,
+    resolution: ResolutionResult,  # NEW
+    resolution_context_hash: str,  # NEW
+):
+    # ... existing code ...
+    resolution_json = self._serialize_resolution(resolution)
+    pyproject_mtime = self.pyproject_path.stat().st_mtime
+    comfydock_version = comfydock_core.__version__
+
+    # Store all data
+    # ...
+```
+
+4. Update `get()` method with context checking:
+```python
+def get(...) -> CachedWorkflowAnalysis | None:
+    # Phase 1: Session cache
+    # Phase 2: mtime + size check
+    # Phase 3: Content hash fallback
+    # Phase 4: Resolution context check (NEW)
+    # Phase 5: Return result or signal re-resolution needed
+```
+
+### Phase 2: Add Resolution Context Computation
 
 **File:** `packages/core/src/comfydock_core/managers/workflow_manager.py`
 
 **Changes:**
 
-1. **Constructor Update** (@workflow_manager.py:55)
+1. Add method to compute resolution context:
 ```python
-def __init__(
+def _compute_resolution_context_hash(
     self,
-    comfyui_path: Path,
-    cec_path: Path,
-    pyproject: PyprojectManager,
-    model_repository: ModelRepository,
-    node_mapping_repository: NodeMappingsRepository,
-    model_downloader: ModelDownloader,
-    workflow_cache: WorkflowCacheRepository,  # NEW
-    environment_name: str,                     # NEW - for cache keys
-):
-    # ... existing init ...
-    self.workflow_cache = workflow_cache
-    self.environment_name = environment_name
+    dependencies: WorkflowDependencies,
+    workflow_name: str
+) -> str:
+    """Compute workflow-specific resolution context hash."""
+    # Implementation as shown above
 ```
 
-2. **Update analyze_workflow()** (@workflow_manager.py:592)
+2. Update workflow analysis to cache BOTH:
 ```python
-def analyze_workflow(self, name: str) -> WorkflowDependencies:
-    """Analyze a single workflow for dependencies - with caching.
+def analyze_workflow_cached(self, name: str) -> tuple[WorkflowDependencies, ResolutionResult]:
+    """Analyze and resolve workflow with full caching."""
 
-    Args:
-        name: Workflow name
+    # Check cache
+    cached = self.workflow_cache.get(...)
 
-    Returns:
-        WorkflowDependencies
+    if cached and not cached.needs_reresolution:
+        return (cached.dependencies, cached.resolution)
 
-    Raises:
-        FileNotFoundError if workflow not found
-    """
-    workflow_path = self.get_workflow_path(name)
+    if cached and cached.needs_reresolution:
+        # Workflow content valid, but resolution stale
+        dependencies = cached.dependencies
+    else:
+        # Full miss - analyze workflow
+        dependencies = self._analyze_workflow_impl(name)
 
-    # Check cache first
-    cached = self.workflow_cache.get(
-        env_name=self.environment_name,
-        workflow_name=name,
-        workflow_path=workflow_path
-    )
+    # Resolve (either from cache miss or stale resolution)
+    resolution = self.resolve_workflow(dependencies)
 
-    if cached is not None:
-        logger.debug(f"Cache HIT for workflow '{name}'")
-        return cached
-
-    logger.debug(f"Cache MISS for workflow '{name}' - running full analysis")
-
-    # Cache miss - run full analysis
-    dependencies = self._analyze_workflow_impl(name, workflow_path)
-
-    # Store in cache
+    # Compute context and cache
+    context_hash = self._compute_resolution_context_hash(dependencies, name)
     self.workflow_cache.set(
         env_name=self.environment_name,
         workflow_name=name,
         workflow_path=workflow_path,
-        dependencies=dependencies
+        dependencies=dependencies,
+        resolution=resolution,
+        resolution_context_hash=context_hash
     )
 
-    return dependencies
+    return (dependencies, resolution)
+```
 
-def _analyze_workflow_impl(
+3. Update callers to use new method:
+```python
+# OLD
+def analyze_single_workflow_status(self, name: str):
+    dependencies = self.analyze_workflow(name)  # Only cached parsing
+    resolution = self.resolve_workflow(dependencies)  # Always runs
+
+# NEW
+def analyze_single_workflow_status(self, name: str):
+    dependencies, resolution = self.analyze_workflow_cached(name)  # Both cached!
+```
+
+### Phase 3: Pass Dependencies to Cache
+
+**File:** `packages/core/src/comfydock_core/caching/workflow_cache.py`
+
+The cache needs access to pyproject and model_repository to compute resolution context.
+
+**Option A:** Pass managers to cache constructor:
+```python
+def __init__(
     self,
-    name: str,
-    workflow_path: Path
-) -> WorkflowDependencies:
-    """Internal implementation - extracted from analyze_workflow().
-
-    This is the existing analysis logic, now private.
-    """
-    parser = WorkflowDependencyParser(workflow_path)
-    deps = parser.analyze_dependencies()
-    return deps
+    db_path: Path,
+    pyproject_manager: PyprojectManager,  # NEW
+    model_repository: ModelRepository      # NEW
+):
 ```
 
-3. **Cache Invalidation Hooks**
-
-Add cache invalidation when workflows change:
-
+**Option B:** Compute context in WorkflowManager, pass to cache:
 ```python
-def copy_all_workflows(self) -> dict[str, Path | None]:
-    """Copy ALL workflows from ComfyUI to .cec for commit.
+# In workflow_manager.py
+context_hash = self._compute_resolution_context_hash(dependencies, workflow_name)
 
-    Returns:
-        Dictionary of workflow names to Path
-    """
-    results = {}
-
-    # ... existing copy logic ...
-
-    # NEW: Invalidate cache for modified/deleted workflows
-    for name in results:
-        if results[name] is None or results[name] == "deleted":
-            self.workflow_cache.invalidate(
-                env_name=self.environment_name,
-                workflow_name=name
-            )
-
-    return results
+# Pass pre-computed hash to cache
+cache.set(..., resolution_context_hash=context_hash)
 ```
 
-**Rationale:**
-- Minimal changes to existing API (analyze_workflow signature unchanged)
-- Cache logic isolated to single method
-- Invalidation ensures cache accuracy
-- Logger output provides visibility for debugging
-
----
-
-#### 2.2 Update Factory to Provide Cache
-
-**File:** `packages/core/src/comfydock_core/factories/environment_factory.py`
-
-**Changes:**
-
-1. **Import cache repository** (top of file)
-```python
-from comfydock_core.caching.workflow_cache import WorkflowCacheRepository
-```
-
-2. **Create cache instance in factory** (@environment_factory.py - in create method)
-```python
-def create(
-    self,
-    name: str,
-    comfyui_path: Path,
-    cec_path: Path,
-    # ... other params ...
-) -> Environment:
-    # ... existing code ...
-
-    # NEW: Create workflow cache
-    cache_db_path = self.workspace.paths.cache / "workflows.db"
-    workflow_cache = WorkflowCacheRepository(cache_db_path)
-
-    # Create workflow manager with cache
-    workflow_manager = WorkflowManager(
-        comfyui_path=comfyui_path,
-        cec_path=cec_path,
-        pyproject=pyproject,
-        model_repository=model_repository,
-        node_mapping_repository=node_mapping_repository,
-        model_downloader=model_downloader,
-        workflow_cache=workflow_cache,        # NEW
-        environment_name=name,                 # NEW
-    )
-
-    # ... rest of factory code ...
-```
-
-**Dependencies:**
-- `Workspace.paths.cache` (@packages/core/src/comfydock_core/core/workspace.py:89)
-
-**Rationale:**
-- Factory handles dependency injection
-- Cache is workspace-scoped (shared across all environments)
-- Environment name provides cache namespace
-
----
-
-### Phase 3: Testing & Validation
-
-#### 3.1 Unit Tests
-
-**File:** `packages/core/tests/caching/test_workflow_cache.py` (NEW)
-
-**Test Cases:**
-
-1. **test_cache_miss_returns_none**
-   - Query cache for non-existent workflow
-   - Verify returns None
-
-2. **test_cache_hit_after_set**
-   - Set workflow analysis in cache
-   - Query same workflow
-   - Verify returns cached data
-   - Verify session cache populated
-
-3. **test_cache_invalidation_on_content_change**
-   - Cache workflow analysis
-   - Modify workflow content (change node)
-   - Query cache
-   - Verify returns None (cache miss)
-
-4. **test_cache_hit_on_mtime_match**
-   - Cache workflow
-   - Query again without changing file
-   - Verify fast path (mtime match)
-   - Measure query time < 1ms
-
-5. **test_cache_hit_after_touch_only**
-   - Cache workflow
-   - Touch file (change mtime, same content)
-   - Query cache
-   - Verify returns cached (hash fallback works)
-
-6. **test_session_cache_isolation**
-   - Create two cache instances
-   - Set in cache A
-   - Query in cache B
-   - Verify SQLite shared, session cache isolated
-
-7. **test_multi_environment_isolation**
-   - Cache same workflow name in env1 and env2
-   - Verify independent cache entries
-   - Verify no cross-contamination
-
-8. **test_normalization_ignores_ui_changes**
-   - Cache workflow
-   - Change only UI state (pan/zoom)
-   - Query cache
-   - Verify cache hit (normalization worked)
-
-9. **test_cache_survives_restart**
-   - Cache workflow in instance A
-   - Create new instance B (same db_path)
-   - Query in instance B
-   - Verify cache persisted
-
-10. **test_invalidate_specific_workflow**
-    - Cache multiple workflows
-    - Invalidate one workflow
-    - Verify others still cached
-
----
-
-#### 3.2 Integration Tests
-
-**File:** `packages/core/tests/integration/test_workflow_caching_integration.py` (NEW)
-
-**Test Cases:**
-
-1. **test_status_command_uses_cache**
-   - Create environment with workflows
-   - Run status command (cold cache)
-   - Run status again (warm cache)
-   - Verify second run faster (log inspection)
-
-2. **test_commit_after_status_uses_cache**
-   - Run status command
-   - Run commit command immediately
-   - Verify commit doesn't re-analyze (session cache)
-
-3. **test_cache_invalidation_on_workflow_edit**
-   - Run status (cache workflows)
-   - Edit workflow JSON
-   - Run status again
-   - Verify edited workflow re-analyzed
-   - Verify other workflows still cached
-
-4. **test_resolve_command_uses_cache**
-   - Run workflow resolve
-   - Run status after
-   - Verify status uses cache from resolve
-
-5. **test_cache_performance_with_many_workflows**
-   - Create 20 workflows
-   - Run status (cold cache) - measure time
-   - Run status again (warm cache) - measure time
-   - Verify warm cache >10x faster
-
----
-
-#### 3.3 Performance Benchmarks
-
-**File:** `packages/core/tests/benchmarks/test_workflow_cache_performance.py` (NEW)
-
-**Benchmarks:**
-
-1. **benchmark_cache_hit_latency**
-   - Measure time for cache hit
-   - Target: < 1ms (mtime path)
-
-2. **benchmark_hash_computation**
-   - Measure hash computation for various workflow sizes
-   - 100 nodes: < 10ms
-   - 500 nodes: < 30ms
-   - 1000 nodes: < 50ms
-
-3. **benchmark_full_analysis_vs_cache**
-   - Compare full analysis vs cache hit
-   - Measure speedup factor
-   - Target: >20x faster for cache hit
-
-4. **benchmark_session_cache_effectiveness**
-   - Simulate status → commit sequence
-   - Measure cache reuse rate
-   - Target: 100% cache hit for commit
-
----
-
-### Phase 4: Migration & Rollout
-
-#### 4.1 Database Migration Strategy
-
-**Versioning:** Follow model_repository pattern
-
-```python
-# workflow_cache.py
-SCHEMA_VERSION = 1
-
-CREATE_SCHEMA_INFO_TABLE = """
-CREATE TABLE IF NOT EXISTS schema_info (
-    version INTEGER PRIMARY KEY
-)
-"""
-
-def ensure_schema(self):
-    """Create database schema if needed."""
-    # Create tables...
-
-    # Check version
-    current_version = self.get_schema_version()
-    if current_version != SCHEMA_VERSION:
-        self.migrate_schema(current_version, SCHEMA_VERSION)
-
-def migrate_schema(self, from_version: int, to_version: int):
-    """Migrate database schema between versions."""
-    if from_version == to_version:
-        return
-
-    logger.info(f"Migrating workflow cache schema v{from_version} → v{to_version}")
-
-    # For v0 → v1: Just drop and recreate (cache is ephemeral)
-    self.sqlite.execute_write("DROP TABLE IF EXISTS workflow_cache")
-    # ... recreate tables ...
-```
-
-**Rationale:**
-- Cache is ephemeral (safe to drop/recreate)
-- Versioning prevents corruption on schema changes
-- Consistent with existing model_repository pattern
-
----
-
-#### 4.2 Cache Management Commands
-
-**Future Enhancement:** Add CLI commands for cache management
-
-```bash
-# Clear workflow cache
-comfydock cache clear workflows
-
-# Show cache statistics
-comfydock cache stats
-
-# Rebuild cache for environment
-comfydock cache rebuild
-```
-
-**Implementation location:** `packages/cli/comfydock_cli/global_commands.py`
-
----
-
-### Phase 5: Monitoring & Observability
-
-#### 5.1 Logging Strategy
-
-**Log Levels:**
-- `DEBUG`: Cache hits/misses, hash computation times
-- `INFO`: Cache invalidation events, schema migrations
-- `WARNING`: Cache errors (fallback to full analysis)
-
-**Example Logs:**
-```
-DEBUG: Cache HIT for workflow 'my_workflow' (mtime match, 0.001ms)
-DEBUG: Cache MISS for workflow 'new_workflow' - running full analysis
-INFO: Invalidated cache for 3 modified workflows
-WARNING: Cache read error - falling back to full analysis: <error>
-```
-
----
-
-#### 5.2 Performance Metrics
-
-Track in cache repository:
-- Total queries
-- Cache hits / misses
-- Average hit latency
-- Average miss latency
-- Session cache reuse rate
-
-**Implementation:**
-```python
-class WorkflowCacheRepository:
-    def __init__(self, db_path: Path):
-        # ... existing init ...
-        self._stats = {
-            'queries': 0,
-            'hits': 0,
-            'misses': 0,
-            'session_hits': 0,
-        }
-
-    def get_stats(self) -> dict:
-        total = self._stats['queries']
-        if total == 0:
-            return self._stats
-
-        return {
-            **self._stats,
-            'hit_rate': self._stats['hits'] / total,
-            'session_hit_rate': self._stats['session_hits'] / total,
-        }
-```
+**Recommendation:** Option B - keeps cache layer simple, computation in manager
 
 ---
 
 ## Expected Performance Improvements
 
-### Benchmark Targets
+### Benchmark Targets (Updated)
 
 **Scenario:** 10 workflows, each with 100 nodes
 
-| Operation | Without Cache | With Cache (Cold) | With Cache (Warm) | Speedup |
-|-----------|---------------|-------------------|-------------------|---------|
-| First status | 2000ms | 2000ms | - | 1x |
-| Second status | 2000ms | - | 10ms | 200x |
-| Commit after status | 2000ms | - | 1ms | 2000x |
-| Edit 1 workflow, status | 2000ms | - | 200ms | 10x |
+| Operation | Current (Partial Cache) | With Full Cache | Speedup |
+|-----------|------------------------|-----------------|---------|
+| First status | 2500ms (parse only cached) | 2500ms | 1x |
+| Second status (no changes) | 1500ms (still resolves) | 10ms | 150x |
+| Second status (pyproject changed, different workflow) | 1500ms | 70ms (context check) | 21x |
+| Second status (pyproject changed, affects workflow) | 1500ms | 300ms (re-resolve only) | 5x |
+| Edit 1 workflow, status | 2300ms | 250ms | 9x |
 
-**Session Cache Impact:**
-- status → commit sequence: **100% cache reuse**
-- status → resolve → status: **100% cache reuse**
-- Multiple status calls: **>90% cache reuse**
+### Performance Breakdown
+
+**Current Implementation (v1 - parsing only):**
+```
+Parse workflow JSON:        0ms    (✅ cached)
+Resolve 31 nodes:          200ms   (❌ runs every time)
+  - Load global mappings:  200ms   (one-time per session)
+  - Actual resolution:      30ms   (per workflow)
+Resolve models:             50ms   (❌ runs every time)
+Total:                     250ms   (per workflow, after first)
+```
+
+**With Full Cache (v2 - parsing + resolution):**
+```
+Check workflow mtime:        1µs   (✅ instant)
+Check pyproject mtime:       1µs   (✅ instant, 99% of cases)
+Return cached resolution:    0ms   (✅ instant)
+Total:                      <1ms   (250x improvement!)
+```
+
+**When pyproject changes (but not for this workflow):**
+```
+Check workflow mtime:        1µs
+Check pyproject mtime:       1µs   (changed!)
+Compute context hash:        7ms   (extract relevant pyproject data)
+Context matches:             ✅
+Return cached resolution:    0ms
+Total:                      ~7ms   (35x improvement)
+```
+
+**When context changes (affects this workflow):**
+```
+Check workflow mtime:        1µs
+Check pyproject mtime:       1µs   (changed!)
+Compute context hash:        7ms
+Context changed:             ✅ need re-resolve
+Return cached dependencies:  0ms   (parsing still cached!)
+Re-resolve workflow:        50ms   (no global mappings load)
+Update cache:                1ms
+Total:                     ~59ms   (4x improvement)
+```
 
 ---
 
 ## Implementation Checklist
 
-### Phase 1: Core Infrastructure
-- [ ] Create `utils/workflow_hash.py`
-  - [ ] Implement `compute_workflow_hash()`
-  - [ ] Extract `_normalize_workflow_for_hashing()` from workflow_manager
-  - [ ] Add unit tests for normalization edge cases
-  - [ ] Benchmark hash computation performance
+### Phase 1: Schema Enhancement
+- [ ] Update `workflow_cache.py` schema to v2
+- [ ] Add `resolution_context_hash` field
+- [ ] Add `pyproject_mtime` field
+- [ ] Add `resolution_json` field
+- [ ] Add `comfydock_version` field
+- [ ] Implement v1 → v2 migration
+- [ ] Add resolution serialization/deserialization
 
-- [ ] Create `caching/workflow_cache.py`
-  - [ ] Implement SQLite schema with versioning
-  - [ ] Implement `WorkflowCacheRepository` class
-  - [ ] Add session cache dict
-  - [ ] Implement `get()` with 3-phase lookup
-  - [ ] Implement `set()` with dual cache update
-  - [ ] Implement `invalidate()` method
-  - [ ] Add stats tracking
+### Phase 2: Context Hashing
+- [ ] Add `_compute_resolution_context_hash()` to WorkflowManager
+- [ ] Extract custom node mappings for workflow nodes only
+- [ ] Extract declared packages for workflow nodes only
+- [ ] Extract model pyproject entries for workflow only
+- [ ] Extract model index subset for workflow models only
+- [ ] Include comfydock version in context
 
-### Phase 2: Integration
-- [ ] Update `workflow_manager.py`
-  - [ ] Add cache parameter to constructor
-  - [ ] Add environment_name parameter
-  - [ ] Extract `_analyze_workflow_impl()` private method
-  - [ ] Update `analyze_workflow()` with cache logic
-  - [ ] Add cache invalidation to `copy_all_workflows()`
-  - [ ] Add cache invalidation to workflow modification methods
+### Phase 3: Cache Integration
+- [ ] Update `WorkflowManager.analyze_workflow_cached()` to cache resolution
+- [ ] Update cache `set()` to accept resolution and context hash
+- [ ] Update cache `get()` to check resolution context
+- [ ] Add pyproject mtime fast-reject path
+- [ ] Return partial cache hit (dependencies valid, resolution stale)
 
-- [ ] Update `environment_factory.py`
-  - [ ] Import `WorkflowCacheRepository`
-  - [ ] Create cache instance in factory
-  - [ ] Pass cache to WorkflowManager constructor
-  - [ ] Pass environment name to WorkflowManager
+### Phase 4: Caller Updates
+- [ ] Update `analyze_single_workflow_status()` to use new method
+- [ ] Update all callers to handle `(dependencies, resolution)` tuple
+- [ ] Remove redundant `resolve_workflow()` calls
 
-### Phase 3: Testing
-- [ ] Write unit tests (`test_workflow_cache.py`)
-  - [ ] Test cache miss behavior
-  - [ ] Test cache hit behavior
-  - [ ] Test content invalidation
-  - [ ] Test mtime fast path
-  - [ ] Test hash fallback
-  - [ ] Test session cache isolation
-  - [ ] Test multi-environment isolation
-  - [ ] Test normalization edge cases
-  - [ ] Test cache persistence
-  - [ ] Test invalidation
-
-- [ ] Write integration tests (`test_workflow_caching_integration.py`)
-  - [ ] Test status command caching
-  - [ ] Test commit after status
-  - [ ] Test cache invalidation on edit
-  - [ ] Test resolve command caching
-  - [ ] Test performance with many workflows
-
-- [ ] Write performance benchmarks
-  - [ ] Benchmark cache hit latency
-  - [ ] Benchmark hash computation
-  - [ ] Benchmark full analysis vs cache
-  - [ ] Benchmark session cache effectiveness
-
-### Phase 4: Documentation
-- [ ] Update codebase-map.md with new cache files
-- [ ] Add docstrings to all new methods
-- [ ] Document cache invalidation strategy
-- [ ] Add performance tuning guide
-
-### Phase 5: Monitoring
-- [ ] Add debug logging for cache operations
-- [ ] Add performance metrics tracking
-- [ ] Add cache statistics endpoint
-- [ ] Test logging output in real usage
-
----
-
-## File Reference Summary
-
-### New Files
-1. `packages/core/src/comfydock_core/utils/workflow_hash.py`
-   - Hash computation and normalization
-
-2. `packages/core/src/comfydock_core/caching/workflow_cache.py`
-   - SQLite cache repository
-
-3. `packages/core/tests/caching/test_workflow_cache.py`
-   - Unit tests
-
-4. `packages/core/tests/integration/test_workflow_caching_integration.py`
-   - Integration tests
-
-5. `packages/core/tests/benchmarks/test_workflow_cache_performance.py`
-   - Performance benchmarks
-
-### Modified Files
-1. `packages/core/src/comfydock_core/managers/workflow_manager.py`
-   - Lines to modify: 55 (constructor), 592 (analyze_workflow), 396 (copy_all_workflows)
-   - Extract normalization logic from line 356
-
-2. `packages/core/src/comfydock_core/factories/environment_factory.py`
-   - Add cache creation in factory method
-
-3. `packages/core/docs/codebase-map.md`
-   - Add cache files to Caching section
-
-### Existing Dependencies
-1. `packages/core/src/comfydock_core/infrastructure/sqlite_manager.py`
-   - Used by: workflow_cache.py
-
-2. `packages/core/src/comfydock_core/repositories/workflow_repository.py`
-   - Used by: workflow_hash.py (line 41: load_raw_json)
-
-3. `packages/core/src/comfydock_core/models/workflow.py`
-   - Used by: workflow_cache.py (line 473: WorkflowDependencies)
-
-4. `packages/core/src/comfydock_core/core/workspace.py`
-   - Used by: environment_factory.py (line 89: paths.cache)
+### Phase 5: Testing
+- [ ] Test context hash computation
+- [ ] Test cache hit when workflow unchanged
+- [ ] Test cache hit when pyproject changed (different workflow)
+- [ ] Test re-resolution when context changed
+- [ ] Test re-parsing when workflow changed
+- [ ] Test version mismatch invalidation
+- [ ] Benchmark before/after performance
 
 ---
 
 ## Risk Mitigation
 
-### Risk 1: Cache Corruption
+### Risk 1: Context Hash Computation Cost
+**Issue:** Computing context hash on every lookup adds 7ms overhead
+
 **Mitigation:**
-- SQLite ACID guarantees prevent corruption
-- Schema versioning allows clean migration
-- Cache is ephemeral (can be dropped/rebuilt)
-- Fallback to full analysis on any cache error
+- pyproject_mtime fast-reject skips context computation 99% of time
+- 7ms is still 35x faster than re-resolving (250ms)
+- Only paid when pyproject actually changes
+- Can optimize further if needed (cache context hash keyed by pyproject mtime)
 
-### Risk 2: Hash Collisions
+### Risk 2: Incomplete Context Capture
+**Issue:** Missing a dependency in context hash causes stale cache hits
+
 **Mitigation:**
-- 64-bit blake3 hash provides 1 in 2^64 collision probability
-- For 1 million workflows: ~0.000000003% collision chance
-- If collision: worst case is incorrect cache hit (detectable via testing)
-- Can increase hash length if needed (blake3 supports any length)
+- Comprehensive test coverage of all resolution inputs
+- Include version as global invalidator (catches any missed dependencies)
+- Manual cache clear command available
+- Monitor for user-reported issues
 
-### Risk 3: Cache Stale Data
+### Risk 3: Migration Complexity
+**Issue:** Users lose cache on v1 → v2 migration
+
 **Mitigation:**
-- Content hashing ensures accuracy (100% reliable)
-- mtime + size heuristic is conservative (only trusts exact match)
-- Hash fallback catches mtime-only changes
-- Invalidation hooks on workflow modifications
-- Users can clear cache manually if needed
-
-### Risk 4: Performance Regression
-**Mitigation:**
-- Benchmarks verify cache is faster than no cache
-- Session cache eliminates SQLite overhead for repeated scans
-- mtime fast path is <1µs (negligible overhead)
-- Hash computation only on cache miss (same cost as today)
-- Gradual rollout with feature flag if needed
-
-### Risk 5: Disk Space Usage
-**Mitigation:**
-- WorkflowDependencies JSON is small (~1-10KB per workflow)
-- 100 workflows ≈ 1MB cache size
-- SQLite compression reduces size further
-- Add cache cleanup command for large workspaces
-- Monitor cache size in stats
-
----
-
-## Future Enhancements
-
-### 1. Lazy Resolution Optimization
-Once cache is working, add second-level optimization:
-- Build lookup of known nodes/models from pyproject
-- Skip resolution for known dependencies
-- Only resolve unknowns
-- **Expected impact:** 50-100x faster for resolved workflows
-
-### 2. TTL-Based Invalidation
-Add time-based invalidation for extra safety:
-- Cache entries expire after N hours (configurable)
-- Force re-analysis periodically
-- Useful for catching external changes
-
-### 3. Cache Warmup
-Pre-populate cache on environment creation:
-- Analyze all workflows during setup
-- Background cache refresh on idle
-- Parallel analysis for speed
-
-### 4. Cache Sharing
-Explore team-wide cache sharing:
-- Hash-based cache is content-addressable
-- Could share cache entries via git LFS
-- Requires careful security review
-
-### 5. Incremental Diffing
-For very large workflows (1000+ nodes):
-- Cache intermediate parsing results
-- Diff against cached workflow structure
-- Only re-analyze changed nodes
-- **Complexity:** High, only add if profiling shows need
+- Cache is ephemeral (no data loss, just performance hit once)
+- Migration happens automatically on first run
+- Clear messaging in migration logs
+- Warm cache rebuilds quickly (only affects first status after upgrade)
 
 ---
 
 ## Success Metrics
 
 ### Performance Goals
-- [ ] Cache hit latency: < 1ms (mtime path)
-- [ ] Cache hit latency: < 20ms (hash path)
+- [ ] Cache hit latency: < 1ms (pyproject unchanged)
+- [ ] Cache hit latency: < 10ms (pyproject changed, different workflow)
+- [ ] Cache hit latency: < 100ms (context changed, re-resolve only)
 - [ ] status command with 10 cached workflows: < 50ms total
-- [ ] Second status after first: >20x faster
-- [ ] Session cache reuse: >90% for commit after status
+- [ ] Second status after first: >100x faster
 
 ### Quality Goals
-- [ ] Zero cache corruption incidents
-- [ ] Zero false positive cache hits (wrong data returned)
-- [ ] Cache accuracy: 100% (content hashing guarantee)
-- [ ] Test coverage: >90% for cache code
-- [ ] All benchmarks passing
+- [ ] Zero false cache hits (wrong resolution returned)
+- [ ] Context hash captures all resolution inputs
+- [ ] Test coverage: >90% for context computation
+- [ ] All benchmark targets met
 
 ### User Impact Goals
-- [ ] Users report faster status/commit commands
-- [ ] No user-facing behavior changes (transparent cache)
-- [ ] No new error cases (graceful fallback)
-- [ ] Improved UX for large workspace workflows
+- [ ] Users report dramatically faster status/commit
+- [ ] No surprises (cache invalidates when expected)
+- [ ] Graceful handling of pyproject changes
+- [ ] Clear logging of cache behavior
 
 ---
 
-## Timeline Estimate
+## Notes for Implementation
 
-- **Phase 1 (Core Infrastructure):** 4-6 hours
-  - workflow_hash.py: 1-2 hours
-  - workflow_cache.py: 2-3 hours
-  - Initial testing: 1 hour
+### Key Insights
+1. **Resolution is 80% of the cost** - that's what we need to cache
+2. **Workflow-specific invalidation** - don't invalidate all workflows for one pyproject change
+3. **Lazy context computation** - only compute when pyproject mtime changes
+4. **Partial cache hits** - dependencies valid but resolution stale is common
 
-- **Phase 2 (Integration):** 2-3 hours
-  - workflow_manager.py changes: 1 hour
-  - environment_factory.py changes: 30 min
-  - Integration testing: 1-1.5 hours
+### Critical Path
+1. Get context hash computation right (test thoroughly)
+2. Ensure all resolution inputs are captured
+3. Verify pyproject mtime fast-reject path works
+4. Benchmark to prove actual speedup
 
-- **Phase 3 (Testing):** 3-4 hours
-  - Unit tests: 1-2 hours
-  - Integration tests: 1 hour
-  - Benchmarks: 1 hour
-
-- **Phase 4 (Documentation):** 1 hour
-  - Code documentation: 30 min
-  - Update codebase map: 30 min
-
-**Total:** 10-14 hours for complete implementation
-
----
-
-## Notes for Implementation Session
-
-### Key Decisions Made
-1. **SQLite over JSON files:** Better consistency, performance, and consistency with existing code
-2. **Session cache included:** Critical for status → commit performance
-3. **mtime + size heuristic:** Provides fast path without complexity
-4. **Content hashing required:** 100% accuracy guarantee
-5. **Reuse normalization:** Extract from workflow_manager to avoid duplication
-
-### Critical Path Items
-1. Extract normalization logic cleanly (don't break existing code)
-2. Test hash stability (same workflow = same hash)
-3. Verify cache invalidation hooks catch all modifications
-4. Benchmark before/after to prove performance gain
-5. Test multi-environment isolation thoroughly
-
-### Testing Focus Areas
-1. Normalization edge cases (randomize seeds, UI state)
-2. Cache invalidation on all workflow modifications
-3. Session cache isolation between instances
-4. Multi-environment cache isolation
-5. Performance regression (cache shouldn't slow down misses)
-
-### Potential Gotchas
-1. **Normalization completeness:** Missing a field means false cache misses
-2. **Session cache lifecycle:** Must be instance-scoped, not module-scoped
-3. **Environment name propagation:** Must flow through all factory/manager chains
-4. **SQLite concurrency:** Multiple processes (not threads) need careful testing
-5. **Hash computation cost:** Ensure only done when necessary (mtime short-circuit)
-
-### Debug Tips
-1. Add `COMFYDOCK_CACHE_DEBUG=1` env var for verbose logging
-2. Log cache hit/miss with timing info
-3. Track cache stats in development
-4. Add explicit cache clear command early for testing
-5. Verify normalized workflow JSON in tests (snapshot testing)
+### Implementation Order
+1. Start with schema v2 and migration
+2. Add context hash computation (isolated, testable)
+3. Wire up cache integration
+4. Update callers
+5. Extensive testing and benchmarking

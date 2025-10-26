@@ -132,6 +132,17 @@ class Environment:
         )
 
     @cached_property
+    def workflow_cache(self):
+        """Get workflow cache repository."""
+        from ..caching.workflow_cache import WorkflowCacheRepository
+        cache_db_path = self.workspace_paths.cache / "workflows.db"
+        return WorkflowCacheRepository(
+            cache_db_path,
+            pyproject_manager=self.pyproject,
+            model_repository=self.model_repository
+        )
+
+    @cached_property
     def workflow_manager(self) -> WorkflowManager:
         return WorkflowManager(
             self.comfyui_path,
@@ -139,7 +150,9 @@ class Environment:
             self.pyproject,
             self.model_repository,
             self.node_mapping_repository,
-            self.model_downloader
+            self.model_downloader,
+            self.workflow_cache,
+            self.name
         )
 
     @cached_property
@@ -735,11 +748,8 @@ class Environment:
         Raises:
             FileNotFoundError: If workflow not found
         """
-        # Analyze workflow
-        analysis = self.workflow_manager.analyze_workflow(name)
-
-        # Then do initial resolve
-        result = self.workflow_manager.resolve_workflow(analysis)
+        # Analyze and resolve workflow (both cached for performance)
+        _, result = self.workflow_manager.analyze_and_resolve_workflow(name)
 
         # Apply auto-resolutions (reconcile with pyproject.toml)
         self.workflow_manager.apply_resolution(result)

@@ -6,17 +6,23 @@ from comfydock_core.managers.workflow_manager import WorkflowManager
 
 
 @pytest.fixture
-def workflow_manager():
+def workflow_manager(tmp_path):
     """Create a minimal WorkflowManager for testing normalization."""
     with patch('comfydock_core.managers.workflow_manager.GlobalNodeResolver'):
         with patch('comfydock_core.managers.workflow_manager.ModelResolver'):
+            # Create a mock workflow cache
+            from comfydock_core.caching.workflow_cache import WorkflowCacheRepository
+            cache_db = WorkflowCacheRepository(tmp_path / "workflows.db")
+
             manager = WorkflowManager(
                 comfyui_path=Path("/tmp/comfyui"),
                 cec_path=Path("/tmp/cec"),
                 pyproject=Mock(),
                 model_repository=Mock(),
                 node_mapping_repository=Mock(),
-                model_downloader=Mock()
+                model_downloader=Mock(),
+                workflow_cache=cache_db,
+                environment_name="test-env"
             )
             return manager
 
