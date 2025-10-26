@@ -7,7 +7,6 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-
 from ..analyzers.status_scanner import StatusScanner
 from ..factories.uv_factory import create_uv_for_environment
 from ..logging.logging_config import get_logger
@@ -44,12 +43,7 @@ if TYPE_CHECKING:
         ResolutionResult,
         WorkflowSyncStatus,
     )
-    from ..repositories.model_repository import ModelRepository
-    from ..repositories.node_mappings_repository import NodeMappingsRepository
-    from ..repositories.workspace_config_repository import WorkspaceConfigRepository
-    from ..services.model_downloader import ModelDownloader
     from ..services.node_lookup_service import NodeLookupService
-    from .workspace import WorkspacePaths
 
 logger = get_logger(__name__)
 

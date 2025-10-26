@@ -154,6 +154,13 @@ class WorkflowManager:
                 relative_path=str(resolved.target_path) if resolved.target_path else None  # Target path
             )
             self.pyproject.workflows.add_workflow_model(workflow_name, manifest_model)
+
+            # Invalidate cache so download intent is detected on next resolution
+            self.workflow_cache.invalidate(
+                env_name=self.environment_name,
+                workflow_name=workflow_name
+            )
+
             return
 
         # Build manifest model
@@ -1170,10 +1177,24 @@ class WorkflowManager:
             )
             self.pyproject.models.add_model(global_model)
 
+        # Load existing workflow models to preserve download intents from previous sessions
+        existing_workflow_models = self.pyproject.workflows.get_workflow_models(workflow_name)
+        existing_by_filename = {m.filename: m for m in existing_workflow_models}
+
         # Add unresolved models
         for ref in resolution.models_unresolved:
             category = self._get_category_for_node_ref(ref)
             criticality = self._get_default_criticality(category)
+
+            # Check if this model already has a download intent from a previous session
+            existing = existing_by_filename.get(ref.widget_value)
+            sources = []
+            relative_path = None
+            if existing and existing.status == "unresolved" and existing.sources:
+                # Preserve download intent from previous session
+                sources = existing.sources
+                relative_path = existing.relative_path
+                logger.debug(f"Preserving download intent for '{ref.widget_value}': sources={sources}, path={relative_path}")
 
             manifest_model = ManifestWorkflowModel(
                 filename=ref.widget_value,
@@ -1181,7 +1202,8 @@ class WorkflowManager:
                 criticality=criticality,
                 status="unresolved",
                 nodes=[ref],
-                sources=[]
+                sources=sources,
+                relative_path=relative_path
             )
             manifest_models.append(manifest_model)
 

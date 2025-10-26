@@ -512,7 +512,20 @@ class WorkflowCacheRepository:
         Returns:
             JSON string
         """
+        from pathlib import Path
+
+        def convert_paths(obj):
+            """Recursively convert Path objects to strings for JSON serialization."""
+            if isinstance(obj, Path):
+                return str(obj)
+            elif isinstance(obj, dict):
+                return {k: convert_paths(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [convert_paths(item) for item in obj]
+            return obj
+
         res_dict = asdict(resolution)
+        res_dict = convert_paths(res_dict)
         return json.dumps(res_dict)
 
     def _deserialize_resolution(self, resolution_json: str) -> ResolutionResult:
@@ -681,6 +694,8 @@ class WorkflowCacheRepository:
                     "hash": manifest_model.hash,
                     "status": manifest_model.status,
                     "criticality": manifest_model.criticality,
+                    "sources": manifest_model.sources,
+                    "relative_path": manifest_model.relative_path,
                 }
 
         context["workflow_models_pyproject"] = model_pyproject_data

@@ -70,13 +70,13 @@ class PyprojectManager:
 
     def load(self) -> dict:
         """Load the pyproject.toml file.
-        
+
         Args:
             force_reload: Force reload from disk even if cached
-            
+
         Returns:
             The loaded configuration dictionary
-            
+
         Raises:
             CDPyprojectNotFoundError: If the file doesn't exist
             CDPyprojectInvalidError: If the file is empty or invalid
