@@ -1,25 +1,125 @@
-# Process Management Implementation Plan - REVISED
+# Process Management Implementation Plan - REVISED (Docker-Ready)
 
 **Status:** Ready for Implementation
 **Target:** ComfyDock v2.0.0
-**Architecture:** Background-always with pseudo-foreground mode
+**Architecture:** Background-always with pseudo-foreground mode (Docker-compatible)
 **Breaking Changes:** Yes (background default, requires major version bump)
+**Docker Readiness:** Designed for seamless Docker runtime integration
 
 ## Executive Summary
 
-Implement background process management for ComfyUI with comprehensive logging. All `comfydock run` invocations start ComfyUI as a background daemon. The `--foreground` flag creates a pseudo-foreground experience by streaming logs while monitoring the background process.
+Implement background process management for ComfyUI with comprehensive logging and **Docker-ready abstractions**. All `comfydock run` invocations start ComfyUI as a background daemon (host process now, container later). The `--foreground` flag creates a pseudo-foreground experience by streaming logs while monitoring the background runtime.
 
 **Key Benefits:**
 - Eliminates foreground→background conversion complexity
 - Enables seamless auto-restart for node operations
 - Consistent cross-platform behavior
 - Simplified multi-environment workflows
-- Aligns with future Docker container architecture
+- **Unified API surface for host and Docker runtimes** (critical for roadmap)
+- **Container-like UX today, actual containers tomorrow** (seamless transition)
 
 **Architectural Decisions:**
 - **Return Value Pattern**: Node operations return `NodeOperationResult` with restart recommendations; CLI layer handles all restart logic (avoids circular dependencies)
-- **PID-Only Process Checking**: `is_running()` checks only PID (fast, reliable). HTTP health checks are **optional** and used only for display in `status` command (adds confidence, not required for core logic)
-- **Pre-Customer MVP Context**: This is a major breaking change (v1.0.0 → v2.0.0), but acceptable since we're pre-customer and can make sweeping improvements
+- **PID-Only Process Checking**: `is_running()` checks only PID for host (fast, reliable). Docker will use container status checks. HTTP health checks are **optional** and used only for display
+- **Runtime Abstraction**: Code structured for easy Docker transition via runtime_type field and swappable utility functions
+- **Child-Managed Logging**: Child process opens own log file (works for Docker stdout redirection)
+- **Pre-Customer MVP Context**: Major breaking change acceptable; no users yet, can make sweeping improvements
+
+**Docker Architecture (Future):**
+- Single image: `comfydock/comfyui:latest` (no rebuilds needed)
+- Workspace mount: User's `~/.comfydock` mounted to container `/workspace`
+- Shared caches: uv cache, model cache, registry cache persist between host and container
+- Same commands: `comfydock run`, `logs`, `stop`, `restart` work identically for both runtimes
+
+---
+
+## Why Docker-Ready Architecture Matters
+
+This plan implements **more than just background process management**—it creates a **unified runtime abstraction** that will seamlessly support Docker containers without major refactoring.
+
+### The Problem Without Abstraction
+
+**Bad approach (requires full rewrite for Docker):**
+```python
+# Environment.py - tightly coupled to host processes
+def run(self):
+    process = subprocess.Popen(["python", "main.py"])  # Host-only
+    self.pid = process.pid
+    return process
+```
+
+When Docker arrives, this requires:
+- Rewriting all process management code
+- Changing state file format
+- Breaking existing environments
+- ~2-3 weeks of refactoring + testing
+
+### Our Approach (Docker-Ready Today)
+
+**Good approach (Docker support is just a new code path):**
+```python
+# Environment.py - runtime-agnostic
+def run(self):
+    if runtime_type == "host":
+        state = _run_host()  # Current implementation
+    elif runtime_type == "docker":
+        state = _run_docker()  # Future implementation (3-5 days to add)
+    self._write_state(state)
+```
+
+When Docker arrives:
+- Implement `_run_docker()` (1 day)
+- Add `--runtime` flag (1 day)
+- Test both modes (1-2 days)
+- **Total: 3-5 days** (vs. 2-3 weeks for rewrite)
+
+### Concrete Benefits
+
+1. **Same user commands for both runtimes:**
+   ```bash
+   # Host mode (today)
+   comfydock run --env prod
+   comfydock logs --follow
+   comfydock restart
+
+   # Docker mode (tomorrow, same commands)
+   comfydock run --env prod --runtime docker
+   comfydock logs --follow  # Uses 'docker logs'
+   comfydock restart  # Restarts container
+   ```
+
+2. **State file works for both:**
+   ```json
+   {
+     "runtime_type": "host",  // or "docker"
+     "pid": 12345,            // Process PID or container PID
+     "log_path": "/path",     // File path or container name
+     "container_id": null     // Populated for docker
+   }
+   ```
+
+3. **Abstraction markers guide future work:**
+   ```python
+   def is_process_alive(pid):
+       """Check if process exists (HOST RUNTIME).
+
+       Docker equivalent:
+           docker inspect --format='{{.State.Running}}' <container>
+       """
+   ```
+
+### Investment Justification
+
+**Extra effort for Docker-readiness:**
+- +1 day design time (runtime_type schema, abstraction markers)
+- +0.5 days implementation (dispatch logic, Docker comments)
+- +0.5 days testing (ensure abstraction doesn't leak)
+
+**Total extra cost:** ~2 days
+
+**Savings when adding Docker:** ~10-15 days (avoiding rewrite)
+
+**Net benefit:** ~8-13 days saved + cleaner codebase
 
 ---
 
@@ -155,7 +255,7 @@ CLI calls: env.restart() if user confirms
 
 ## Detailed Implementation
 
-### 1. ProcessState Model
+### 1. ProcessState Model (Docker-Ready)
 
 **File:** `packages/core/src/comfydock_core/models/process.py` (NEW FILE)
 
@@ -164,24 +264,44 @@ CLI calls: env.restart() if user confirms
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 
 
 @dataclass
 class ProcessState:
-    """State of a running ComfyUI process."""
+    """State of a running ComfyUI process or container.
 
-    pid: int                    # Process ID
+    This model supports both host processes (current) and Docker containers (future).
+    The runtime_type field enables seamless transition between execution modes.
+    """
+
+    # Runtime identification
+    runtime_type: Literal["host", "docker"] = "host"  # Docker support added later
+
+    # Process/container identification (field name kept as 'pid' for host compatibility)
+    pid: int                    # Process ID (host) or container PID (docker)
+
+    # Network configuration
     host: str                   # From --listen arg (e.g., "0.0.0.0")
     port: int                   # From --port arg (e.g., 8188)
-    args: list[str]             # Full args for restart
+
+    # Runtime configuration
+    args: list[str]             # Full args for restart (host: python args, docker: docker run args)
     started_at: str             # ISO timestamp
-    log_path: str               # Absolute path to log file
+    log_path: str               # File path (host) or container name (docker logs <container>)
+
+    # Optional health tracking
     last_health_check: str | None = None
     health_status: str | None = None  # "healthy", "unhealthy", "unknown"
+
+    # Docker-specific fields (future, all optional for now)
+    container_id: str | None = None      # Full container ID (docker only)
+    image_tag: str | None = None         # Image used (docker only)
 
     def to_dict(self) -> dict:
         """Serialize to JSON for state file."""
         return {
+            "runtime_type": self.runtime_type,
             "pid": self.pid,
             "host": self.host,
             "port": self.port,
@@ -191,14 +311,21 @@ class ProcessState:
             "health": {
                 "last_check": self.last_health_check,
                 "status": self.health_status
-            }
+            },
+            # Docker fields (optional)
+            "container_id": self.container_id,
+            "image_tag": self.image_tag,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "ProcessState":
-        """Deserialize from state file."""
+        """Deserialize from state file.
+
+        Handles both old format (no runtime_type) and new format.
+        """
         health = data.get("health", {})
         return cls(
+            runtime_type=data.get("runtime_type", "host"),  # Default to host for old state files
             pid=data["pid"],
             host=data["host"],
             port=data["port"],
@@ -206,7 +333,9 @@ class ProcessState:
             started_at=data["started_at"],
             log_path=data["log_path"],
             last_health_check=health.get("last_check"),
-            health_status=health.get("status")
+            health_status=health.get("status"),
+            container_id=data.get("container_id"),
+            image_tag=data.get("image_tag"),
         )
 
     def get_uptime(self) -> timedelta:
@@ -216,6 +345,12 @@ class ProcessState:
 ```
 
 **State File Location:** `environments/<env_name>/.cec/.comfyui.state`
+
+**Docker Transition Notes:**
+- `runtime_type="host"`: Current implementation (background Python process)
+- `runtime_type="docker"`: Future implementation (container via Docker CLI)
+- Same state file format works for both, just different field interpretations
+- When Docker is added, `pid` becomes container PID, `log_path` becomes container name
 
 ---
 
@@ -265,36 +400,69 @@ class UpdateResult:
 
 ---
 
-### 3. Background Process Utilities
+### 3. Background Process Utilities (Docker-Ready)
 
 **File:** `packages/core/src/comfydock_core/utils/process.py` (NEW FILE)
 
 ```python
-"""Process management utilities for ComfyUI daemon."""
+"""Process management utilities for ComfyUI daemon.
+
+This module is designed to support both host processes (current) and Docker
+containers (future) with minimal changes. Functions are structured to be easily
+swappable based on runtime_type.
+"""
 
 import os
 import sys
 import subprocess
 from pathlib import Path
-from typing import IO
 
 
 def create_background_process(
     cmd: list[str],
     cwd: Path,
-    log_file: IO,
+    stdout_path: Path,
+    stderr_to_stdout: bool = True,
     env: dict | None = None
 ) -> subprocess.Popen:
-    """Start a process in background, detached from terminal.
+    """Start a background process with logging (HOST RUNTIME).
 
-    Cross-platform implementation.
+    IMPORTANT: This function does NOT pass file handles to the child.
+    Instead, it uses subprocess redirection to have the child open the
+    log file itself. This approach:
+    - Works reliably on Windows (no file handle inheritance issues)
+    - Translates cleanly to Docker (where logs go to stdout)
+    - Prevents file handle leaks
+
+    Args:
+        cmd: Command and arguments to execute
+        cwd: Working directory for process
+        stdout_path: Path where stdout should be written
+        stderr_to_stdout: Merge stderr into stdout
+        env: Environment variables (defaults to parent's env)
+
+    Returns:
+        Subprocess.Popen object (detached from terminal)
+
+    Docker equivalent:
+        docker run -d \\
+            --name <container> \\
+            -v <workspace>:/workspace \\
+            -w /workspace/ComfyUI \\
+            comfydock/comfyui:latest \\
+            python main.py <args>
+        # Logs retrieved via: docker logs <container>
     """
+    # Open log file for child to write to
+    log_file = open(stdout_path, "w", buffering=1, encoding="utf-8")
+
     kwargs = {
         'stdout': log_file,
-        'stderr': subprocess.STDOUT,
+        'stderr': log_file if stderr_to_stdout else subprocess.PIPE,
         'stdin': subprocess.DEVNULL,
         'cwd': str(cwd),
-        'env': env or os.environ.copy()
+        'env': env or os.environ.copy(),
+        'close_fds': True,  # Close parent's file descriptors in child
     }
 
     # Platform-specific detachment
@@ -304,27 +472,73 @@ def create_background_process(
             subprocess.DETACHED_PROCESS
         )
     else:
-        kwargs['start_new_session'] = True
+        kwargs['start_new_session'] = True  # Unix: detach from terminal
 
-    return subprocess.Popen(cmd, **kwargs)
+    process = subprocess.Popen(cmd, **kwargs)
+
+    # CRITICAL: Don't close log_file here - child needs it
+    # File will be closed when child exits
+    # This prevents Windows file locking issues
+
+    return process
 
 
-def is_process_alive(pid: int) -> bool:
-    """Check if process exists and is a Python process."""
+def is_process_alive(pid: int, cwd: Path | None = None) -> bool:
+    """Check if process exists and is a Python process (HOST RUNTIME).
+
+    Enhanced verification to prevent PID reuse false positives.
+
+    Args:
+        pid: Process ID to check
+        cwd: Expected working directory (optional, for stronger verification)
+
+    Returns:
+        True if process is alive and verified
+
+    Docker equivalent:
+        docker inspect --format='{{.State.Running}}' <container_id>
+    """
     try:
         import psutil
         process = psutil.Process(pid)
+
         if not process.is_running():
             return False
+
         # Verify it's Python (handles python, python3, python.exe, pythonw.exe)
         name_lower = process.name().lower()
-        return 'python' in name_lower
+        if 'python' not in name_lower:
+            return False
+
+        # Optional: Verify working directory matches (prevents PID reuse)
+        if cwd:
+            try:
+                proc_cwd = process.cwd()
+                if proc_cwd != str(cwd):
+                    return False
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                # Can't verify cwd, but process exists
+                pass
+
+        return True
+
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return False
 
 
 def is_port_bound(port: int, expected_pid: int | None = None) -> bool:
-    """Check if port is in use, optionally verify which PID owns it."""
+    """Check if port is in use (HOST RUNTIME).
+
+    Args:
+        port: Port number to check
+        expected_pid: If provided, verify this PID owns the port
+
+    Returns:
+        True if port is bound
+
+    Docker equivalent:
+        docker port <container> | grep <port>
+    """
     try:
         import psutil
         for conn in psutil.net_connections(kind='inet'):
@@ -349,7 +563,17 @@ def check_http_health(host: str, port: int, timeout: float = 2.0) -> bool:
     """Check if ComfyUI HTTP endpoint is responding.
 
     NOTE: This is OPTIONAL - used only for display in status/list commands.
-    Core process management (is_running, restart logic) uses PID checks only.
+    Core process management (is_running, restart logic) uses PID/container checks only.
+
+    Works for both host and Docker (containers expose ports to host).
+
+    Args:
+        host: Host to check (e.g., "127.0.0.1", "0.0.0.0")
+        port: Port to check
+        timeout: Request timeout in seconds
+
+    Returns:
+        True if endpoint responds with 200
     """
     import urllib.request
 
@@ -365,6 +589,43 @@ def check_http_health(host: str, port: int, timeout: float = 2.0) -> bool:
             return response.status == 200
     except Exception:
         return False
+
+
+def stream_file_logs(log_path: Path, follow: bool = False) -> subprocess.Popen | None:
+    """Stream log file efficiently (HOST RUNTIME).
+
+    Uses platform-specific efficient methods instead of readline() polling.
+
+    Args:
+        log_path: Path to log file
+        follow: If True, follow log file in real-time (like tail -f)
+
+    Returns:
+        Subprocess handle for background streaming, or None for one-shot
+
+    Docker equivalent:
+        docker logs <container> [--follow]
+    """
+    if not follow:
+        # One-shot: just print the file
+        print(log_path.read_text(), end='')
+        return None
+
+    # Follow mode: use platform-specific efficient tailing
+    if sys.platform == 'win32':
+        # Windows: PowerShell Get-Content -Wait
+        cmd = ['powershell', '-Command', f'Get-Content "{log_path}" -Wait']
+    else:
+        # Unix: tail -f
+        cmd = ['tail', '-f', str(log_path)]
+
+    # Stream to stdout (no capture)
+    process = subprocess.Popen(
+        cmd,
+        stdout=None,  # Inherit parent's stdout
+        stderr=subprocess.DEVNULL
+    )
+    return process
 ```
 
 ---
@@ -460,10 +721,18 @@ def _clear_state(self) -> None:
 
 ```python
 def run(self, args: list[str] | None = None) -> subprocess.CompletedProcess:
-    """Run ComfyUI in background with logging.
+    """Run ComfyUI in background with logging (HOST RUNTIME).
 
     ALWAYS starts ComfyUI as a background daemon process.
     Output is written to workspace log file.
+
+    Docker equivalent:
+        docker run -d \\
+            --name comfydock-{env_name} \\
+            -v {workspace}:/workspace \\
+            -p {port}:8188 \\
+            comfydock/comfyui:latest \\
+            python main.py {args}
     """
     from datetime import datetime
     from ..utils.process import is_port_bound
@@ -478,7 +747,7 @@ def run(self, args: list[str] | None = None) -> subprocess.CompletedProcess:
     # Parse arguments for state tracking
     config = self._parse_comfyui_args(args or [])
 
-    # Check for port conflicts BEFORE starting
+    # Check for port conflicts BEFORE starting (early detection)
     if is_port_bound(config.port):
         raise CDEnvironmentError(
             f"Port {config.port} is already in use.\n\n"
@@ -503,29 +772,23 @@ def run(self, args: list[str] | None = None) -> subprocess.CompletedProcess:
         log_path.rename(old_log)
         log_path.touch()
 
-    # Open log file for writing (line buffered, explicit UTF-8 encoding)
-    log_file = open(log_path, "w", buffering=1, encoding="utf-8")
-
     # Build command
     python = self.uv_manager.python_executable
     cmd = [str(python), "main.py"] + (args or [])
 
     logger.info(f"Starting ComfyUI in background: {' '.join(cmd)}")
 
-    # Start background process
-    try:
-        process = create_background_process(
-            cmd=cmd,
-            cwd=self.comfyui_path,
-            log_file=log_file
-        )
-    finally:
-        # Close parent's reference to log file (child still has it)
-        # This prevents file handle leaks
-        log_file.close()
+    # Start background process (child opens log file itself)
+    process = create_background_process(
+        cmd=cmd,
+        cwd=self.comfyui_path,
+        stdout_path=log_path,
+        stderr_to_stdout=True
+    )
 
     # Write state file atomically
     state = ProcessState(
+        runtime_type="host",  # Docker runtime added later
         pid=process.pid,
         host=config.host,
         port=config.port,
@@ -536,6 +799,26 @@ def run(self, args: list[str] | None = None) -> subprocess.CompletedProcess:
     self._write_state(state)
 
     logger.info(f"ComfyUI started: PID {process.pid}, port {config.port}")
+
+    # Optional: Monitor startup for first few seconds (detect early failures)
+    # This is a UX enhancement - if the process dies immediately (e.g., port
+    # binding fails AFTER our check due to race condition), we can report it
+    import time
+    time.sleep(0.5)  # Give process time to fail on startup errors
+
+    if not self.is_running():
+        # Process died immediately - read last few lines of log for error
+        try:
+            log_lines = log_path.read_text().strip().split('\n')
+            error_hint = '\n'.join(log_lines[-5:])  # Last 5 lines
+            raise CDEnvironmentError(
+                f"ComfyUI failed to start. Check logs at: {log_path}\n\n"
+                f"Recent output:\n{error_hint}"
+            )
+        except Exception:
+            raise CDEnvironmentError(
+                f"ComfyUI failed to start. Check logs at: {log_path}"
+            )
 
     # Return success immediately
     return subprocess.CompletedProcess(
@@ -550,21 +833,27 @@ def run(self, args: list[str] | None = None) -> subprocess.CompletedProcess:
 
 ```python
 def is_running(self) -> bool:
-    """Check if ComfyUI is running (PID-only check).
+    """Check if ComfyUI is running (HOST RUNTIME: PID check).
 
-    This method ONLY checks if the process is alive via PID.
-    It does NOT perform HTTP health checks - those are optional
-    and used only for display purposes in status/list commands.
+    This method checks if the process is alive via PID with enhanced
+    verification (working directory check) to prevent PID reuse false positives.
+
+    It does NOT perform HTTP health checks - those are optional and used only
+    for display purposes in status/list commands.
 
     Returns:
         True if process is alive, False otherwise
+
+    Docker equivalent:
+        docker inspect --format='{{.State.Running}}' comfydock-{env_name}
     """
     state = self._read_state()
     if not state:
         return False
 
-    if not is_process_alive(state.pid):
-        logger.debug(f"PID {state.pid} not alive, clearing state")
+    # Enhanced PID check with working directory verification
+    if not is_process_alive(state.pid, cwd=self.comfyui_path):
+        logger.debug(f"PID {state.pid} not alive or cwd mismatch, clearing state")
         self._clear_state()
         return False
 
@@ -757,9 +1046,10 @@ def run(self, args):
 import signal
 import time
 from pathlib import Path
+from comfydock_core.utils.process import stream_file_logs
 
 def _stream_logs_with_monitoring(env, state):
-    """Stream logs while monitoring process."""
+    """Stream logs while monitoring process (efficient platform-specific tailing)."""
     log_path = Path(state.log_path)
 
     # Register signal handler for cleanup
@@ -772,20 +1062,31 @@ def _stream_logs_with_monitoring(env, state):
     if hasattr(signal, 'SIGTERM'):  # Unix only
         signal.signal(signal.SIGTERM, signal_handler)
 
-    # Stream logs
-    with open(log_path, 'r') as f:
-        print(f.read(), end='')
+    # Stream logs using platform-specific efficient method (tail -f / Get-Content -Wait)
+    log_stream = stream_file_logs(log_path, follow=True)
 
+    # Monitor process while streaming runs in background
+    try:
         while True:
+            # Check if ComfyUI process died
             if not env.is_running():
                 print("\n\n⚠️  ComfyUI process exited")
+                if log_stream:
+                    log_stream.terminate()
                 break
 
-            line = f.readline()
-            if line:
-                print(line, end='')
-            else:
-                time.sleep(0.1)
+            # Check if log stream died (shouldn't happen)
+            if log_stream and log_stream.poll() is not None:
+                print("\n\n⚠️  Log stream ended unexpectedly")
+                break
+
+            time.sleep(1)  # Check every second
+    except KeyboardInterrupt:
+        # Handled by signal handler
+        pass
+    finally:
+        if log_stream:
+            log_stream.terminate()
 ```
 
 ---
@@ -797,6 +1098,8 @@ def _stream_logs_with_monitoring(env, state):
 **Add logs command:**
 
 ```python
+from comfydock_core.utils.process import stream_file_logs
+
 @with_env_logging("env logs")
 def logs(self, args):
     """View ComfyUI logs."""
@@ -821,25 +1124,26 @@ def logs(self, args):
         _show_all_logs(log_path)
 
 def _stream_logs_follow(log_path: Path, env):
-    """Stream logs in real-time."""
+    """Stream logs in real-time (efficient platform-specific method)."""
     print(f"Following logs (Ctrl+C to exit)...")
     print("=" * 60)
 
-    with open(log_path, 'r') as f:
-        print(f.read(), end='')
+    # Use efficient streaming (tail -f on Unix, Get-Content -Wait on Windows)
+    log_stream = stream_file_logs(log_path, follow=True)
 
-        try:
-            while True:
-                if not env.is_running():
-                    print("\n\n⚠️  ComfyUI process exited")
-                    break
-                line = f.readline()
-                if line:
-                    print(line, end='')
-                else:
-                    time.sleep(0.1)
-        except KeyboardInterrupt:
-            print("\n")
+    try:
+        # Wait for log stream to finish (or user Ctrl+C)
+        while log_stream and log_stream.poll() is None:
+            # Also check if ComfyUI died
+            if not env.is_running():
+                print("\n\n⚠️  ComfyUI process exited")
+                break
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n")
+    finally:
+        if log_stream:
+            log_stream.terminate()
 
 def _show_tail(log_path: Path, n: int):
     """Show last N lines."""
@@ -849,9 +1153,8 @@ def _show_tail(log_path: Path, n: int):
             print(line, end='')
 
 def _show_all_logs(log_path: Path):
-    """Show all logs."""
-    with open(log_path, 'r') as f:
-        print(f.read(), end='')
+    """Show all logs (one-shot, no streaming)."""
+    stream_file_logs(log_path, follow=False)  # Efficient file read
 ```
 
 **Add stop and restart commands:**
@@ -1272,19 +1575,56 @@ def list_envs(self, args):
 
 ## Testing Strategy
 
-### Unit Tests
-- `test_process_utils.py`: Test PID checks, port binding, health checks
-- `test_process_state.py`: Test ProcessState serialization
-- `test_node_operation_result.py`: Test return value structures
+### Critical Tests (Not Optional for MVP)
 
-### Integration Tests
-- `test_environment_process.py`: Test run(), stop(), restart()
-- `test_state_file_lifecycle.py`: Test state file creation/cleanup
+These tests are **essential** for process management reliability. Unlike typical feature development where 2-3 happy path tests suffice, process management requires rigorous edge case testing to prevent data loss and system instability.
 
-### CLI Tests
-- `test_run_command.py`: Test background and foreground modes
-- `test_logs_command.py`: Test log viewing and streaming
-- `test_auto_restart.py`: Test restart flags
+#### Unit Tests (Required)
+- `test_process_utils.py`:
+  - **PID reuse prevention**: Start process, kill it, start unrelated Python process with recycled PID, verify state cleanup
+  - **Port binding detection**: Verify port conflict detection before startup
+  - **Enhanced process verification**: Verify working directory checks work correctly
+  - **HTTP health checks**: Verify optional health checks don't block core logic
+
+- `test_process_state.py`:
+  - **Serialization round-trip**: Verify state file survives write/read cycle
+  - **Backward compatibility**: Old state files (no runtime_type) load correctly
+  - **Atomic writes**: Verify temp file → rename pattern works on all platforms
+
+- `test_node_operation_result.py`:
+  - **Return value pattern**: Verify restart recommendations propagate correctly
+
+#### Integration Tests (Required)
+- `test_environment_process.py`:
+  - **run() → stop() → run()**: Verify clean restart cycle
+  - **Startup failure detection**: Kill process immediately after start, verify error reporting
+  - **Port conflict on startup**: Bind port, try to start ComfyUI, verify helpful error message
+
+- `test_state_file_lifecycle.py`:
+  - **Normal lifecycle**: State created on run(), cleared on stop()
+  - **Crash recovery**: Kill process without stop(), verify stale state cleanup on next is_running()
+  - **Corrupted state file**: Invalid JSON, verify graceful degradation
+
+- `test_cross_platform.py` (run on Windows + Unix):
+  - **Log file handling**: Verify child opens log file correctly on both platforms
+  - **Process detachment**: Verify parent can exit without killing child
+  - **Signal handling**: SIGTERM (Unix) vs process.terminate() (Windows)
+
+#### CLI Tests (Standard)
+- `test_run_command.py`: Background and foreground modes
+- `test_logs_command.py`: Log viewing and streaming (verify tail -f / Get-Content -Wait work)
+- `test_auto_restart.py`: Restart flags (mutually exclusive validation)
+- `test_repair_orphan.py`: Orphaned process detection and cleanup
+
+### Testing Philosophy for Process Management
+
+Process management is **infrastructure code**, not application code. The cost of a bug is:
+- **Data loss**: User's generated images corrupted during unclean restart
+- **System instability**: Orphaned processes consuming GPU resources
+- **Port conflicts**: ComfyUI failing to start with cryptic errors
+- **File corruption**: State files corrupted on power loss
+
+Therefore, we test **edge cases** and **failure modes**, not just happy paths. This is one area where the "2-3 tests per file" MVP guidance doesn't apply.
 
 ---
 
@@ -1369,13 +1709,26 @@ def list_envs(self, args):
 
 ## Timeline Estimate
 
-- **Phase 0:** 0.5 days (groundwork)
-- **Phase 1:** 2-3 days (core process management)
-- **Phase 2:** 1-2 days (CLI integration)
-- **Phase 3:** 1 day (auto-restart)
-- **Phase 4:** 1-2 days (testing and docs)
+- **Phase 0:** 0.5-1 days (groundwork + Docker-ready schema)
+- **Phase 1:** 3-4 days (core process management + startup monitoring + enhanced verification)
+- **Phase 2:** 1.5-2 days (CLI integration + efficient log streaming)
+- **Phase 3:** 1 day (auto-restart integration)
+- **Phase 4:** 2-3 days (comprehensive testing + cross-platform validation + docs)
 
-**Total:** ~6-9 days for full implementation
+**Total:** ~8-11 days for full Docker-ready implementation
+
+**Rationale for timeline adjustments:**
+- Added 0.5 days for Docker-ready schema design (runtime_type, container fields)
+- Added 1 day for enhanced process verification (cwd checks, startup monitoring)
+- Added 0.5 days for platform-specific log streaming (tail -f / Get-Content -Wait)
+- Added 1 day for critical cross-platform testing (PID reuse, port conflicts, crash recovery)
+
+**Docker Transition (Future):**
+Once this implementation is stable, adding Docker runtime support should take ~3-5 days:
+- 1 day: Implement Docker process utilities (container start/stop/logs)
+- 1 day: Update Environment.run() to dispatch based on runtime_type
+- 1 day: CLI flag for --runtime=docker
+- 1-2 days: Testing and documentation
 
 ---
 
@@ -1458,6 +1811,144 @@ if result.restart_recommended:
 ### Migration
 - See migration guide: docs/migration-v2.md
 ```
+
+---
+
+## Docker Runtime Preparation
+
+This implementation is designed for **seamless Docker transition**. The abstraction points below enable adding Docker runtime support with minimal refactoring.
+
+### Runtime Abstraction Strategy
+
+**Current (Host Runtime):**
+```python
+# utils/process.py - All functions marked "HOST RUNTIME"
+state = ProcessState(runtime_type="host", pid=12345, ...)
+is_process_alive(state.pid, cwd=comfyui_path)  # PID check
+create_background_process(cmd, cwd, stdout_path)  # Detached Python process
+```
+
+**Future (Docker Runtime):**
+```python
+# New file: utils/docker_process.py
+def is_container_running(container_id: str) -> bool:
+    """Check if container is running (DOCKER RUNTIME)."""
+    result = subprocess.run(
+        ["docker", "inspect", "--format={{.State.Running}}", container_id],
+        capture_output=True, text=True
+    )
+    return result.stdout.strip() == "true"
+
+def create_docker_container(env_name: str, workspace_path: Path, args: list[str]) -> str:
+    """Start ComfyUI in Docker container (DOCKER RUNTIME)."""
+    cmd = [
+        "docker", "run", "-d",
+        "--name", f"comfydock-{env_name}",
+        "-v", f"{workspace_path}:/workspace",
+        "-p", "8188:8188",
+        "comfydock/comfyui:latest",
+        "python", "main.py", *args
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return result.stdout.strip()  # Container ID
+
+# State file with Docker runtime
+state = ProcessState(
+    runtime_type="docker",
+    pid=container_pid,  # Container's main process PID
+    container_id="abc123...",
+    image_tag="comfydock/comfyui:latest",
+    ...
+)
+```
+
+**Unified Environment API (No Changes Needed):**
+```python
+# Environment class (works for both runtimes)
+def is_running(self) -> bool:
+    state = self._read_state()
+    if not state:
+        return False
+
+    # Dispatch based on runtime_type
+    if state.runtime_type == "host":
+        return is_process_alive(state.pid, cwd=self.comfyui_path)
+    elif state.runtime_type == "docker":
+        return is_container_running(state.container_id)
+
+def run(self, args):
+    # Dispatch based on user's --runtime flag or environment config
+    if self.runtime_type == "host":
+        # Current implementation
+        process = create_background_process(...)
+        state = ProcessState(runtime_type="host", pid=process.pid, ...)
+    elif self.runtime_type == "docker":
+        # Future implementation
+        container_id = create_docker_container(self.name, self.workspace_paths.root, args)
+        state = ProcessState(runtime_type="docker", container_id=container_id, ...)
+
+    self._write_state(state)
+```
+
+### Docker Architecture Details
+
+**Single Image + Workspace Mount (No Rebuilds):**
+```dockerfile
+# comfydock/comfyui:latest
+FROM python:3.11-slim
+RUN pip install uv
+WORKDIR /workspace/environment/ComfyUI
+ENTRYPOINT ["python", "main.py"]
+```
+
+**Container Run Command:**
+```bash
+docker run -d \
+  --name comfydock-prod \
+  -v ~/.comfydock:/workspace \
+  -v ~/.comfydock/cache:/workspace/cache \
+  -p 8188:8188 \
+  comfydock/comfyui:latest \
+  --listen 0.0.0.0 --port 8188
+```
+
+**Why This Works:**
+- User's entire workspace (`~/.comfydock`) is mounted to `/workspace`
+- Container sees the environment's ComfyUI directory, custom nodes, models
+- uv cache is shared (fast package installs)
+- No image rebuilds needed for node operations - just restart container
+- `comfydock node add` updates pyproject.toml → `uv sync` → `comfydock restart` → container picks up changes
+
+### Migration Path (When Adding Docker)
+
+**Phase 1: Add Docker Utilities (1 day)**
+- Create `utils/docker_process.py` with container equivalents of host functions
+- Add `--runtime=docker` flag to CLI (defaults to `host`)
+
+**Phase 2: Update Environment Dispatch (1 day)**
+- Modify `Environment.run()` to check `runtime_type` and dispatch
+- Modify `Environment.is_running()`, `stop()`, `restart()` similarly
+
+**Phase 3: CLI Changes (1 day)**
+- `comfydock logs` → dispatch to `docker logs <container>` for Docker runtime
+- `comfydock status` → parse `docker inspect` output for Docker runtime
+
+**Phase 4: Testing (1-2 days)**
+- Test both runtimes side-by-side
+- Verify workspace mount works correctly
+- Validate cache sharing
+
+**Total Docker Addition:** ~3-5 days (thanks to abstraction)
+
+### Abstraction Markers in Current Code
+
+Throughout the implementation, look for these markers:
+```python
+# (HOST RUNTIME) - Function only works for host processes
+# Docker equivalent: <command> - Shows what the Docker version would be
+```
+
+These comments make future refactoring trivial - just implement the Docker equivalent and add the dispatch logic.
 
 ---
 
