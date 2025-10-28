@@ -98,16 +98,18 @@ class GlobalNodeMapping:
 @dataclass
 class GlobalNodePackageVersion:
     """Package version data."""
-    version: str  # Version
-    changelog: str | None  # Changelog
-    release_date: str | None  # Release date
-    dependencies: list[str] | None  # Dependencies
-    deprecated: bool | None  # Deprecated
-    download_url: str | None  # Download URL
-    status: str | None  # Status
-    supported_accelerators: list[str] | None  # Supported accelerators
-    supported_comfyui_version: str | None  # Supported ComfyUI version
-    supported_os: list[str] | None  # Supported OS
+    version: str  # Version (required)
+    # Core fields used by CLI
+    download_url: str | None = None  # Download URL
+    deprecated: bool | None = None  # Deprecated
+    dependencies: list[str] | None = None  # Dependencies
+    # Unused fields (kept for potential future use, omitted from minimal schema)
+    changelog: str | None = None  # Changelog
+    release_date: str | None = None  # Release date
+    status: str | None = None  # Status
+    supported_accelerators: list[str] | None = None  # Supported accelerators
+    supported_comfyui_version: str | None = None  # Supported ComfyUI version
+    supported_os: list[str] | None = None  # Supported OS
 
     def __repr__(self) -> str:
         """Concise representation showing version and key flags."""
@@ -122,22 +124,24 @@ class GlobalNodePackageVersion:
 class GlobalNodePackage:
     """Global standard package data."""
 
-    id: str  # Package ID
-    display_name: str | None  # Display name
-    author: str | None  # Author
-    description: str | None  # Description
-    repository: str | None  # Repository
-    downloads: int | None  # Downloads
-    github_stars: int | None  # GitHub stars
-    rating: int | None  # Rating
-    license: str | None  # License
-    category: str | None  # Category
+    id: str  # Package ID (required)
+    # Core fields used by CLI
+    display_name: str | None = None  # Display name
+    description: str | None = None  # Description
+    repository: str | None = None  # Repository
+    github_stars: int | None = None  # GitHub stars
+    versions: dict[str, GlobalNodePackageVersion] | None = None  # Versions
+    source: str | None = None  # Source of the package (None = Registry, "manager" = Manager-only)
+    # Unused fields (kept for potential future use, omitted from minimal schema)
+    author: str | None = None  # Author
+    downloads: int | None = None  # Downloads
+    rating: int | None = None  # Rating
+    license: str | None = None  # License
+    category: str | None = None  # Category
     icon: str | None = None  # Icon URL
     tags: list[str] | None = None  # Tags
     status: str | None = None  # Status
     created_at: str | None = None  # Created at
-    versions: dict[str, GlobalNodePackageVersion] | None = None  # Versions
-    source: str | None = None  # Source of the package (None = Registry, "manager" = Manager-only)
 
     def __repr__(self) -> str:
         """Concise representation showing key package info and version list."""
@@ -177,13 +181,13 @@ class GlobalNodePackage:
 
 @dataclass
 class GlobalNodeMappingsStats:
-    packages: int | None
-    signatures: int | None
-    total_nodes: int | None
-    augmented: bool | None
-    augmentation_date: str | None
-    nodes_from_manager: int | None
-    manager_packages: int | None
+    packages: int | None = None
+    signatures: int | None = None
+    total_nodes: int | None = None
+    augmented: bool | None = None
+    augmentation_date: str | None = None
+    nodes_from_manager: int | None = None
+    manager_packages: int | None = None
 
 
 @dataclass
