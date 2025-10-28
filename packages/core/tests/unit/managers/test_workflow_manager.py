@@ -137,9 +137,9 @@ def test_apply_resolution_preserves_existing_sources(workflow_manager):
     workflow_manager.pyproject.workflows.set_node_packs = Mock()
     workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
     workflow_manager.pyproject.workflows.get_workflow_models = Mock(return_value=[])
-    workflow_manager.pyproject.workflows.get_all_with_resolutions = Mock(return_value={"test_workflow": {}})
-    workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
     workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
+    workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
+    workflow_manager.pyproject.load = Mock(return_value={'tool': {'comfydock': {'workflows': {'test_workflow': {}}}}})
     workflow_manager.update_workflow_model_paths = Mock()
     workflow_manager.model_repository.get_sources = Mock(return_value=[
         {'url': 'https://civitai.com/model/123', 'type': 'civitai', 'metadata': {}, 'added_time': 0}
@@ -202,8 +202,8 @@ def test_apply_resolution_empty_sources_for_new_models(workflow_manager):
     workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
     workflow_manager.pyproject.workflows.get_workflow_models = Mock(return_value=[])
     workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
-    workflow_manager.pyproject.workflows.get_all_with_resolutions = Mock(return_value={"test_workflow": {}})
     workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
+    workflow_manager.pyproject.load = Mock(return_value={'tool': {'comfydock': {'workflows': {'test_workflow': {}}}}})
     workflow_manager.update_workflow_model_paths = Mock()
     workflow_manager.model_repository.get_sources = Mock(return_value=[])
 
@@ -414,15 +414,16 @@ class TestOptionalUnresolvedModelPersistence:
 
         # Mock pyproject to capture what gets written
         written_models = []
-        def mock_set_workflow_models(workflow_name, models):
+        def mock_set_workflow_models(workflow_name, models, config=None):
             written_models.extend(models)
 
         workflow_manager.pyproject.workflows.set_workflow_models = mock_set_workflow_models
         workflow_manager.pyproject.workflows.set_node_packs = Mock()
         workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
         workflow_manager.pyproject.workflows.get_workflow_models = Mock(return_value=[])
-        workflow_manager.pyproject.workflows.get_all_with_resolutions = Mock(return_value={"test_workflow": {}})
+        workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
         workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
+        workflow_manager.pyproject.load = Mock(return_value={'tool': {'comfydock': {'workflows': {'test_workflow': {}}}}})
         workflow_manager.pyproject.models.add_model = Mock()
         workflow_manager.pyproject.models.cleanup_orphans = Mock()
 
@@ -507,12 +508,13 @@ class TestOptionalUnresolvedModelPersistence:
 
         # Setup mocks
         written_models = []
-        workflow_manager.pyproject.workflows.set_workflow_models = lambda w, m: written_models.extend(m)
+        workflow_manager.pyproject.workflows.set_workflow_models = lambda w, m, config=None: written_models.extend(m)
         workflow_manager.pyproject.workflows.set_node_packs = Mock()
         workflow_manager.pyproject.workflows.get_custom_node_map = Mock(return_value={})
         workflow_manager.pyproject.workflows.get_workflow_models = Mock(return_value=[])
-        workflow_manager.pyproject.workflows.get_all_with_resolutions = Mock(return_value={"test": {}})
+        workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
         workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
+        workflow_manager.pyproject.load = Mock(return_value={'tool': {'comfydock': {'workflows': {'test': {}}}}})
         workflow_manager.pyproject.models.add_model = Mock()
         workflow_manager.pyproject.models.cleanup_orphans = Mock()
         workflow_manager.model_repository.get_sources = Mock(return_value=[])

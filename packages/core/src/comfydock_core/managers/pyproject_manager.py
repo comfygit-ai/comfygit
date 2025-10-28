@@ -810,18 +810,21 @@ class WorkflowHandler(BaseHandler):
 
     def get_workflow_models(
         self,
-        workflow_name: str
+        workflow_name: str,
+        config: dict | None = None
     ) -> list[ManifestWorkflowModel]:
         """Get all models for a workflow.
 
         Args:
             workflow_name: Workflow name
+            config: Optional in-memory config for batched reads. If None, loads from disk.
 
         Returns:
             List of ManifestWorkflowModel objects (resolved and unresolved)
         """
         try:
-            config = self.load()
+            if config is None:
+                config = self.load()
             workflow_data = config.get('tool', {}).get('comfydock', {}).get('workflows', {}).get(workflow_name, {})
             models_data = workflow_data.get('models', [])
 
@@ -833,15 +836,19 @@ class WorkflowHandler(BaseHandler):
     def set_workflow_models(
         self,
         workflow_name: str,
-        models: list[ManifestWorkflowModel]
+        models: list[ManifestWorkflowModel],
+        config: dict | None = None
     ) -> None:
         """Set all models for a workflow (unified list).
 
         Args:
             workflow_name: Workflow name
             models: List of ManifestWorkflowModel objects (resolved and unresolved)
+            config: Optional in-memory config for batched writes. If None, loads and saves immediately.
         """
-        config = self.load()
+        is_batch = config is not None
+        if not is_batch:
+            config = self.load()
 
         # Ensure sections exist
         self.ensure_section(config, 'tool', 'comfydock', 'workflows')
@@ -862,7 +869,10 @@ class WorkflowHandler(BaseHandler):
             models_array.append(model_dict)
 
         config['tool']['comfydock']['workflows'][workflow_name]['models'] = models_array
-        self.save(config)
+
+        if not is_batch:
+            self.save(config)
+
         logger.debug(f"Set {len(models)} model(s) for workflow '{workflow_name}'")
 
     def add_workflow_model(
@@ -936,14 +946,18 @@ class WorkflowHandler(BaseHandler):
         except Exception:
             return {}
 
-    def set_node_packs(self, name: str, node_pack_ids: set[str] | None) -> None:
+    def set_node_packs(self, name: str, node_pack_ids: set[str] | None, config: dict | None = None) -> None:
         """Set node pack references for a workflow.
 
         Args:
             name: Workflow name
             node_pack_ids: List of node pack identifiers (e.g., ["comfyui-akatz-nodes"]) | None which clears node packs
+            config: Optional in-memory config for batched writes. If None, loads and saves immediately.
         """
-        config = self.load()
+        is_batch = config is not None
+        if not is_batch:
+            config = self.load()
+
         self.ensure_section(config, 'tool', 'comfydock', 'workflows', name)
         if not node_pack_ids:
             if 'nodes' in config['tool']['comfydock']['workflows'][name]:
@@ -952,7 +966,9 @@ class WorkflowHandler(BaseHandler):
         else:
             logger.info(f"Set {len(node_pack_ids)} node pack(s) for workflow: {name}")
             config['tool']['comfydock']['workflows'][name]['nodes'] = sorted(node_pack_ids)
-        self.save(config)
+
+        if not is_batch:
+            self.save(config)
 
     def clear_workflow_resolutions(self, name: str) -> bool:
         """Clear model resolutions for a workflow."""
@@ -971,17 +987,19 @@ class WorkflowHandler(BaseHandler):
 
     # === Per-workflow custom_node_map methods ===
 
-    def get_custom_node_map(self, workflow_name: str) -> dict[str, str | bool]:
+    def get_custom_node_map(self, workflow_name: str, config: dict | None = None) -> dict[str, str | bool]:
         """Get custom_node_map for a specific workflow.
 
         Args:
             workflow_name: Name of workflow
+            config: Optional in-memory config for batched reads. If None, loads from disk.
 
         Returns:
             Dict mapping node_type -> package_id (or false for optional)
         """
         try:
-            config = self.load()
+            if config is None:
+                config = self.load()
             workflow_data = config.get('tool', {}).get('comfydock', {}).get('workflows', {}).get(workflow_name, {})
             return workflow_data.get('custom_node_map', {})
         except Exception:
@@ -1011,17 +1029,21 @@ class WorkflowHandler(BaseHandler):
         self.save(config)
         logger.debug(f"Set custom_node_map for workflow '{workflow_name}': {node_type} -> {package_id}")
 
-    def remove_custom_node_mapping(self, workflow_name: str, node_type: str) -> bool:
+    def remove_custom_node_mapping(self, workflow_name: str, node_type: str, config: dict | None = None) -> bool:
         """Remove a single custom_node_map entry for a workflow.
 
         Args:
             workflow_name: Name of workflow
             node_type: Node type to remove
+            config: Optional in-memory config for batched writes. If None, loads and saves immediately.
 
         Returns:
             True if removed, False if not found
         """
-        config = self.load()
+        is_batch = config is not None
+        if not is_batch:
+            config = self.load()
+
         workflow_data = config.get('tool', {}).get('comfydock', {}).get('workflows', {}).get(workflow_name, {})
 
         if 'custom_node_map' not in workflow_data or node_type not in workflow_data['custom_node_map']:
@@ -1033,15 +1055,18 @@ class WorkflowHandler(BaseHandler):
         if not workflow_data['custom_node_map']:
             del workflow_data['custom_node_map']
 
-        self.save(config)
+        if not is_batch:
+            self.save(config)
+
         logger.debug(f"Removed custom_node_map entry for workflow '{workflow_name}': {node_type}")
         return True
 
-    def remove_workflows(self, workflow_names: list[str]) -> int:
+    def remove_workflows(self, workflow_names: list[str], config: dict | None = None) -> int:
         """Remove workflow sections from pyproject.toml.
 
         Args:
             workflow_names: List of workflow names to remove
+            config: Optional in-memory config for batched writes. If None, loads and saves immediately.
 
         Returns:
             Number of workflows removed
@@ -1049,7 +1074,10 @@ class WorkflowHandler(BaseHandler):
         if not workflow_names:
             return 0
 
-        config = self.load()
+        is_batch = config is not None
+        if not is_batch:
+            config = self.load()
+
         workflows = config.get('tool', {}).get('comfydock', {}).get('workflows', {})
 
         removed_count = 0
@@ -1062,7 +1090,8 @@ class WorkflowHandler(BaseHandler):
         if removed_count > 0:
             # Clean up empty workflows section
             self.clean_empty_sections(config, 'tool', 'comfydock', 'workflows')
-            self.save(config)
+            if not is_batch:
+                self.save(config)
             logger.info(f"Removed {removed_count} workflow section(s) from pyproject.toml")
 
         return removed_count
@@ -1075,28 +1104,32 @@ class ModelHandler(BaseHandler):
     Unresolved models are stored per-workflow only.
     """
 
-    def add_model(self, model: ManifestModel) -> None:
+    def add_model(self, model: ManifestModel, config: dict | None = None) -> None:
         """Add a model to the global manifest.
 
         If model already exists, merges sources (union of old and new).
 
         Args:
             model: ManifestModel object with hash, filename, size, etc.
+            config: Optional in-memory config for batched writes. If None, loads and saves immediately.
 
         Raises:
             CDPyprojectError: If save fails
         """
-        config = self.load()
+        is_batch = config is not None
+        if not is_batch:
+            config = self.load()
 
         # Ensure sections exist
         self.ensure_section(config, "tool", "comfydock", "models")
 
         # Check if model already exists and merge sources
-        existing_model = self.get_by_hash(model.hash)
-        if existing_model:
-            # Union of old and new sources (deduplicate)
-            merged_sources = list(set(existing_model.sources + model.sources))
-            model.sources = merged_sources
+        # In batch mode, check in-memory config instead of loading from disk
+        models_section = config.get("tool", {}).get("comfydock", {}).get("models", {})
+        if model.hash in models_section:
+            existing_dict = models_section[model.hash]
+            existing_sources = existing_dict.get('sources', [])
+            model.sources = list(set(existing_sources + model.sources))
 
         # Serialize to inline table for compact representation
         model_dict = model.to_toml_dict()
@@ -1105,7 +1138,10 @@ class ModelHandler(BaseHandler):
             model_entry[key] = value
 
         config["tool"]["comfydock"]["models"][model.hash] = model_entry
-        self.save(config)
+
+        if not is_batch:
+            self.save(config)
+
         logger.debug(f"Added model: {model.filename} ({model.hash[:8]}...)")
 
     def get_all(self) -> list[ManifestModel]:
@@ -1176,38 +1212,46 @@ class ModelHandler(BaseHandler):
         models = config.get("tool", {}).get("comfydock", {}).get("models", {})
         return set(models.keys())
 
-    def cleanup_orphans(self) -> None:
+    def cleanup_orphans(self, config: dict | None = None) -> None:
         """Remove models from global table that aren't referenced by any workflow.
 
         This should be called after all workflows have been processed to clean up
         models that were removed from all workflows.
+
+        Args:
+            config: Optional in-memory config for batched writes. If None, loads and saves immediately.
         """
+        is_batch = config is not None
+        if not is_batch:
+            config = self.load()
+
         # Collect all model hashes referenced by ANY workflow
+        # Read from in-memory config instead of loading from disk
         referenced_hashes = set()
-        all_workflows = self.manager.workflows.get_all_with_resolutions()
+        all_workflows = config.get('tool', {}).get('comfydock', {}).get('workflows', {})
 
-        for workflow_name in all_workflows:
-            workflow_models = self.manager.workflows.get_workflow_models(workflow_name)
-            for model in workflow_models:
+        for workflow_name, workflow_data in all_workflows.items():
+            workflow_models_data = workflow_data.get('models', [])
+            for model_data in workflow_models_data:
                 # Only track resolved models (unresolved models aren't in global table)
-                if model.hash and model.status == "resolved":
-                    referenced_hashes.add(model.hash)
+                if model_data.get('hash') and model_data.get('status') == "resolved":
+                    referenced_hashes.add(model_data['hash'])
 
-        # Get all hashes in global models table
-        global_hashes = self.get_all_model_hashes()
+        # Get all hashes in global models table (from in-memory config)
+        models_section = config.get("tool", {}).get("comfydock", {}).get("models", {})
+        global_hashes = set(models_section.keys())
 
         # Remove orphans (in global but not referenced)
         orphaned_hashes = global_hashes - referenced_hashes
 
         if orphaned_hashes:
-            config = self.load()
-            models_section = config.get("tool", {}).get("comfydock", {}).get("models", {})
-
             for model_hash in orphaned_hashes:
                 if model_hash in models_section:
                     del models_section[model_hash]
                     logger.debug(f"Removed orphaned model: {model_hash[:8]}...")
 
-            self.save(config)
+            if not is_batch:
+                self.save(config)
+
             logger.info(f"Cleaned up {len(orphaned_hashes)} orphaned model(s)")
 

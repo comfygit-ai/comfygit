@@ -877,27 +877,34 @@ class Environment:
             return
 
         # Apply auto-resolutions to pyproject.toml for workflows with changes
+        # BATCHED MODE: Load config once, pass through all operations, save once
         logger.info("Committing all changes...")
+        config = self.pyproject.load()
+
         for wf_analysis in workflow_status.analyzed_workflows:
             if wf_analysis.sync_state in ("new", "modified"):
-                # Apply resolution results to pyproject (writes newly resolved models)
-                self.workflow_manager.apply_resolution(wf_analysis.resolution)
-
-        logger.info("Copying workflows from ComfyUI to .cec...")
-        copy_results = self.workflow_manager.copy_all_workflows()
-        copied_count = len([r for r in copy_results.values() if r and r != "deleted"])
-        logger.debug(f"Copied {copied_count} workflow(s)")
+                # Apply resolution results to pyproject (in-memory mutations)
+                self.workflow_manager.apply_resolution(wf_analysis.resolution, config=config)
 
         # Clean up deleted workflows from pyproject.toml
         if workflow_status.sync_status.deleted:
             logger.info("Cleaning up deleted workflows from pyproject.toml...")
             removed_count = self.pyproject.workflows.remove_workflows(
-                workflow_status.sync_status.deleted
+                workflow_status.sync_status.deleted,
+                config=config
             )
             logger.debug(f"Removed {removed_count} workflow section(s)")
 
             # Clean up orphaned models (must run AFTER workflow sections are removed)
-            self.pyproject.models.cleanup_orphans()
+            self.pyproject.models.cleanup_orphans(config=config)
+
+        # Save all changes at once
+        self.pyproject.save(config)
+
+        logger.info("Copying workflows from ComfyUI to .cec...")
+        copy_results = self.workflow_manager.copy_all_workflows()
+        copied_count = len([r for r in copy_results.values() if r and r != "deleted"])
+        logger.debug(f"Copied {copied_count} workflow(s)")
 
         self.commit(message)
 

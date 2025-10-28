@@ -1020,7 +1020,8 @@ class WorkflowManager:
 
     def apply_resolution(
         self,
-        resolution: ResolutionResult
+        resolution: ResolutionResult,
+        config: dict | None = None
     ) -> None:
         """Apply resolutions with smart defaults and reconciliation.
 
@@ -1028,8 +1029,13 @@ class WorkflowManager:
 
         Args:
             resolution: Result with auto-resolved dependencies from resolve_workflow()
+            config: Optional in-memory config for batched writes. If None, loads and saves immediately.
         """
         from comfydock_core.models.manifest import ManifestModel, ManifestWorkflowModel
+
+        is_batch = config is not None
+        if not is_batch:
+            config = self.pyproject.load()
 
         workflow_name = resolution.workflow_name
 
@@ -1052,15 +1058,15 @@ class WorkflowManager:
                 target_node_types.add(packages[0].node_type)
 
         if target_node_pack_ids:
-            self.pyproject.workflows.set_node_packs(workflow_name, target_node_pack_ids)
+            self.pyproject.workflows.set_node_packs(workflow_name, target_node_pack_ids, config=config)
         else:
-            self.pyproject.workflows.set_node_packs(workflow_name, None)
+            self.pyproject.workflows.set_node_packs(workflow_name, None, config=config)
 
         # Reconcile custom_node_map
-        existing_custom_map = self.pyproject.workflows.get_custom_node_map(workflow_name)
+        existing_custom_map = self.pyproject.workflows.get_custom_node_map(workflow_name, config=config)
         for node_type in list(existing_custom_map.keys()):
             if node_type not in target_node_types:
-                self.pyproject.workflows.remove_custom_node_mapping(workflow_name, node_type)
+                self.pyproject.workflows.remove_custom_node_mapping(workflow_name, node_type, config=config)
 
         # Phase 2: Build ManifestWorkflowModel entries with smart defaults
         manifest_models: list[ManifestWorkflowModel] = []
@@ -1137,10 +1143,10 @@ class WorkflowManager:
                 category=model.category,
                 sources=sources  # From SQLite - authoritative source
             )
-            self.pyproject.models.add_model(global_model)
+            self.pyproject.models.add_model(global_model, config=config)
 
         # Load existing workflow models to preserve download intents from previous sessions
-        existing_workflow_models = self.pyproject.workflows.get_workflow_models(workflow_name)
+        existing_workflow_models = self.pyproject.workflows.get_workflow_models(workflow_name, config=config)
         existing_by_filename = {m.filename: m for m in existing_workflow_models}
 
         # Add unresolved models
@@ -1170,13 +1176,14 @@ class WorkflowManager:
             manifest_models.append(manifest_model)
 
         # Write all models to workflow
-        self.pyproject.workflows.set_workflow_models(workflow_name, manifest_models)
+        self.pyproject.workflows.set_workflow_models(workflow_name, manifest_models, config=config)
 
         # Clean up deleted workflows from pyproject.toml
         # This handles both:
         # 1. Committed workflows that were deleted (in .cec, in pyproject, not in ComfyUI)
         # 2. Resolved-but-not-committed workflows (in pyproject, not in .cec, not in ComfyUI)
-        workflows_in_pyproject = set(self.pyproject.workflows.get_all_with_resolutions().keys())
+        # Read from in-memory config instead of loading from disk
+        workflows_in_pyproject = set(config.get('tool', {}).get('comfydock', {}).get('workflows', {}).keys())
         workflows_in_comfyui = set()
         if self.comfyui_workflows.exists():
             for workflow_file in self.comfyui_workflows.glob("*.json"):
@@ -1184,12 +1191,16 @@ class WorkflowManager:
 
         workflows_to_remove = workflows_in_pyproject - workflows_in_comfyui
         if workflows_to_remove:
-            removed_count = self.pyproject.workflows.remove_workflows(list(workflows_to_remove))
+            removed_count = self.pyproject.workflows.remove_workflows(list(workflows_to_remove), config=config)
             if removed_count > 0:
                 logger.info(f"Cleaned up {removed_count} deleted workflow(s) from pyproject.toml")
 
         # Clean up orphaned models (must run AFTER workflow sections are removed)
-        self.pyproject.models.cleanup_orphans()
+        self.pyproject.models.cleanup_orphans(config=config)
+
+        # Save if not in batch mode
+        if not is_batch:
+            self.pyproject.save(config)
 
         # Phase 3: Update workflow JSON with resolved paths
         self.update_workflow_model_paths(resolution)
