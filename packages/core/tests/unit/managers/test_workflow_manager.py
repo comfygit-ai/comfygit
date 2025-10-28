@@ -3,6 +3,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 from comfydock_core.managers.workflow_manager import WorkflowManager
+from comfydock_core.utils.workflow_hash import normalize_workflow
 
 
 @pytest.fixture
@@ -42,7 +43,7 @@ def test_normalize_workflow_removes_volatile_fields(workflow_manager):
         }
     }
 
-    normalized = workflow_manager._normalize_workflow_for_comparison(workflow)
+    normalized = normalize_workflow(workflow)
 
     # Check volatile fields removed
     assert "revision" not in normalized
@@ -68,7 +69,7 @@ def test_normalize_workflow_handles_randomize_seeds(workflow_manager):
         ]
     }
 
-    normalized = workflow_manager._normalize_workflow_for_comparison(workflow)
+    normalized = normalize_workflow(workflow)
 
     # Seed should be normalized to 0 when control is "randomize"
     assert normalized["nodes"][0]["widgets_values"][0] == 0
@@ -93,7 +94,7 @@ def test_normalize_workflow_preserves_fixed_seeds(workflow_manager):
         ]
     }
 
-    normalized = workflow_manager._normalize_workflow_for_comparison(workflow)
+    normalized = normalize_workflow(workflow)
 
     # Fixed seed should be preserved
     assert normalized["nodes"][0]["widgets_values"][0] == 12345
