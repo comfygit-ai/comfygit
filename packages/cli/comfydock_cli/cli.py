@@ -359,7 +359,7 @@ def _add_env_commands(subparsers):
 
     # node add
     node_add_parser = node_subparsers.add_parser("add", help="Add custom node(s)")
-    node_add_parser.add_argument("node_names", nargs="+", help="Node directory name(s) or registry ID(s)")
+    node_add_parser.add_argument("node_names", nargs="+", help="Node identifier(s): registry-id[@version], github-url[@ref], or directory name")
     node_add_parser.add_argument("--dev", action="store_true", help="Track existing local development node")
     node_add_parser.add_argument("--no-test", action="store_true", help="Don't test resolution")
     node_add_parser.add_argument("--force", action="store_true", help="Force overwrite existing directory")

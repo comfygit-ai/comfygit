@@ -99,12 +99,13 @@ class GitHubClient:
         # TODO: Handle authentication if needed
         return False
 
-    def get_repository_info(self, repo_url: str) -> GitHubRepoInfo | None:
+    def get_repository_info(self, repo_url: str, ref: str | None = None) -> GitHubRepoInfo | None:
         """Get information about a GitHub repository.
-        
+
         Args:
             repo_url: GitHub repository URL
-            
+            ref: Optional git ref (branch/tag/commit) to resolve
+
         Returns:
             Repository information or None if not found
         """
@@ -112,8 +113,11 @@ class GitHubClient:
         if not parsed:
             return None
 
-        owner, name, specified_commit = parsed
-        cache_key = f"{owner}/{name}" + (f"@{specified_commit}" if specified_commit else "")
+        owner, name, url_commit = parsed
+
+        # ref parameter takes precedence over URL-embedded commit
+        target_ref = ref or url_commit
+        cache_key = f"{owner}/{name}" + (f"@{target_ref}" if target_ref else "")
 
         # Try cache first
         cached = self.cache_manager.get("github", cache_key)
@@ -131,16 +135,26 @@ class GitHubClient:
 
             default_branch = repo_data.get("default_branch", "main")
 
-            # Use specified commit if provided, otherwise get latest commit on default branch
-            latest_commit = specified_commit
-            if not specified_commit:
+            # Resolve target ref to commit SHA
+            latest_commit = None
+            if target_ref:
+                # Ref specified - resolve to commit (works for branches, tags, and commits)
+                try:
+                    commits_url = f"https://api.github.com/repos/{owner}/{name}/commits/{target_ref}"
+                    with urllib.request.urlopen(commits_url) as response:
+                        commit_data = json.loads(response.read())
+                        latest_commit = commit_data.get("sha")
+                except urllib.error.HTTPError:
+                    logger.warning(f"Could not resolve ref '{target_ref}' for {owner}/{name}")
+                    pass
+            else:
+                # No ref - get latest commit from default branch
                 try:
                     commits_url = f"https://api.github.com/repos/{owner}/{name}/commits/{default_branch}"
                     with urllib.request.urlopen(commits_url) as response:
                         commit_data = json.loads(response.read())
                         latest_commit = commit_data.get("sha")
                 except urllib.error.HTTPError:
-                    # Could not get latest commit, that's okay
                     pass
 
             # Get latest release

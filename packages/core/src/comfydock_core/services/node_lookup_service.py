@@ -63,27 +63,33 @@ class NodeLookupService:
         2. Otherwise → query live API
 
         Args:
-            identifier: Registry ID (optionally with @version), node name, or git URL
+            identifier: Registry ID, git URL, or name. Supports @version/@ref syntax:
+                       - registry-id@1.0.0 (registry version)
+                       - https://github.com/user/repo@v1.2.3 (git tag)
+                       - https://github.com/user/repo@main (git branch)
+                       - https://github.com/user/repo@abc123 (git commit)
 
         Returns:
             NodeInfo with metadata, or None if not found
         """
-        # Parse version from identifier if present (e.g., "package-id@1.2.3")
+        # Parse version/ref from identifier (e.g., "package-id@1.2.3" or "https://...@branch")
         requested_version = None
-        if '@' in identifier and not is_git_url(identifier):
-            parts = identifier.split('@', 1)
-            identifier = parts[0]
+        base_identifier = identifier
+
+        if '@' in identifier:
+            parts = identifier.rsplit('@', 1)  # rsplit to handle URLs with @
+            base_identifier = parts[0]
             requested_version = parts[1]
 
         # Check if it's a git URL - these bypass cache
-        if is_git_url(identifier):
+        if is_git_url(base_identifier):
             try:
-                if repo_info := self.github_client.get_repository_info(identifier):
+                if repo_info := self.github_client.get_repository_info(base_identifier, ref=requested_version):
                     return NodeInfo(
                         name=repo_info.name,
                         repository=repo_info.clone_url,
                         source="git",
-                        version=repo_info.latest_commit
+                        version=repo_info.latest_commit  # This will be the requested ref's commit
                     )
             except Exception as e:
                 logger.warning(f"Invalid git URL: {e}")
@@ -96,16 +102,16 @@ class NodeLookupService:
 
         # Strategy: Cache first, then API
         if prefer_cache and self.node_mappings_repository:
-            package = self.node_mappings_repository.get_package(identifier)
+            package = self.node_mappings_repository.get_package(base_identifier)
             if package:
-                logger.debug(f"Found '{identifier}' in local cache")
+                logger.debug(f"Found '{base_identifier}' in local cache")
                 return NodeInfo.from_global_package(package, version=requested_version)
             else:
-                logger.debug(f"'{identifier}' not in local cache, trying API...")
+                logger.debug(f"'{base_identifier}' not in local cache, trying API...")
 
         # Fallback to registry API
         try:
-            registry_node = self.registry_client.get_node(identifier)
+            registry_node = self.registry_client.get_node(base_identifier)
             if registry_node:
                 if requested_version:
                     version = requested_version
@@ -119,7 +125,7 @@ class NodeLookupService:
         except CDRegistryError as e:
             logger.warning(f"Cannot reach registry: {e}")
 
-        logger.debug(f"Node '{identifier}' not found")
+        logger.debug(f"Node '{base_identifier}' not found")
         return None
 
     def get_node(self, identifier: str) -> NodeInfo:
