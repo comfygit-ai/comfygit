@@ -283,3 +283,124 @@ class TestCleanupBehavior:
         # Empty sections should be removed
         assert "[tool.comfydock.nodes]" not in content
         assert "[tool.comfydock.models" not in content
+
+
+class TestPyprojectCaching:
+    """Test instance-level caching behavior for pyproject.toml loading."""
+
+    def test_multiple_loads_use_cache(self, temp_pyproject):
+        """Multiple load() calls should use cached config, not reload from disk."""
+        PyprojectManager.reset_load_stats()
+        manager = PyprojectManager(temp_pyproject)
+
+        # First load - should hit disk
+        config1 = manager.load()
+        stats1 = manager.get_load_stats()
+        assert stats1['instance_loads'] == 1, "First load should read from disk"
+
+        # Second load - should use cache
+        config2 = manager.load()
+        stats2 = manager.get_load_stats()
+        assert stats2['instance_loads'] == 1, "Second load should use cache (no disk I/O)"
+
+        # Third load - still cached
+        config3 = manager.load()
+        stats3 = manager.get_load_stats()
+        assert stats3['instance_loads'] == 1, "Third load should use cache (no disk I/O)"
+
+        # All configs should be identical
+        assert config1 is config2, "Cached config should be same object"
+        assert config2 is config3, "Cached config should be same object"
+
+    def test_save_invalidates_cache(self, temp_pyproject):
+        """Saving should invalidate cache, causing next load to read from disk."""
+        PyprojectManager.reset_load_stats()
+        manager = PyprojectManager(temp_pyproject)
+
+        # Load once
+        config = manager.load()
+        assert manager.get_load_stats()['instance_loads'] == 1
+
+        # Load again - should use cache
+        manager.load()
+        assert manager.get_load_stats()['instance_loads'] == 1
+
+        # Modify and save
+        config['project']['version'] = "2.0.0"
+        manager.save(config)
+
+        # Load after save - should reload from disk
+        config_after_save = manager.load()
+        stats = manager.get_load_stats()
+        assert stats['instance_loads'] == 2, "Post-save load should reload from disk"
+        assert config_after_save['project']['version'] == "2.0.0", "Should see updated version"
+
+    def test_mtime_change_invalidates_cache(self, temp_pyproject):
+        """Changing file mtime should invalidate cache."""
+        import time
+
+        PyprojectManager.reset_load_stats()
+        manager = PyprojectManager(temp_pyproject)
+
+        # Load once
+        manager.load()
+        assert manager.get_load_stats()['instance_loads'] == 1
+
+        # Load again - cached
+        manager.load()
+        assert manager.get_load_stats()['instance_loads'] == 1
+
+        # Touch file to change mtime
+        time.sleep(0.01)  # Ensure mtime changes
+        temp_pyproject.touch()
+
+        # Load after touch - should reload
+        manager.load()
+        assert manager.get_load_stats()['instance_loads'] == 2, "Mtime change should trigger reload"
+
+        # Load again - should use new cache
+        manager.load()
+        assert manager.get_load_stats()['instance_loads'] == 2, "Should use new cache"
+
+    def test_force_reload_bypasses_cache(self, temp_pyproject):
+        """force_reload=True should bypass cache and reload from disk."""
+        PyprojectManager.reset_load_stats()
+        manager = PyprojectManager(temp_pyproject)
+
+        # Load once
+        manager.load()
+        assert manager.get_load_stats()['instance_loads'] == 1
+
+        # Load with force_reload
+        manager.load(force_reload=True)
+        assert manager.get_load_stats()['instance_loads'] == 2, "force_reload should bypass cache"
+
+        # Regular load should use newly cached config
+        manager.load()
+        assert manager.get_load_stats()['instance_loads'] == 2, "Should use cache from forced reload"
+
+    def test_multiple_instances_have_independent_caches(self, temp_pyproject):
+        """Multiple PyprojectManager instances should have independent caches."""
+        PyprojectManager.reset_load_stats()
+
+        # Create two managers for same file
+        manager1 = PyprojectManager(temp_pyproject)
+        manager2 = PyprojectManager(temp_pyproject)
+
+        # Load with both
+        config1 = manager1.load()
+        config2 = manager2.load()
+
+        # Both should have loaded from disk (independent caches)
+        assert manager1.get_load_stats()['instance_loads'] == 1
+        assert manager2.get_load_stats()['instance_loads'] == 1
+        assert PyprojectManager._total_load_calls == 2
+
+        # Configs are independent objects
+        assert config1 is not config2, "Different instances should have different cached objects"
+
+        # Second loads should use respective caches
+        manager1.load()
+        manager2.load()
+        assert manager1.get_load_stats()['instance_loads'] == 1
+        assert manager2.get_load_stats()['instance_loads'] == 1

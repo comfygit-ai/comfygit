@@ -29,6 +29,9 @@ logger = get_logger(__name__)
 class PyprojectManager:
     """Manages pyproject.toml file operations for Python projects."""
 
+    # Class-level call counter for tracking total loads across all instances
+    _total_load_calls = 0
+
     def __init__(self, pyproject_path: Path):
         """Initialize the PyprojectManager.
 
@@ -36,6 +39,9 @@ class PyprojectManager:
             pyproject_path: Path to the pyproject.toml file
         """
         self.path = pyproject_path
+        self._instance_load_calls = 0  # Instance-level counter
+        self._config_cache: dict | None = None
+        self._cache_mtime: float | None = None
 
     @cached_property
     def dependencies(self) -> DependencyHandler:
@@ -68,8 +74,28 @@ class PyprojectManager:
         """Check if the pyproject.toml file exists."""
         return self.path.exists()
 
-    def load(self) -> dict:
-        """Load the pyproject.toml file.
+    def get_load_stats(self) -> dict:
+        """Get statistics about pyproject.toml load operations.
+
+        Returns:
+            Dictionary with load statistics including:
+            - instance_loads: Number of loads for this instance
+            - total_loads: Total loads across all instances
+        """
+        return {
+            "instance_loads": self._instance_load_calls,
+            "total_loads": PyprojectManager._total_load_calls,
+        }
+
+    @classmethod
+    def reset_load_stats(cls):
+        """Reset class-level load statistics (useful for testing/benchmarking)."""
+        cls._total_load_calls = 0
+
+    def load(self, force_reload: bool = False) -> dict:
+        """Load the pyproject.toml file with instance-level caching.
+
+        Cache is automatically invalidated when the file's mtime changes.
 
         Args:
             force_reload: Force reload from disk even if cached
@@ -81,8 +107,33 @@ class PyprojectManager:
             CDPyprojectNotFoundError: If the file doesn't exist
             CDPyprojectInvalidError: If the file is empty or invalid
         """
+        import time
+        import traceback
+
         if not self.exists():
             raise CDPyprojectNotFoundError(f"pyproject.toml not found at {self.path}")
+
+        # Check cache validity via mtime
+        current_mtime = self.path.stat().st_mtime
+
+        if (not force_reload and
+            self._config_cache is not None and
+            self._cache_mtime == current_mtime):
+            # Cache hit
+            logger.debug("[PYPROJECT CACHE HIT] Using cached config")
+            return self._config_cache
+
+        # Cache miss - load from disk
+        PyprojectManager._total_load_calls += 1
+        self._instance_load_calls += 1
+
+        # Get caller info for tracking where loads are coming from
+        stack = traceback.extract_stack()
+        caller_frame = stack[-2] if len(stack) >= 2 else None
+        caller_info = f"{caller_frame.filename}:{caller_frame.lineno} in {caller_frame.name}" if caller_frame else "unknown"
+
+        # Start timing
+        start_time = time.perf_counter()
 
         try:
             with open(self.path) as f:
@@ -93,11 +144,27 @@ class PyprojectManager:
         if not config:
             raise CDPyprojectInvalidError(f"pyproject.toml is empty at {self.path}")
 
+        # Cache the loaded config
+        self._config_cache = config
+        self._cache_mtime = current_mtime
+
+        # Calculate elapsed time
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Log with detailed metrics
+        logger.debug(
+            f"[PYPROJECT LOAD #{self._instance_load_calls}/{PyprojectManager._total_load_calls}] "
+            f"Loaded pyproject.toml in {elapsed_ms:.2f}ms | "
+            f"Called from: {caller_info}"
+        )
+
         return config
 
 
     def save(self, config: dict | None = None) -> None:
         """Save the configuration to pyproject.toml.
+
+        Automatically invalidates the cache to ensure fresh reads after save.
 
         Args:
             config: Configuration to save (uses cache if not provided)
@@ -123,6 +190,10 @@ class PyprojectManager:
         except OSError as e:
             raise CDPyprojectError(f"Failed to write pyproject.toml to {self.path}: {e}")
 
+        # Invalidate cache after save to ensure fresh reads
+        self._config_cache = None
+        self._cache_mtime = None
+
         logger.debug(f"Saved pyproject.toml to {self.path}")
 
     def reset_lazy_handlers(self):
@@ -134,6 +205,10 @@ class PyprojectManager:
         for prop in cached_props:
             if prop in self.__dict__:
                 del self.__dict__[prop]
+                
+        # Invalidate cache after save to ensure fresh reads
+        self._config_cache = None
+        self._cache_mtime = None
 
     def _cleanup_empty_sections(self, config: dict) -> None:
         """Recursively remove empty sections from config."""
