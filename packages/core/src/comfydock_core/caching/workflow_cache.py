@@ -188,6 +188,7 @@ class WorkflowCacheRepository:
         import time
         start_time = time.perf_counter()
 
+        # TODO will not work for workflows in subdirectories
         session_key = f"{env_name}:{workflow_name}"
 
         # Phase 1: Check session cache
@@ -657,19 +658,15 @@ class WorkflowCacheRepository:
         logger.debug(f"[CONTEXT] Step 1 (custom mappings) took {step_elapsed:.2f}ms")
 
         # 2. Declared packages for nodes THIS workflow uses
+        # Use authoritative workflow.nodes list instead of inferring from workflow content
         step_start = time.perf_counter()
-        declared_packages = self.pyproject_manager.nodes.get_existing()
-        relevant_packages = set()
 
-        for node in dependencies.non_builtin_nodes:
-            # Check custom mapping
-            if node.type in context["custom_mappings"]:
-                pkg = context["custom_mappings"][node.type]
-                if isinstance(pkg, str):
-                    relevant_packages.add(pkg)
-            # Check cnr_id in properties
-            elif node.properties and node.properties.get('cnr_id'):
-                relevant_packages.add(node.properties['cnr_id'])
+        # Read nodes list from workflow config (written by apply_resolution)
+        workflow_config = self.pyproject_manager.workflows.get_all_with_resolutions().get(workflow_name, {})
+        relevant_packages = set(workflow_config.get('nodes', []))
+
+        # Get global package metadata
+        declared_packages = self.pyproject_manager.nodes.get_existing()
 
         context["declared_packages"] = {
             pkg: {

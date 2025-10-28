@@ -26,6 +26,8 @@ def compute_workflow_hash(workflow_path: Path) -> str:
         >>> compute_workflow_hash(Path("my_workflow.json"))
         "a1b2c3d4e5f6g7h8"
     """
+    # Note: Using direct json.load() rather than WorkflowRepository for performance
+    # and separation of concerns (hashing != parsing). This is intentional.
     # Load workflow JSON
     with open(workflow_path, 'r') as f:
         workflow = json.load(f)
