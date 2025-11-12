@@ -37,7 +37,7 @@ from conftest import simulate_comfyui_save_workflow, test_env, test_workspace
 from helpers.model_index_builder import ModelIndexBuilder
 from helpers.workflow_builder import WorkflowBuilder
 
-from comfydock_core.models.workflow import (
+from comfygit_core.models.workflow import (
     ResolutionResult,
     ResolvedModel,
     WorkflowNodeWidgetRef,

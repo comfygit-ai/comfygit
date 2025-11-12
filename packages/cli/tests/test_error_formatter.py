@@ -1,12 +1,12 @@
 """Tests for CLI error formatter."""
 
 import pytest
-from comfydock_core.models.exceptions import (
+from comfygit_core.models.exceptions import (
     NodeAction,
     NodeConflictContext,
     CDNodeConflictError,
 )
-from comfydock_cli.formatters.error_formatter import NodeErrorFormatter
+from comfygit_cli.formatters.error_formatter import NodeErrorFormatter
 
 
 def test_format_remove_node_action():

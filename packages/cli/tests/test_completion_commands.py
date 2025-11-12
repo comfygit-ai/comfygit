@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from comfydock_cli.completion_commands import CompletionCommands
+from comfygit_cli.completion_commands import CompletionCommands
 
 
 class TestCompletionCommands:
@@ -32,20 +32,20 @@ class TestCompletionCommands:
             assert shell is None
             assert config is None
 
-    @patch('comfydock_cli.completion_commands.shutil.which')
+    @patch('comfygit_cli.completion_commands.shutil.which')
     def test_check_argcomplete_available_found(self, mock_which):
         """Test argcomplete check when available."""
         mock_which.return_value = '/usr/local/bin/register-python-argcomplete'
         assert CompletionCommands._check_argcomplete_available()
         mock_which.assert_called_once_with('register-python-argcomplete')
 
-    @patch('comfydock_cli.completion_commands.shutil.which')
+    @patch('comfygit_cli.completion_commands.shutil.which')
     def test_check_argcomplete_available_not_found(self, mock_which):
         """Test argcomplete check when not available."""
         mock_which.return_value = None
         assert not CompletionCommands._check_argcomplete_available()
 
-    @patch('comfydock_cli.completion_commands.subprocess.run')
+    @patch('comfygit_cli.completion_commands.subprocess.run')
     def test_install_argcomplete_success(self, mock_run):
         """Test successful argcomplete installation."""
         mock_run.return_value = Mock(returncode=0)
@@ -54,7 +54,7 @@ class TestCompletionCommands:
         args = mock_run.call_args[0][0]
         assert args == ['uv', 'tool', 'install', 'argcomplete']
 
-    @patch('comfydock_cli.completion_commands.subprocess.run')
+    @patch('comfygit_cli.completion_commands.subprocess.run')
     def test_install_argcomplete_failure(self, mock_run):
         """Test failed argcomplete installation."""
         from subprocess import CalledProcessError
