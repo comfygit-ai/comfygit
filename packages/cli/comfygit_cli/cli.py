@@ -249,13 +249,13 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     config_parser.add_argument("--show", action="store_true", help="Show current configuration")
     config_parser.set_defaults(func=global_cmds.config)
 
-    # logs - Show application logs
-    logs_parser = subparsers.add_parser("logs", help="Show application logs for debugging")
-    logs_parser.add_argument("-n", "--lines", type=int, default=200, help="Number of lines to show (default: 200)")
-    logs_parser.add_argument("--level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Filter by log level")
-    logs_parser.add_argument("--full", action="store_true", help="Show all logs (no line limit)")
-    logs_parser.add_argument("--workspace", action="store_true", help="Show workspace logs instead of environment logs")
-    logs_parser.set_defaults(func=global_cmds.logs)
+    # debug - Show application logs for debugging
+    debug_parser = subparsers.add_parser("debug", help="Show application debug logs")
+    debug_parser.add_argument("-n", "--lines", type=int, default=200, help="Number of lines to show (default: 200)")
+    debug_parser.add_argument("--level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="Filter by log level")
+    debug_parser.add_argument("--full", action="store_true", help="Show all logs (no line limit)")
+    debug_parser.add_argument("--workspace", action="store_true", help="Show workspace logs instead of environment logs")
+    debug_parser.set_defaults(func=global_cmds.debug)
 
     # Shell completion management
     completion_cmds = CompletionCommands()
@@ -340,16 +340,13 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     repair_parser.set_defaults(func=env_cmds.repair)
 
-    # commit - Commit management with subcommands
-    commit_parser = subparsers.add_parser("commit", help="Commit changes and view history")
-    commit_subparsers = commit_parser.add_subparsers(dest="commit_command", help="Commit commands")
+    # log - Show version history
+    log_parser = subparsers.add_parser("log", help="Show environment version history")
+    log_parser.add_argument("-v", "--verbose", action="store_true", help="Show full details")
+    log_parser.set_defaults(func=env_cmds.log)
 
-    # commit log - Show commit history
-    commit_log_parser = commit_subparsers.add_parser("log", help="Show commit history")
-    commit_log_parser.add_argument("-v", "--verbose", action="store_true", help="Show full details")
-    commit_log_parser.set_defaults(func=env_cmds.commit_log)
-
-    # commit (no subcommand) - defaults to save
+    # commit - Save environment changes
+    commit_parser = subparsers.add_parser("commit", help="Commit environment changes")
     commit_parser.add_argument("-m", "--message", help="Commit message (auto-generated if not provided)")
     commit_parser.add_argument("--auto", action="store_true", help="Auto-resolve issues without interaction")
     commit_parser.add_argument("--allow-issues", action="store_true", help="Allow committing workflows with unresolved issues")

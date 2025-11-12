@@ -281,8 +281,8 @@ class GlobalCommands:
             print(f"✗ Failed to list environments: {e}", file=sys.stderr)
             sys.exit(1)
 
-    def logs(self, args: argparse.Namespace) -> None:
-        """Show application logs with smart environment detection."""
+    def debug(self, args: argparse.Namespace) -> None:
+        """Show application debug logs with smart environment detection."""
         import re
 
         # Smart detection: workspace flag > -e flag > active env > workspace fallback

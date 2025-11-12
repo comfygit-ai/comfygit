@@ -595,8 +595,8 @@ class EnvironmentCommands:
                 elif git_status == "deleted":
                     print(f"    - {workflow_name}.json")
 
-    @with_env_logging("commit log")
-    def commit_log(self, args: argparse.Namespace, logger=None) -> None:
+    @with_env_logging("log")
+    def log(self, args: argparse.Namespace, logger=None) -> None:
         """Show environment version history with simple identifiers."""
         env = self._get_env(args)
 
@@ -1387,15 +1387,15 @@ class EnvironmentCommands:
             if args.target:
                 print(f"\nEnvironment is now at version {args.target}")
                 print("• Run 'cg commit -m \"message\"' to save any new changes")
-                print("• Run 'cg commit log' to see version history")
+                print("• Run 'cg log' to see version history")
             else:
                 print("\nUncommitted changes have been discarded")
                 print("• Environment is now clean and matches the last commit")
-                print("• Run 'cg commit log' to see version history")
+                print("• Run 'cg log' to see version history")
 
         except ValueError as e:
             print(f"✗ {e}", file=sys.stderr)
-            print("\nTip: Run 'cg commit log' to see available versions")
+            print("\nTip: Run 'cg log' to see available versions")
             sys.exit(1)
         except CDEnvironmentError as e:
             print(f"✗ {e}", file=sys.stderr)
