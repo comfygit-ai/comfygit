@@ -24,21 +24,21 @@ except PackageNotFoundError:
     __version__ = "unknown"
 
 
-def _get_cfd_config_dir() -> Path:
-    """Get CFD config directory (creates if needed)."""
-    config_dir = Path.home() / ".config" / "cfd"
+def _get_comfygit_config_dir() -> Path:
+    """Get ComfyGit config directory (creates if needed)."""
+    config_dir = Path.home() / ".config" / "comfygit"
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
 
 
 def _check_for_old_docker_installation() -> None:
     """Warn once about old Docker-based ComfyDock installation."""
-    old_config = Path.home() / ".comfygit" / "environments.json"
+    old_config = Path.home() / ".comfydock" / "environments.json"
     if not old_config.exists():
         return  # No old Docker installation detected
 
     # Check if we've already shown this warning
-    warning_flag = _get_cfd_config_dir() / ".docker_warning_shown"
+    warning_flag = _get_comfygit_config_dir() / ".docker_warning_shown"
     if warning_flag.exists():
         return  # Already warned user
 
@@ -46,14 +46,14 @@ def _check_for_old_docker_installation() -> None:
     print("\n" + "="*70)
     print("ℹ️  OLD DOCKER-BASED COMFYDOCK DETECTED")
     print("="*70)
-    print("\nYou have an old Docker-based ComfyDock (v0.3.x) at ~/.comfygit")
-    print("This is the NEW ComfyDock v1.0+ (UV-based).")
+    print("\nYou have an old Docker-based ComfyDock (v0.3.x) at ~/.comfydock")
+    print("This is the NEW ComfyGit v1.0+ (UV-based).")
     print("\nKey differences:")
-    print("  • Old version: Docker containers, 'comfygit' command")
-    print("  • New version: UV packages, 'cfd' command")
+    print("  • Old version: Docker containers, 'comfydock' command")
+    print("  • New version: UV packages, 'comfygit' command")
     print("\nBoth versions can coexist. Your old environments are unchanged.")
     print("\nTo use old version: pip install comfydock==0.1.6")
-    print("To use new version: cfd init")
+    print("To use new version: comfygit init")
     print("\nMigration guide: https://github.com/comfyhub-org/comfygit/blob/main/MIGRATION.md")
     print("="*70 + "\n")
 
@@ -103,7 +103,7 @@ def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser with hierarchical command structure."""
     parser = argparse.ArgumentParser(
         description="ComfyGit - Manage ComfyUI workspaces and environments",
-        prog="cfd"
+        prog="comfygit"
     )
 
     # Global options

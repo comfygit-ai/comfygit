@@ -30,7 +30,7 @@ class TestStatusDisplaysUninstalledNodes:
 
     def test_status_output_shows_uninstalled_packages(self, test_env):
         """
-        Test that `cfd status` output shows workflows with uninstalled packages.
+        Test that `comfygit status` output shows workflows with uninstalled packages.
 
         This is the actual bug test - it checks that has_issues returns True
         when there are uninstalled packages, even if resolution succeeds.

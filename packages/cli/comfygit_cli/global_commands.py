@@ -80,7 +80,7 @@ class GlobalCommands:
                     print("   • Automatic node resolution from workflow files")
                     print("   • Node package search and discovery")
                     print("")
-                    print("   Download later with: cfd registry update")
+                    print("   Download later with: comfygit registry update")
                     logger.warning("Failed to fetch initial registry data")
 
             print(f"✓ Workspace initialized at {workspace.path}")
@@ -93,9 +93,9 @@ class GlobalCommands:
                 self._show_workspace_env_setup(workspace.path)
 
             print("\nNext steps:")
-            print("  1. Create an environment: cfd create <name>")
-            print("  2. Add custom nodes: cfd -e <name> node add <node>")
-            print("  3. Run ComfyUI: cfd -e <name> run")
+            print("  1. Create an environment: comfygit create <name>")
+            print("  2. Add custom nodes: comfygit -e <name> node add <node>")
+            print("  3. Run ComfyUI: comfygit -e <name> run")
         except Exception as e:
             print(f"✗ Failed to initialize workspace: {e}", file=sys.stderr)
             sys.exit(1)
@@ -217,7 +217,7 @@ class GlobalCommands:
         """Show the default models directory message."""
         models_dir = workspace.get_models_directory()
         print(f"\n✓ Using default models directory: {models_dir}")
-        print("   (Change later with: cfd model index dir <path>)")
+        print("   (Change later with: comfygit model index dir <path>)")
 
     def _scan_and_set_models_dir(self, workspace: Workspace, models_path: Path) -> None:
         """Scan a models directory and set it as the workspace models directory.
@@ -267,7 +267,7 @@ class GlobalCommands:
 
             if not environments:
                 print("No environments found.")
-                print("Create one with: cfd create <name>")
+                print("Create one with: comfygit create <name>")
                 return
 
             print("Environments:")
@@ -366,10 +366,10 @@ class GlobalCommands:
         """Migrate an existing ComfyUI installation (not implemented in MVP)."""
         print("⚠️  Migration is not yet implemented in this MVP")
         print("\nFor now, you can:")
-        print("  1. Create a new environment: cfd create <name>")
+        print("  1. Create a new environment: comfygit create <name>")
         print("  2. Manually add your custom nodes:")
-        print("     cfd -e <name> node add <node-name-or-url>")
-        print("  3. Apply changes: cfd -e <name> sync")
+        print("     comfygit -e <name> node add <node-name-or-url>")
+        print("  3. Apply changes: comfygit -e <name> sync")
 
         # Still do a basic scan if requested
         if args.scan_only:
@@ -750,7 +750,7 @@ class GlobalCommands:
             if not models:
                 print("📦 All indexed models:")
                 print("   No models found")
-                print("   Run 'cfd model index dir <path>' to set your models directory")
+                print("   Run 'comfygit model index dir <path>' to set your models directory")
                 return
 
             # Get stats for header
@@ -942,7 +942,7 @@ class GlobalCommands:
 
             if not info['exists']:
                 print("✗ No registry data cached")
-                print("   Run 'cfd index registry update' to fetch")
+                print("   Run 'comfygit index registry update' to fetch")
                 return
 
             print("📦 Registry Cache Status:")
@@ -1003,7 +1003,7 @@ class GlobalCommands:
             self.workspace.set_models_directory(directory_path, progress=progress)
 
             print(f"\n✓ Models directory set successfully: {directory_path}")
-            print("   Use 'cfd model index sync' to rescan when models change")
+            print("   Use 'comfygit model index sync' to rescan when models change")
 
         except Exception as e:
             logger.error(f"Failed to set models directory '{directory_path}': {e}")
@@ -1023,7 +1023,7 @@ class GlobalCommands:
 
             if result is None:
                 print("✗ No models directory configured")
-                print("   Run 'cfd model index dir <path>' to set your models directory")
+                print("   Run 'comfygit model index dir <path>' to set your models directory")
                 return
 
             # Progress callback already handled display
@@ -1053,7 +1053,7 @@ class GlobalCommands:
                 print(f"   Models Directory: {exists} {models_dir}")
             else:
                 print("   Models Directory: Not configured")
-                print("   Run 'cfd model index dir <path>' to set your models directory")
+                print("   Run 'comfygit model index dir <path>' to set your models directory")
                 return
 
             total_models = stats.get('total_models', 0)
@@ -1253,7 +1253,7 @@ class GlobalCommands:
 
         if added_count > 0:
             print("\nYour environment is now more shareable!")
-            print("  Run 'cfd export' to bundle and distribute")
+            print("  Run 'comfygit export' to bundle and distribute")
 
     # === Config Management ===
 

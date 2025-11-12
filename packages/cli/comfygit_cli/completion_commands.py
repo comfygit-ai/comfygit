@@ -9,8 +9,8 @@ from pathlib import Path
 class CompletionCommands:
     """Handle shell completion installation and management."""
 
-    COMMANDS = ['cfd']
-    COMPLETION_COMMENT = "# ComfyDock tab completion"
+    COMMANDS = ['comfygit', 'cg']
+    COMPLETION_COMMENT = "# ComfyGit tab completion"
     ZSH_INIT_CHECK = 'if ! command -v compdef &> /dev/null; then'
 
     @classmethod
@@ -173,7 +173,7 @@ class CompletionCommands:
                 print("\nManual installation:")
                 print("  uv tool install argcomplete")
                 print("\nThen run:")
-                print("  comfydock completion install")
+                print("  comfygit completion install")
                 sys.exit(1)
             print("✓ argcomplete installed")
 
@@ -186,9 +186,9 @@ class CompletionCommands:
             print(f"  source {config_file}")
             print(f"\nOr start a new terminal session.")
             print(f"\nTry it out:")
-            print(f"  comfydock stat<TAB>")
-            print(f"  cfd use <TAB>")
-            print(f"  cfd workflow resolve <TAB>")
+            print(f"  comfygit stat<TAB>")
+            print(f"  comfygit use <TAB>")
+            print(f"  comfygit workflow resolve <TAB>")
         except Exception as e:
             print(f"✗ Failed to install completion: {e}")
             sys.exit(1)
@@ -240,7 +240,7 @@ class CompletionCommands:
             if not argcomplete_available:
                 print("\n⚠️  Warning: Completion is configured but argcomplete is not in PATH")
                 print("   Install with: uv tool install argcomplete")
-            print(f"\nTo uninstall: comfydock completion uninstall")
+            print(f"\nTo uninstall: comfygit completion uninstall")
         else:
             print("Status: ✗ Not installed")
-            print(f"\nTo install: comfydock completion install")
+            print(f"\nTo install: comfygit completion install")

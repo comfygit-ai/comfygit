@@ -89,7 +89,7 @@ class TestCompletionCommands:
             # Verify it was added
             content = config_file.read_text()
             assert CompletionCommands.COMPLETION_COMMENT in content
-            assert 'eval "$(register-python-argcomplete cfd)"' in content
+            assert 'eval "$(register-python-argcomplete comfygit)"' in content
 
             # Verify no zsh-specific initialization
             assert 'compinit' not in content
@@ -112,7 +112,7 @@ class TestCompletionCommands:
             # Verify it was added
             content = config_file.read_text()
             assert CompletionCommands.COMPLETION_COMMENT in content
-            assert 'eval "$(register-python-argcomplete cfd)"' in content
+            assert 'eval "$(register-python-argcomplete comfygit)"' in content
 
             # Verify zsh initialization block
             assert 'compinit' in content
@@ -136,7 +136,7 @@ class TestCompletionCommands:
             assert config_file.exists()
             content = config_file.read_text()
             assert CompletionCommands.COMPLETION_COMMENT in content
-            assert 'eval "$(register-python-argcomplete cfd)"' in content
+            assert 'eval "$(register-python-argcomplete comfygit)"' in content
         finally:
             if config_file.exists():
                 config_file.unlink()
@@ -148,7 +148,7 @@ class TestCompletionCommands:
             f.write(
                 "# Before\n"
                 f"{CompletionCommands.COMPLETION_COMMENT}\n"
-                'eval "$(register-python-argcomplete cfd)"\n'
+                'eval "$(register-python-argcomplete comfygit)"\n'
                 "# After\n"
             )
 
@@ -180,7 +180,7 @@ class TestCompletionCommands:
                 "    compinit\n"
                 "fi\n"
                 "\n"
-                'eval "$(register-python-argcomplete cfd)"\n'
+                'eval "$(register-python-argcomplete comfygit)"\n'
                 "# After\n"
             )
 
@@ -232,6 +232,6 @@ class TestCompletionCommands:
             second_content = config_file.read_text()
 
             # Content should have doubled (not idempotent by design, install command checks first)
-            assert second_content.count('eval "$(register-python-argcomplete cfd)"') == 2
+            assert second_content.count('eval "$(register-python-argcomplete comfygit)"') == 2
         finally:
             config_file.unlink()

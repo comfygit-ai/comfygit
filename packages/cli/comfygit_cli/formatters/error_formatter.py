@@ -17,10 +17,10 @@ class NodeErrorFormatter:
         if error.can_retry:
             lines.append("\nTo fix this issue:")
             lines.append("  1. Download registry data:")
-            lines.append("     → cfd registry update")
+            lines.append("     → comfygit registry update")
             lines.append("")
             lines.append("  2. Check download status:")
-            lines.append("     → cfd registry status")
+            lines.append("     → comfygit registry status")
 
         return "\n".join(lines)
 
@@ -28,22 +28,22 @@ class NodeErrorFormatter:
     def format_node_action(action: NodeAction) -> str:
         """Convert NodeAction to CLI command string."""
         if action.action_type == 'remove_node':
-            return f"cfd node remove {action.node_identifier}"
+            return f"comfygit node remove {action.node_identifier}"
 
         elif action.action_type == 'add_node_dev':
-            return f"cfd node add {action.node_name} --dev"
+            return f"comfygit node add {action.node_name} --dev"
 
         elif action.action_type == 'add_node_force':
-            return f"cfd node add {action.node_identifier} --force"
+            return f"comfygit node add {action.node_identifier} --force"
 
         elif action.action_type == 'add_node_version':
-            return f"cfd node add {action.node_identifier}"
+            return f"comfygit node add {action.node_identifier}"
 
         elif action.action_type == 'rename_directory':
             return f"mv custom_nodes/{action.directory_name} custom_nodes/{action.new_name}"
 
         elif action.action_type == 'update_node':
-            return f"cfd node update {action.node_identifier}"
+            return f"comfygit node update {action.node_identifier}"
 
         return f"# Unknown action: {action.action_type}"
 

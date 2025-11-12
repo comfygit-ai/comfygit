@@ -10,7 +10,7 @@ from comfygit_core.models.exceptions import UVCommandError
 
 
 class TestPyAdd:
-    """Test 'cfd py add' command handler."""
+    """Test 'comfygit py add' command handler."""
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_add_single_package(self, mock_workspace):
@@ -274,7 +274,7 @@ class TestPyAdd:
 
 
 class TestPyRemove:
-    """Test 'cfd py remove' command handler."""
+    """Test 'comfygit py remove' command handler."""
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_remove_single_package(self, mock_workspace):
@@ -402,7 +402,7 @@ class TestPyRemove:
 
 
 class TestPyAddTier2Flags:
-    """Test 'cfd py add' with Tier 2 power-user flags."""
+    """Test 'comfygit py add' with Tier 2 power-user flags."""
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_add_with_group_flag(self, mock_workspace):
@@ -571,7 +571,7 @@ class TestPyAddTier2Flags:
 
 
 class TestPyUvPassthrough:
-    """Test 'cfd py uv' UV passthrough for advanced users."""
+    """Test 'comfygit py uv' UV passthrough for advanced users."""
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     @patch('comfygit_cli.env_commands.subprocess.run')
@@ -724,7 +724,7 @@ class TestPyUvPassthrough:
 
 
 class TestPyList:
-    """Test 'cfd py list' command handler."""
+    """Test 'comfygit py list' command handler."""
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_list_empty_dependencies(self, mock_workspace):

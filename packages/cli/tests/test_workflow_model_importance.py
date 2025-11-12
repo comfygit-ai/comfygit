@@ -17,7 +17,7 @@ class TestWorkflowModelImportanceCommand:
     """Test the workflow model importance CLI command."""
 
     def test_direct_mode_update_single_model(self, test_env, test_workspace):
-        """Test direct mode: cfd workflow model importance <workflow> <model> <level>."""
+        """Test direct mode: comfygit workflow model importance <workflow> <model> <level>."""
         # ARRANGE: Create and resolve workflow with a model
         model_builder = ModelIndexBuilder(test_workspace)
         model_builder.add_model("test_model.safetensors", "checkpoints")
