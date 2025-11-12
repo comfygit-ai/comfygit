@@ -149,6 +149,7 @@ def main():
         sys.exit(0)
 
     # Get PR number from args or detect from current branch
+    pr_number = None
     if len(sys.argv) > 1:
         try:
             pr_number = int(sys.argv[1])
@@ -168,20 +169,26 @@ def main():
             print("✗ Already on main branch. Nothing to sync.")
             sys.exit(1)
 
-        # Find PR for current branch
+        # Try to find PR for current branch
         pr_number = get_pr_for_branch(original_branch)
 
         if not pr_number:
-            print(f"✗ No open PR found for branch: {original_branch}")
-            print("  Provide PR number: python merge-and-sync.py <PR_NUMBER>")
-            sys.exit(1)
+            print(f"ℹ No open PR found for branch: {original_branch}")
+            print(f"  Skipping merge step, proceeding directly to sync...")
+            print()
 
     print(f"Branch: {original_branch}")
-    print(f"PR: #{pr_number}")
+    if pr_number:
+        print(f"PR: #{pr_number}")
+    else:
+        print(f"PR: None (assuming already merged)")
     print()
 
-    # Merge PR
-    merge_pr(pr_number)
+    # Merge PR if found
+    if pr_number:
+        merge_pr(pr_number)
+    else:
+        print("Skipping PR merge (no open PR found)")
 
     # Sync branches
     sync_branches(original_branch)
