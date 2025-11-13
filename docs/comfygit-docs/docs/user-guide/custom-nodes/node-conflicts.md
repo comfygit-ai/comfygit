@@ -400,7 +400,7 @@ Ensure no errors appear when ComfyUI starts.
 **View full UV error output:**
 
 ```bash
-cg logs -n 100
+cg debug -n 100
 ```
 
 This shows the complete UV resolution error, not just the summary.

@@ -22,8 +22,10 @@ This creates `~/comfygit/` with the following structure:
 
 ```
 ~/comfygit/
-├── environments/          # Your ComfyUI environments
+├── comfygit_cache/        # Cache for registry, custom nodes, comfyui clones, etc.
 ├── models/                # Shared models directory
+├── environments/          # Your ComfyUI environments
+├── logs/                  # Environment and workspace logs
 └── .metadata/             # Workspace configuration
 ```
 
@@ -41,7 +43,7 @@ cg create my-project --use
 This will:
 
 1. Create a new environment called `my-project`
-2. Download and install ComfyUI
+2. Download and install ComfyUI (latest release from github)
 3. Install PyTorch with GPU support (auto-detected)
 4. Set it as your active environment
 5. Take 2-5 minutes depending on your internet speed
@@ -155,7 +157,7 @@ This creates a git commit in the `.cec/` directory tracking:
 **Check your commit history:**
 
 ```bash
-cg commit log
+cg log
 ```
 
 **Output:**
@@ -163,14 +165,15 @@ cg commit log
 ```
 Version history for environment 'my-project':
 
-v1: Added depthflow nodes
+v2: Added depthflow nodes
+v1: Initial environment setup
 
 Use 'cg rollback <version>' to restore to a specific version
 ```
 
 !!! tip "Verbose mode"
     ```bash
-    cg commit log --verbose
+    cg log --verbose
     ```
 
     Shows timestamps and full commit hashes.
@@ -302,6 +305,7 @@ Here are the most important commands for daily use:
 | `cg status` | Show environment status | `cg status` |
 | `cg node add` | Add custom node | `cg node add comfyui-depthflow-nodes` |
 | `cg commit` | Save current state | `cg commit -m "message"` |
+| `cg log` | List environment commits | `cg log` |
 | `cg rollback` | Revert to previous state | `cg rollback v1` |
 | `cg export` | Export environment | `cg export my-pack.tar.gz` |
 | `cg import` | Import environment | `cg import my-pack.tar.gz` |
@@ -320,7 +324,7 @@ See the [CLI reference](../cli-reference/environment-commands.md) for a complete
 
 !!! tip "Check logs when things fail"
     ```bash
-    cg logs -n 50
+    cg debug -n 50
     ```
 
     Shows the last 50 log lines for debugging.

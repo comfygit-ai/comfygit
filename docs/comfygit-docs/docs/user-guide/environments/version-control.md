@@ -176,7 +176,7 @@ cg commit -m "WIP: portrait workflow" --allow-issues
 ### Compact format (default)
 
 ```bash
-cg commit log
+cg log
 ```
 
 **Output:**
@@ -196,7 +196,7 @@ Use 'cg rollback <version>' to restore to a specific version
 See full details:
 
 ```bash
-cg commit log --verbose
+cg log --verbose
 ```
 
 **Output:**
@@ -256,7 +256,7 @@ Type `y` and press Enter.
 
 Uncommitted changes have been discarded
 • Environment is now clean and matches the last commit
-• Run 'cg commit log' to see version history
+• Run 'cg log' to see version history
 ```
 
 **Skip confirmation:**
@@ -296,7 +296,7 @@ Continue? (y/N):
 
 Environment is now at version v2
 • Run 'cg commit -m "message"' to save any new changes
-• Run 'cg commit log' to see version history
+• Run 'cg log' to see version history
 ```
 
 **What happens:**
