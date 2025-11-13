@@ -1,0 +1,381 @@
+/* ComfyGit Documentation Custom Styles */
+
+/* ============================================
+   COLOR SCHEME - Git/Version Control Theme
+   ============================================ */
+
+:root {
+  /* ComfyGit Brand Colors - Git/Version Control Inspired */
+  --cd-harbor-deep: #0a0e27;        /* Deep navy background */
+  --cd-harbor: #0f1419;              /* Dark background */
+  --cd-dock: #1a1f35;                /* Slightly lighter background */
+  --cd-container: #2563eb;           /* Primary blue (Docker inspired) */
+  --cd-container-light: #3b82f6;     /* Lighter blue */
+  --cd-flow: #06b6d4;                /* Cyan accent (data flow) */
+  --cd-flow-bright: #0ea5e9;         /* Brighter cyan */
+  --cd-node: #8b5cf6;                /* Purple accent (AI/nodes) */
+  --cd-node-light: #a78bfa;          /* Lighter purple */
+  --cd-canvas: #f3f4f6;              /* Light text color */
+  --cd-canvas-bright: #ffffff;       /* Pure white */
+  --cd-muted: #9ca3af;               /* Muted text */
+  --cd-muted-dark: #6b7280;          /* Darker muted */
+  --cd-code-bg: #0d1117;             /* Code background (GitHub dark) */
+  --cd-code-bg-light: #f6f8fa;       /* Code background light */
+  --cd-warning: #fbbf24;             /* Warning yellow */
+  --cd-error: #ef4444;               /* Error red */
+  --cd-success: #10b981;             /* Success green */
+}
+
+/* Light Mode - Clean and Professional */
+[data-md-color-scheme="comfygit-light"] {
+  --md-default-fg-color: #1f2937;
+  --md-default-fg-color--light: #4b5563;
+  --md-default-fg-color--lighter: #6b7280;
+  --md-default-fg-color--lightest: rgba(0, 0, 0, 0.12);
+  --md-default-bg-color: #ffffff;
+  --md-default-bg-color--light: #f9fafb;
+  --md-default-bg-color--lighter: #f3f4f6;
+  --md-default-bg-color--lightest: #e5e7eb;
+
+  --md-primary-fg-color: #1e40af;
+  --md-primary-fg-color--light: #2563eb;
+  --md-primary-fg-color--dark: #1e3a8a;
+  --md-primary-bg-color: #ffffff;
+
+  --md-accent-fg-color: #0891b2;
+  --md-accent-fg-color--transparent: rgba(8, 145, 178, 0.1);
+  --md-accent-bg-color: #ffffff;
+
+  --md-typeset-a-color: var(--cd-container);
+  --md-typeset-mark-color: rgba(251, 191, 36, 0.5);
+
+  --md-code-fg-color: #1f2937;
+  --md-code-bg-color: var(--cd-code-bg-light);
+  --md-code-hl-color: rgba(37, 99, 235, 0.1);
+}
+
+/* Dark Mode - High Contrast Tech Theme */
+[data-md-color-scheme="comfygit-dark"] {
+  --md-default-fg-color: var(--cd-canvas);
+  --md-default-fg-color--light: var(--cd-muted);
+  --md-default-fg-color--lighter: var(--cd-muted-dark);
+  --md-default-fg-color--lightest: rgba(255, 255, 255, 0.3);
+  --md-default-bg-color: var(--cd-harbor-deep);
+  --md-default-bg-color--light: var(--cd-harbor);
+  --md-default-bg-color--lighter: var(--cd-dock);
+  --md-default-bg-color--lightest: #252a3d;
+
+  --md-primary-fg-color: var(--cd-dock);
+  --md-primary-fg-color--light: #252a3d;
+  --md-primary-fg-color--dark: var(--cd-harbor);
+  --md-primary-bg-color: var(--cd-canvas-bright);
+
+  --md-accent-fg-color: var(--cd-flow);
+  --md-accent-fg-color--transparent: rgba(6, 182, 212, 0.1);
+  --md-accent-bg-color: var(--cd-canvas-bright);
+
+  --md-typeset-color: var(--cd-canvas);
+  --md-typeset-a-color: var(--cd-flow-bright);
+  --md-typeset-mark-color: var(--cd-warning);
+
+  --md-code-fg-color: var(--cd-canvas);
+  --md-code-bg-color: var(--cd-code-bg);
+  --md-code-hl-color: rgba(6, 182, 212, 0.15);
+
+  /* Syntax Highlighting - High Contrast */
+  --md-code-hl-comment-color: var(--cd-muted-dark);
+  --md-code-hl-punctuation-color: var(--cd-muted);
+  --md-code-hl-generic-color: var(--cd-node-light);
+  --md-code-hl-variable-color: var(--cd-canvas);
+  --md-code-hl-string-color: #a5d6ff;
+  --md-code-hl-keyword-color: #ff7b72;
+  --md-code-hl-operator-color: var(--cd-flow);
+  --md-code-hl-number-color: #79c0ff;
+  --md-code-hl-special-color: var(--cd-node-light);
+  --md-code-hl-function-color: #d2a8ff;
+  --md-code-hl-constant-color: var(--cd-warning);
+  --md-code-hl-name-color: var(--md-code-fg-color);
+
+  /* Table colors */
+  --md-typeset-table-color: rgba(255, 255, 255, 0.12);
+  --md-typeset-table-color--light: rgba(255, 255, 255, 0.035);
+
+  /* Diff colors */
+  --md-typeset-del-color: rgba(239, 68, 68, 0.15);
+  --md-typeset-ins-color: rgba(16, 185, 129, 0.15);
+}
+
+/* Theme-specific image handling */
+[data-md-color-scheme="comfygit-light"] img[src$="#only-dark"],
+[data-md-color-scheme="comfygit-light"] img[src$="#gh-dark-mode-only"] {
+  display: none;
+}
+
+[data-md-color-scheme="comfygit-light"] img[src$="#only-light"],
+[data-md-color-scheme="comfygit-light"] img[src$="#gh-light-mode-only"] {
+  display: inline;
+}
+
+[data-md-color-scheme="comfygit-dark"] img[src$="#only-light"],
+[data-md-color-scheme="comfygit-dark"] img[src$="#gh-light-mode-only"] {
+  display: none;
+}
+
+[data-md-color-scheme="comfygit-dark"] img[src$="#only-dark"],
+[data-md-color-scheme="comfygit-dark"] img[src$="#gh-dark-mode-only"] {
+  display: inline;
+}
+
+/* Enhanced admonitions in dark mode */
+[data-md-color-scheme="comfygit-dark"] .admonition {
+  color: var(--cd-canvas);
+  background-color: var(--md-code-bg-color);
+  border-left: 0.2rem solid var(--md-accent-fg-color);
+}
+
+[data-md-color-scheme="comfygit-dark"] .admonition .admonition-title {
+  color: var(--cd-canvas-bright);
+  background-color: rgba(6, 182, 212, 0.1);
+}
+
+[data-md-color-scheme="comfygit-dark"] .admonition p,
+[data-md-color-scheme="comfygit-dark"] .admonition li {
+  color: var(--cd-canvas);
+}
+
+[data-md-color-scheme="comfygit-dark"] .admonition code {
+  color: var(--cd-canvas);
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-md-color-scheme="comfygit-dark"] .admonition a {
+  color: var(--cd-flow-bright);
+}
+
+/* Enhanced links in dark mode */
+[data-md-color-scheme="comfygit-dark"] details summary a {
+  color: var(--cd-flow-bright);
+}
+
+/* Better table display */
+.md-typeset__table {
+  min-width: 100%;
+}
+
+.md-typeset table:not([class]) {
+  display: table;
+}
+
+/* Navigation enhancements for larger screens */
+@media screen and (min-width: 76.25em) {
+  /* Reduce nav font size for more content */
+  .md-nav--primary .md-nav {
+    font-size: 0.75rem;
+  }
+
+  /* Section headings slightly larger */
+  .md-nav__item--section > .md-nav__link {
+    font-weight: normal;
+    font-size: 0.85rem;
+  }
+
+  /* Tighter spacing for navigation */
+  .md-nav--primary .md-nav__link {
+    margin: 0;
+  }
+
+  .md-nav--primary .md-nav__item {
+    margin-top: 0.35em;
+  }
+
+  .md-nav--primary .md-nav__item--section {
+    margin-bottom: 0.75em;
+    margin-top: 1em;
+  }
+
+  /* Force full viewport height for consistent layout */
+  .md-main {
+    min-height: 100vh;
+  }
+}
+
+/* Bold active navigation links for accessibility */
+.md-nav__link--active {
+  font-weight: bold;
+  color: var(--md-accent-fg-color);
+}
+
+/* Prevent selection of code prompts and output */
+.highlight .gp,
+.highlight .go {
+  user-select: none;
+}
+
+/* ============================================
+   EXISTING STYLES (Updated)
+   ============================================ */
+
+/* Card grid styling for better layout */
+.grid.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.grid.cards > * {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.2rem;
+  padding: 1rem;
+  transition: box-shadow 0.2s;
+}
+
+.grid.cards > *:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+
+/* Command output styling */
+code.language-bash::before,
+code.language-powershell::before,
+code.language-cmd::before {
+  opacity: 0.6;
+}
+
+/* Table improvements */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+}
+
+table th {
+  background-color: var(--md-primary-fg-color--light);
+  color: var(--md-primary-bg-color);
+  font-weight: 600;
+}
+
+/* Navigation improvements */
+.md-tabs {
+  background-color: var(--md-primary-fg-color);
+}
+
+/* Improve readability of inline code */
+code {
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  background-color: var(--md-code-bg-color);
+}
+
+/* Better spacing for lists */
+li {
+  margin: 0.3rem 0;
+}
+
+/* Improve blockquote styling */
+blockquote {
+  border-left: 4px solid var(--md-accent-fg-color);
+  padding-left: 1rem;
+  margin: 1rem 0;
+  font-style: italic;
+  opacity: 0.9;
+}
+
+/* Title wrapper to position button inline with h1 */
+.md-title-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.md-title-wrapper h1 {
+  margin: 0;
+  flex: 1;
+}
+
+/* Copy Markdown Button */
+.md-copy-markdown-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--md-default-bg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.375rem;
+  color: var(--md-default-fg-color);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-family: inherit;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.md-copy-markdown-button:hover {
+  background: var(--md-default-fg-color--lightest);
+  border-color: var(--md-default-fg-color--light);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.md-copy-markdown-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.md-copy-markdown-button svg {
+  flex-shrink: 0;
+}
+
+.md-copy-markdown-button .md-button-label {
+  line-height: 1;
+}
+
+/* Copy notification toast */
+.md-copy-notification {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  padding: 0.8rem 1.2rem;
+  background: var(--md-accent-fg-color);
+  color: var(--md-accent-bg-color);
+  border-radius: 0.3rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  font-size: 0.9rem;
+  font-weight: 500;
+  z-index: 1000;
+  opacity: 0;
+  transform: translateY(1rem);
+  transition: all 0.3s ease;
+}
+
+.md-copy-notification.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.md-copy-notification.error {
+  background: var(--cd-error);
+  color: var(--cd-canvas-bright);
+}
+
+/* Mobile responsive - stack vertically */
+@media screen and (max-width: 76.1875em) {
+  .md-title-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .md-copy-markdown-button .md-button-label {
+    display: none;
+  }
+
+  .md-copy-markdown-button {
+    padding: 0.5rem;
+  }
+}
