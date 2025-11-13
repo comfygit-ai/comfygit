@@ -9,15 +9,18 @@ from ..logging.logging_config import get_logger
 from ..managers.pyproject_manager import PyprojectManager
 from ..managers.uv_project_manager import UVProjectManager
 from ..models.exceptions import (
+    CDDependencyConflictError,
     CDEnvironmentError,
     CDNodeConflictError,
     CDNodeNotFoundError,
+    DependencyConflictContext,
     NodeAction,
     NodeConflictContext,
 )
 from ..models.shared import NodeInfo, NodePackage, NodeRemovalResult, UpdateResult
 from ..services.node_lookup_service import NodeLookupService
 from ..strategies.confirmation import AutoConfirmStrategy, ConfirmationStrategy
+from ..utils.conflict_parser import extract_conflicting_packages
 from ..utils.dependency_parser import parse_dependency_string
 from ..utils.git import is_github_url, normalize_github_url
 from ..validation.resolution_tester import ResolutionTester
@@ -94,10 +97,7 @@ class NodeManager:
             logger.info(f"Testing dependency resolution for '{node_package.name}' before installation")
             test_result = self._test_requirements_in_isolation(node_package.requirements)
             if not test_result.success:
-                raise CDNodeConflictError(
-                    f"Node '{node_package.name}' has dependency conflicts: "
-                    f"{self.resolution_tester.format_conflicts(test_result)}"
-                )
+                self._raise_dependency_conflict(node_package.name, test_result)
 
         # === BEGIN TRANSACTIONAL SECTION ===
         # Snapshot state before any modifications for rollback
@@ -370,10 +370,7 @@ class NodeManager:
             logger.info(f"Testing dependency resolution for '{node_package.name}' before installation")
             test_result = self._test_requirements_in_isolation(node_package.requirements)
             if not test_result.success:
-                raise CDNodeConflictError(
-                    f"Node '{node_package.name}' has dependency conflicts: "
-                    f"{self.resolution_tester.format_conflicts(test_result)}"
-                )
+                self._raise_dependency_conflict(node_package.name, test_result)
 
         # === BEGIN TRANSACTIONAL SECTION ===
         # Snapshot state before any modifications for rollback
@@ -1037,10 +1034,7 @@ class NodeManager:
         if not no_test:
             resolution_result = self.resolution_tester.test_resolution(self.pyproject.path)
             if not resolution_result.success:
-                raise CDNodeConflictError(
-                    f"Updated requirements for '{node_info.name}' have conflicts: "
-                    f"{self.resolution_tester.format_conflicts(resolution_result)}"
-                )
+                self._raise_dependency_conflict(node_info.name, resolution_result)
 
         result.requirements_added = list(added)
         result.requirements_removed = list(removed)
@@ -1345,4 +1339,40 @@ class NodeManager:
             base_pyproject=self.pyproject.path,
             additional_deps=requirements,
             group_name=None  # Test as main dependencies for broadest compatibility check
+        )
+
+    def _raise_dependency_conflict(self, node_name: str, test_result) -> None:
+        """Raise enhanced dependency conflict error with actionable suggestions.
+
+        Args:
+            node_name: Name of the node being installed
+            test_result: ResolutionResult from dependency testing
+        """
+        # Extract conflicting package pairs
+        conflict_pairs = extract_conflicting_packages(test_result.stderr)
+
+        # Build simple, honest suggestions
+        suggestions = [
+            NodeAction(
+                action_type='skip_node',
+                description=f"Skip installing '{node_name}'"
+            ),
+            NodeAction(
+                action_type='add_constraint',
+                description="Add version constraint to override (see --verbose for details)"
+            )
+        ]
+
+        # Create enhanced context
+        context = DependencyConflictContext(
+            node_name=node_name,
+            conflicting_packages=conflict_pairs,
+            conflict_descriptions=test_result.conflicts,
+            raw_stderr=test_result.stderr,
+            suggested_actions=suggestions
+        )
+
+        raise CDDependencyConflictError(
+            f"Cannot add '{node_name}' due to dependency conflicts",
+            context=context
         )

@@ -19,8 +19,7 @@ comfygit node [-h] {add,remove,prune,list,update} ...
 **Usage:**
 
 ```bash
-comfygit node add [-h] [--dev] [--no-test] [--force]
-                         node_names [node_names ...]
+comfygit node add [-h] [--dev] [--no-test] [--force] [--verbose] node_names [node_names ...]
 ```
 
 **Arguments:**
@@ -32,6 +31,7 @@ comfygit node add [-h] [--dev] [--no-test] [--force]
 - `--dev` - Track existing local development node (default: `False`)
 - `--no-test` - Don't test resolution (default: `False`)
 - `--force` - Force overwrite existing directory (default: `False`)
+- `--verbose, -v` - Show full UV error output for dependency conflicts (default: `False`)
 
 
 ### `remove`

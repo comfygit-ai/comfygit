@@ -58,9 +58,7 @@ comfygit workflow model [-h] {importance} ...
 **Usage:**
 
 ```bash
-comfygit workflow model importance [-h]
-                                          [workflow_name] [model_identifier]
-                                          [{required,flexible,optional}]
+comfygit workflow model importance [-h] [workflow_name] [model_identifier] [{required,flexible,optional}]
 ```
 
 **Arguments:**

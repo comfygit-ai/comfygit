@@ -8,7 +8,7 @@ import sys
 from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
-from comfygit_core.models.exceptions import CDEnvironmentError, CDNodeConflictError, CDRegistryDataError, UVCommandError
+from comfygit_core.models.exceptions import CDDependencyConflictError, CDEnvironmentError, CDNodeConflictError, CDRegistryDataError, UVCommandError
 from comfygit_core.utils.uv_error_handler import handle_uv_error
 
 from .formatters.error_formatter import NodeErrorFormatter
@@ -703,6 +703,13 @@ class EnvironmentCommands:
             if logger:
                 logger.error(f"Registry data unavailable for node add: {e}", exc_info=True)
             print(f"✗ Cannot add node - registry data unavailable", file=sys.stderr)
+            print(formatted, file=sys.stderr)
+            sys.exit(1)
+        except CDDependencyConflictError as e:
+            # Dependency conflict with enhanced formatting
+            formatted = NodeErrorFormatter.format_dependency_conflict_error(e, verbose=args.verbose)
+            if logger:
+                logger.error(f"Dependency conflict for '{node_name}': {e}", exc_info=True)
             print(formatted, file=sys.stderr)
             sys.exit(1)
         except CDNodeConflictError as e:

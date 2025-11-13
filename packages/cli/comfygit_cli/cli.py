@@ -452,6 +452,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     node_add_parser.add_argument("--dev", action="store_true", help="Track existing local development node")
     node_add_parser.add_argument("--no-test", action="store_true", help="Don't test resolution")
     node_add_parser.add_argument("--force", action="store_true", help="Force overwrite existing directory")
+    node_add_parser.add_argument("--verbose", "-v", action="store_true", help="Show full UV error output for dependency conflicts")
     node_add_parser.set_defaults(func=env_cmds.node_add)
 
     # node remove

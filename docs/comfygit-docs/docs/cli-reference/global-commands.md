@@ -35,9 +35,7 @@ comfygit list [-h]
 **Usage:**
 
 ```bash
-comfygit import [-h] [--name NAME] [--branch BRANCH]
-                       [--torch-backend BACKEND] [--use]
-                       [path]
+comfygit import [-h] [--name NAME] [--branch BRANCH] [--torch-backend BACKEND] [--use] [path]
 ```
 
 **Arguments:**
@@ -109,8 +107,12 @@ comfygit model index find [-h] query
 **Usage:**
 
 ```bash
-comfygit model index list [-h]
+comfygit model index list [-h] [--duplicates]
 ```
+
+**Options:**
+
+- `--duplicates` - Show only models with multiple locations (default: `False`)
 
 
 #### `show`

@@ -8,8 +8,8 @@
 **Usage:**
 
 ```bash
-comfygit create [-h] [--template TEMPLATE] [--python PYTHON]
-                       [--comfyui COMFYUI] [--torch-backend BACKEND] [--use]
+comfygit create [-h] [--template TEMPLATE] [--python PYTHON] [--comfyui COMFYUI] [--torch-backend BACKEND]
+                       [--use]
                        name
 ```
 
