@@ -476,7 +476,7 @@ Each push and pull creates versions in your environment history.
 See past versions:
 
 ```bash
-cg -e my-env commit log
+cg -e my-env log
 ```
 
 **Output:**

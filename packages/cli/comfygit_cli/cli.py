@@ -103,7 +103,7 @@ def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser with hierarchical command structure."""
     parser = argparse.ArgumentParser(
         description="ComfyGit - Manage ComfyUI workspaces and environments",
-        prog="comfygit"
+        prog="cg"
     )
 
     # Global options
@@ -174,6 +174,7 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     import_parser.add_argument("--use", action="store_true", help="Set imported environment as active")
+    import_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts, use defaults for workspace initialization")
     import_parser.set_defaults(func=global_cmds.import_env)
 
     # export - Export ComfyGit environment
@@ -197,6 +198,7 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
 
     # model index list
     model_index_list_parser = model_index_subparsers.add_parser("list", help="List all indexed models")
+    model_index_list_parser.add_argument("--duplicates", action="store_true", help="Show only models with multiple locations")
     model_index_list_parser.set_defaults(func=global_cmds.model_index_list)
 
     # model index show
@@ -298,6 +300,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     create_parser.add_argument("--use", action="store_true", help="Set active environment after creation")
+    create_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts, use defaults for workspace initialization")
     create_parser.set_defaults(func=env_cmds.create)
 
     # use - Set active environment
@@ -451,6 +454,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     node_add_parser.add_argument("--dev", action="store_true", help="Track existing local development node")
     node_add_parser.add_argument("--no-test", action="store_true", help="Don't test resolution")
     node_add_parser.add_argument("--force", action="store_true", help="Force overwrite existing directory")
+    node_add_parser.add_argument("--verbose", "-v", action="store_true", help="Show full UV error output for dependency conflicts")
     node_add_parser.set_defaults(func=env_cmds.node_add)
 
     # node remove
@@ -561,7 +565,13 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     # py remove
     py_remove_parser = py_subparsers.add_parser("remove", help="Remove Python dependencies")
     py_remove_parser.add_argument("packages", nargs="+", help="Package names to remove")
+    py_remove_parser.add_argument("--group", help="Remove packages from dependency group instead of main dependencies")
     py_remove_parser.set_defaults(func=env_cmds.py_remove)
+
+    # py remove-group
+    py_remove_group_parser = py_subparsers.add_parser("remove-group", help="Remove entire dependency group")
+    py_remove_group_parser.add_argument("group", help="Dependency group name to remove")
+    py_remove_group_parser.set_defaults(func=env_cmds.py_remove_group)
 
     # py list
     py_list_parser = py_subparsers.add_parser("list", help="List project dependencies")

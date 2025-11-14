@@ -262,10 +262,10 @@ For environment-level issues:
 
 ```bash
 # Show recent logs
-cg logs -n 50
+cg debug -n 50
 
 # Show all logs
-cg logs
+cg debug
 
 # Follow logs in real-time
 tail -f ~/comfygit/logs/comfygit.log

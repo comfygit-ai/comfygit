@@ -120,19 +120,19 @@ Downloads latest registry data from GitHub. Run this periodically to get newly p
 
 ```bash
 # Show last 200 lines (default)
-cg logs
+cg debug
 
 # Show last 50 lines
-cg logs -n 50
+cg debug -n 50
 
 # Show all logs
-cg logs --full
+cg debug --full
 
 # Filter by level
-cg logs --level ERROR
+cg debug --level ERROR
 
 # Show workspace logs instead of environment logs
-cg logs --workspace
+cg debug --workspace
 ```
 
 Logs are stored in `workspace/logs/` and include:
@@ -144,7 +144,7 @@ Logs are stored in `workspace/logs/` and include:
 
 !!! tip "Debugging workflow"
     1. Run failing command
-    2. Check logs: `cg logs -n 100`
+    2. Check logs: `cg debug -n 100`
     3. Look for ERROR or WARNING entries
     4. Include relevant log lines in bug reports
 

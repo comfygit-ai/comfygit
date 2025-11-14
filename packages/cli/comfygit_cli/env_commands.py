@@ -8,7 +8,7 @@ import sys
 from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
-from comfygit_core.models.exceptions import CDEnvironmentError, CDNodeConflictError, CDRegistryDataError, UVCommandError
+from comfygit_core.models.exceptions import CDDependencyConflictError, CDEnvironmentError, CDNodeConflictError, CDRegistryDataError, UVCommandError
 from comfygit_core.utils.uv_error_handler import handle_uv_error
 
 from .formatters.error_formatter import NodeErrorFormatter
@@ -37,6 +37,23 @@ class EnvironmentCommands:
     @cached_property
     def workspace(self) -> Workspace:
         return get_workspace_or_exit()
+
+    def _get_or_create_workspace(self, args: argparse.Namespace) -> Workspace:
+        """Get existing workspace or initialize a new one with user confirmation.
+
+        This is a delegation to GlobalCommands._get_or_create_workspace to avoid duplication.
+        We import and use GlobalCommands here for the shared logic.
+
+        Args:
+            args: Command arguments, must have 'yes' attribute for non-interactive mode
+
+        Returns:
+            Workspace instance (existing or newly created)
+        """
+        from .global_commands import GlobalCommands
+
+        global_cmds = GlobalCommands()
+        return global_cmds._get_or_create_workspace(args)
 
     def _get_env(self, args) -> Environment:
         """Get environment from global -e flag or active environment.
@@ -76,12 +93,15 @@ class EnvironmentCommands:
     @with_env_logging("env create")
     def create(self, args: argparse.Namespace, logger=None) -> None:
         """Create a new environment."""
+        # Ensure workspace exists, creating it if necessary
+        workspace = self._get_or_create_workspace(args)
+
         print(f"🚀 Creating environment: {args.name}")
         print("   This will download PyTorch and dependencies (may take a few minutes)...")
         print()
 
         try:
-            self.workspace.create_environment(
+            workspace.create_environment(
                 name=args.name,
                 comfyui_version=args.comfyui,
                 python_version=args.python,
@@ -96,7 +116,7 @@ class EnvironmentCommands:
 
         if args.use:
             try:
-                self.workspace.set_active_environment(args.name)
+                workspace.set_active_environment(args.name)
 
             except Exception as e:
                 if logger:
@@ -705,6 +725,13 @@ class EnvironmentCommands:
             print(f"✗ Cannot add node - registry data unavailable", file=sys.stderr)
             print(formatted, file=sys.stderr)
             sys.exit(1)
+        except CDDependencyConflictError as e:
+            # Dependency conflict with enhanced formatting
+            formatted = NodeErrorFormatter.format_dependency_conflict_error(e, verbose=args.verbose)
+            if logger:
+                logger.error(f"Dependency conflict for '{node_name}': {e}", exc_info=True)
+            print(formatted, file=sys.stderr)
+            sys.exit(1)
         except CDNodeConflictError as e:
             # Use formatter to render error with CLI commands
             formatted = NodeErrorFormatter.format_conflict_error(e)
@@ -1073,6 +1100,38 @@ class EnvironmentCommands:
         """Remove Python dependencies from the environment."""
         env = self._get_env(args)
 
+        # Handle --group flag (remove from dependency group)
+        if hasattr(args, 'group') and args.group:
+            group_name = args.group
+            print(f"🗑 Removing {len(args.packages)} package(s) from group '{group_name}'...")
+
+            try:
+                result = env.pyproject.dependencies.remove_from_group(group_name, args.packages)
+            except ValueError as e:
+                print(f"✗ {e}", file=sys.stderr)
+                sys.exit(1)
+
+            # Show results
+            if not result['removed']:
+                if len(result['skipped']) == 1:
+                    print(f"\nℹ️  Package '{result['skipped'][0]}' is not in group '{group_name}'")
+                else:
+                    print(f"\nℹ️  None of the specified packages are in group '{group_name}':")
+                    for pkg in result['skipped']:
+                        print(f"  • {pkg}")
+                return
+
+            print(f"\n✓ Removed {len(result['removed'])} package(s) from group '{group_name}'")
+
+            if result['skipped']:
+                print(f"\nℹ️  Skipped {len(result['skipped'])} package(s) not in group:")
+                for pkg in result['skipped']:
+                    print(f"  • {pkg}")
+
+            print(f"\nRun 'cg -e {env.name} py list --all' to view remaining groups")
+            return
+
+        # Default behavior: remove from main dependencies
         print(f"🗑 Removing {len(args.packages)} package(s)...")
 
         try:
@@ -1109,6 +1168,23 @@ class EnvironmentCommands:
                 print(f"  • {pkg}")
 
         print(f"\nRun 'cg -e {env.name} status' to review changes")
+
+    @with_env_logging("env py remove-group")
+    def py_remove_group(self, args: argparse.Namespace, logger=None) -> None:
+        """Remove an entire dependency group."""
+        env = self._get_env(args)
+        group_name = args.group
+
+        print(f"🗑 Removing dependency group: {group_name}")
+
+        try:
+            env.pyproject.dependencies.remove_group(group_name)
+        except ValueError as e:
+            print(f"✗ {e}", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"\n✓ Removed dependency group '{group_name}'")
+        print(f"\nRun 'cg -e {env.name} py list --all' to view remaining groups")
 
     @with_env_logging("env py uv")
     def py_uv(self, args: argparse.Namespace, logger=None) -> None:

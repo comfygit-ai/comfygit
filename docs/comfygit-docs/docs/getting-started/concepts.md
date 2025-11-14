@@ -114,31 +114,108 @@ The `.cec/` (ComfyUI Environment Configuration) directory is the heart of each e
 
 ### pyproject.toml
 
-The main configuration file tracking:
+The main configuration file with several key sections:
 
-**Custom nodes:**
-
-```toml
-[project.optional-dependencies]
-"node/comfyui-manager" = ["GitPython>=3.1.0", "packaging>=23.0"]
-"node/comfyui-impact-pack" = ["ultralytics>=8.0.0"]
-```
-
-**Model references:**
+**Project dependencies (ComfyUI core):**
 
 ```toml
-[tool.comfygit.models]
-checkpoints = [
-    "checkpoints/sd15.safetensors:blake3:abc123...",
+[project]
+name = "comfygit-env-my-project"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "torch",
+    "torchvision",
+    "pillow",
+    "numpy>=1.25.0",
+    # ... ComfyUI's core dependencies
 ]
 ```
 
-**Development nodes:**
+**ComfyGit metadata:**
 
 ```toml
-[tool.comfygit.dev-nodes]
-my-custom-node = "../my-custom-node"  # Local path
+[tool.comfygit]
+comfyui_version = "v0.3.68"
+python_version = "3.12"
 ```
+
+**Node registry (installed nodes):**
+
+```toml
+[tool.comfygit.nodes.comfyui-impact-pack]
+name = "ComfyUI-Impact-Pack"
+registry_id = "comfyui-impact-pack"
+repository = "https://github.com/ltdrdata/ComfyUI-Impact-Pack"
+version = "5.5.0"
+download_url = "https://cdn.comfy.org/ltdrdata/comfyui-impact-pack/5.5.0/node.zip"
+source = "registry"
+```
+
+**Node dependencies (per-node packages):**
+
+```toml
+[dependency-groups]
+comfyui-impact-pack-a1b2c3d4 = [
+    "ultralytics>=8.0.0",
+    "onnxruntime>=1.15.0",
+]
+```
+
+**Model hash registry:**
+
+```toml
+[tool.comfygit.models]
+0b222b1d568748dc = {
+    filename = "clip_vision_h.safetensors",
+    size = 1264219396,
+    relative_path = "clip_vision/clip_vision_h.safetensors",
+    category = "clip_vision"
+}
+```
+
+**Workflow tracking:**
+
+```toml
+[tool.comfygit.workflows.my-workflow]
+nodes = ["comfyui-impact-pack", "comfyui-ipadapter"]
+path = "workflows/my-workflow.json"
+
+[[tool.comfygit.workflows.my-workflow.models]]
+filename = "clip_vision_h.safetensors"
+category = "clip_vision"
+criticality = "required"
+status = "resolved"
+hash = "0b222b1d568748dc"
+nodes = [{node_id = "5", node_type = "CLIPVisionLoader"}]
+```
+
+**PyTorch backend configuration:**
+
+```toml
+[tool.uv]
+constraint-dependencies = ["torch==2.9.1+cu129"]
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.uv.sources.torch]
+index = "pytorch-cu129"
+```
+
+### How it works together
+
+Each section serves a specific purpose:
+
+* **`[project]`** — Core ComfyUI dependencies (torch, pillow, numpy, etc.)
+* **`[tool.comfygit]`** — Environment metadata (ComfyUI version, Python version)
+* **`[tool.comfygit.nodes.*]`** — Registry of installed nodes with versions and sources
+* **`[dependency-groups]`** — Per-node Python dependencies (PEP 735)
+* **`[tool.comfygit.workflows.*]`** — Workflow dependencies and model requirements
+* **`[tool.comfygit.models]`** — Content-addressable model index (hash → metadata)
+* **`[tool.uv]`** — PyTorch backend constraints and custom indexes
 
 ### Why .cec?
 
@@ -146,6 +223,7 @@ my-custom-node = "../my-custom-node"  # Local path
 * **Human readable** — Edit manually if needed
 * **Git-friendly** — Track changes over time
 * **Lockfile included** — uv.lock ensures exact reproducibility
+* **Content-addressable** — Models tracked by hash, not path
 
 ## Reproducibility model
 
@@ -167,7 +245,7 @@ ComfyGit uses a **two-tier approach** to reproducibility:
 cg commit -m "Added IPAdapter nodes"
 
 # View history
-cg commit log
+cg log
 
 # Restore previous version
 cg rollback v1
@@ -208,29 +286,24 @@ cg import my-workflow.tar.gz --name imported-env
 
 ### How they work together
 
-```
-┌─────────────────────────────────────────────┐
-│  Your Machine                               │
-│  ┌─────────────────────────────────────┐   │
-│  │  Environment                        │   │
-│  │  - Custom nodes                     │   │
-│  │  - Models                           │   │
-│  │  - Workflows                        │   │
-│  └─────────────────────────────────────┘   │
-│           │                 │               │
-│           │ commit          │ export        │
-│           ↓                 ↓               │
-│  ┌──────────────┐  ┌──────────────────┐   │
-│  │ .cec/.git/   │  │ .tar.gz package  │───┼─→ Share
-│  │ (commits)    │  │ (complete env)   │   │
-│  └──────────────┘  └──────────────────┘   │
-│           │                                 │
-│           │ push/pull                       │
-│           ↓                                 │
-│  ┌──────────────────────┐                  │
-│  │ Git Remote (GitHub)  │                  │
-│  └──────────────────────┘                  │
-└─────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph machine["Your Machine"]
+        env["Environment<br/>• Custom nodes<br/>• Models<br/>• Workflows"]
+
+        env -->|commit| git[".cec/.git/<br/>(commits)"]
+        env -->|export| tar[".tar.gz package<br/>(complete env)"]
+
+        git -->|push/pull| remote["Git Remote<br/>(GitHub)"]
+    end
+
+    tar -.->|share| share["Share with others"]
+
+    style env fill:#1e40af,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style git fill:#059669,stroke:#10b981,stroke-width:2px,color:#fff
+    style tar fill:#7c3aed,stroke:#a78bfa,stroke-width:2px,color:#fff
+    style remote fill:#dc2626,stroke:#ef4444,stroke-width:2px,color:#fff
+    style share fill:#6b7280,stroke:#9ca3af,stroke-width:2px,color:#fff
 ```
 
 ## Model management
@@ -255,13 +328,48 @@ But different users have different folder structures:
 
 ### ComfyGit's solution
 
-Models are indexed by **hash** (Blake3), not path:
+Models are indexed by **hash** (custom type), not path:
 
 1. Scan your models directory
 2. Compute quick hash for each model
 3. Store in workspace-wide database
-4. Workflows reference models by hash
-5. ComfyGit resolves hash → actual file path
+4. Track models in pyproject.toml by hash
+5. Link workflows to models via hash references
+6. ComfyGit resolves hash → actual file path
+
+**In pyproject.toml:**
+
+```toml
+# Global model registry (hash → metadata)
+[tool.comfygit.models]
+0b222b1d568748dc = {
+    filename = "clip_vision_h.safetensors",
+    size = 1264219396,
+    relative_path = "clip_vision/clip_vision_h.safetensors",
+    category = "clip_vision"
+}
+
+# Workflow-specific model requirements
+[[tool.comfygit.workflows.my-workflow.models]]
+filename = "clip_vision_h.safetensors"
+category = "clip_vision"
+criticality = "required"  # or "flexible" or "optional"
+status = "resolved"       # or "unresolved" or "download_intent"
+hash = "0b222b1d568748dc"  # Links to registry above
+nodes = [{node_id = "5", node_type = "CLIPVisionLoader"}]
+```
+
+The **criticality** field indicates:
+
+- **required** — Workflow won't work without it
+- **flexible** — Can substitute with similar models
+- **optional** — Nice to have but not critical
+
+The **status** field tracks:
+
+- **resolved** — Model found in workspace
+- **unresolved** — Model not found, needs download
+- **download_intent** — Queued for download
 
 ### How it works
 
@@ -271,9 +379,17 @@ Models are indexed by **hash** (Blake3), not path:
 # Point to your existing models
 cg model index dir /path/to/models
 
-# Scan and index
+# Manually scan and index
 cg model index sync
 ```
+
+!!! tip "Auto index syncing"
+    The model index automatically syncs before environment 
+    commands to ensure fresh model data. This happens transparently
+    in the background and is optimized using modification time 
+    checks, so it's fast when models haven't changed. Manual 
+    syncing with 'cg model index sync' is only needed if you want 
+    to force a full rescan.
 
 **Workflow resolution:**
 
@@ -284,10 +400,24 @@ cg workflow resolve my-workflow.json
 
 ComfyGit will:
 
-1. Extract model hashes from workflow
-2. Look up in global index
-3. Symlink from `workspace/models/` to `environment/ComfyUI/models/`
-4. Download missing models from known sources
+1. Extract model references from workflow JSON
+2. Compute hashes and look up in global index
+3. Store model requirements in `[tool.comfygit.workflows.*]`
+4. Track which nodes use each model
+5. Symlink from `workspace/models/` (or custom defined models directory) to `environment/ComfyUI/models/`
+6. Download missing models from known sources
+
+**Workflow tracking benefits:**
+
+When you commit a workflow, ComfyGit records:
+
+- Which custom nodes are required
+- Which models are used (by hash, not path)
+- Model criticality levels for portability
+- Exact node usage (node ID, type, widget position)
+- Resolution status
+
+This makes workflows **truly portable** — anyone importing your environment gets complete dependency information.
 
 ### Benefits
 
@@ -295,12 +425,17 @@ ComfyGit will:
 * **Deduplication** — Same model used by multiple environments
 * **Source tracking** — Remember where models came from (CivitAI, HuggingFace)
 * **Fast lookups** — SQLite database for quick queries
+* **Criticality levels** — Know which models are essential vs optional
+* **Node tracking** — See exactly where each model is used in workflows
 
 ### Model importance
 
 Mark models in workflows as required/flexible/optional:
 
 ```bash
+# Run interactively
+cg workflow model importance
+
 # Required - workflow won't work without it
 cg workflow model importance my-workflow checkpoint.safetensors required
 
@@ -372,23 +507,26 @@ When resolving workflows, ComfyGit:
 Each custom node gets its own dependency group in pyproject.toml:
 
 ```toml
-[project.optional-dependencies]
-"node/comfyui-depthflow-nodes" = [
+[dependency-groups]
+comfyui-depthflow-nodes-a1b2c3d4 = [
     "opencv-python>=4.0.0",
     "numpy>=1.24.0"
 ]
 
-"node/comfyui-impact-pack" = [
+comfyui-impact-pack-e5f6g7h8 = [
     "ultralytics>=8.0.0",
     "onnxruntime>=1.15.0"
 ]
 ```
+
+ComfyGit uses **PEP 735 dependency groups** (not optional-dependencies) for better isolation. Each group has a unique hash suffix to prevent naming conflicts.
 
 ### Benefits
 
 * **Conflict detection** — UV reports if nodes have incompatible deps
 * **Selective installation** — Install only what you need
 * **Clean removal** — Remove node and its unique dependencies
+* **Hash-based naming** — Prevents collisions between similarly-named nodes
 
 ### Handling conflicts
 

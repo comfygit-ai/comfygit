@@ -26,6 +26,7 @@ class ResolutionResult:
     conflicts: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     resolved_packages: dict[str, str] = field(default_factory=dict)  # name -> version
+    stderr: str = ""  # Raw UV stderr for verbose mode and enhanced error messages
 
 
 class ResolutionTester:
@@ -91,8 +92,11 @@ class ResolutionTester:
                     if e.stdout:
                         self.logger.debug(f"UV stdout:\n{e.stdout}")
 
-                    # Try to extract structured conflicts from stderr
+                    # Store raw stderr for verbose mode
                     error_text = e.stderr or str(e)
+                    result.stderr = error_text
+
+                    # Try to extract structured conflicts from stderr
                     conflicts = parse_uv_conflicts(error_text)
                     if conflicts:
                         result.conflicts.extend(conflicts)

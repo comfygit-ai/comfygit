@@ -65,7 +65,9 @@ class NodeAction:
         'add_node_force',
         'add_node_version',
         'rename_directory',
-        'update_node'
+        'update_node',
+        'add_constraint',
+        'skip_node'
     ]
 
     # Parameters needed for the action
@@ -73,6 +75,7 @@ class NodeAction:
     node_name: str | None = None
     directory_name: str | None = None
     new_name: str | None = None
+    package_name: str | None = None  # For add_constraint action
 
     # Human-readable description (client-agnostic)
     description: str = ""
@@ -107,6 +110,36 @@ class CDNodeConflictError(ComfyDockError):
     """Raised when Node has conflicts with enhanced context."""
 
     def __init__(self, message: str, context: NodeConflictContext | None = None):
+        super().__init__(message)
+        self.context = context
+
+    def get_actions(self) -> list[NodeAction]:
+        """Get suggested actions for resolving this conflict."""
+        return self.context.suggested_actions if self.context else []
+
+
+@dataclass
+class DependencyConflictContext:
+    """Context about dependency conflicts during node installation."""
+
+    # The node being added
+    node_name: str
+
+    # Parsed conflict information
+    conflicting_packages: list[tuple[str, str]]  # Package pairs that conflict
+    conflict_descriptions: list[str]  # Simplified conflict messages
+
+    # Raw UV stderr for verbose mode
+    raw_stderr: str = ""
+
+    # Suggested resolutions
+    suggested_actions: list[NodeAction] = field(default_factory=list)
+
+
+class CDDependencyConflictError(ComfyDockError):
+    """Raised when dependency resolution fails during node installation."""
+
+    def __init__(self, message: str, context: DependencyConflictContext | None = None):
         super().__init__(message)
         self.context = context
 
