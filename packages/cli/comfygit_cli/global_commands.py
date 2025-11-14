@@ -28,6 +28,53 @@ class GlobalCommands:
     def workspace(self) -> Workspace:
         return get_workspace_or_exit()
 
+    def _get_or_create_workspace(self, args: argparse.Namespace) -> Workspace:
+        """Get existing workspace or initialize a new one with user confirmation.
+
+        Args:
+            args: Command arguments, must have 'yes' attribute for non-interactive mode
+
+        Returns:
+            Workspace instance (existing or newly created)
+        """
+        from comfygit_core.factories.workspace_factory import WorkspaceFactory
+        from comfygit_core.models.exceptions import CDWorkspaceNotFoundError
+
+        try:
+            workspace = WorkspaceFactory.find()
+            WorkspaceLogger.set_workspace_path(workspace.path)
+            return workspace
+
+        except CDWorkspaceNotFoundError:
+            # Determine if we should auto-init
+            use_yes = getattr(args, 'yes', False)
+
+            if not use_yes:
+                # Interactive: ask user
+                response = input("\n✗ Workspace not initialized. Initialize now? [Y/n]: ").strip().lower()
+                if response in ['n', 'no']:
+                    print("Operation cancelled. Run 'cg init' to initialize workspace manually.")
+                    sys.exit(1)
+            else:
+                # Non-interactive: inform user
+                print("\n📦 No workspace found. Initializing with defaults...")
+
+            # Run init flow
+            init_args = argparse.Namespace(
+                path=None,  # Use default (or COMFYGIT_HOME)
+                models_dir=None,
+                yes=use_yes  # Pass through --yes flag
+            )
+
+            self.init(init_args)
+
+            # Get the newly created workspace
+            workspace = WorkspaceFactory.find()
+            WorkspaceLogger.set_workspace_path(workspace.path)
+
+            print("\n✓ Workspace initialized! Continuing with command...\n")
+            return workspace
+
     def init(self, args: argparse.Namespace) -> None:
         """Initialize a new ComfyDock workspace.
 
@@ -401,6 +448,9 @@ class GlobalCommands:
 
         from comfygit_core.utils.git import is_git_url
 
+        # Ensure workspace exists, creating it if necessary
+        workspace = self._get_or_create_workspace(args)
+
         if not args.path:
             print("✗ Please specify path to import tarball or git URL")
             print("  Usage: cg import <path.tar.gz|git-url>")
@@ -562,7 +612,7 @@ class GlobalCommands:
 
         try:
             if is_git:
-                env = self.workspace.import_from_git(
+                env = workspace.import_from_git(
                     git_url=args.path,
                     name=env_name,
                     model_strategy=strategy,
@@ -571,7 +621,7 @@ class GlobalCommands:
                     torch_backend=args.torch_backend,
                 )
             else:
-                env = self.workspace.import_environment(
+                env = workspace.import_environment(
                     tarball_path=Path(args.path),
                     name=env_name,
                     model_strategy=strategy,
@@ -593,7 +643,7 @@ class GlobalCommands:
 
             # Set as active if --use flag provided
             if hasattr(args, 'use') and args.use:
-                self.workspace.set_active_environment(env.name)
+                workspace.set_active_environment(env.name)
                 print(f"   '{env.name}' set as active environment")
             else:
                 print(f"\nActivate with: cg use {env_name}")
