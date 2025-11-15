@@ -635,6 +635,257 @@ class Environment:
         else:
             logger.info(f"Rollback complete: already at {target_version} (no changes)")
 
+    def checkout(
+        self,
+        ref: str,
+        strategy: RollbackStrategy | None = None,
+        force: bool = False
+    ) -> None:
+        """Checkout commit/branch without auto-committing (git-native exploration).
+
+        This is non-destructive navigation that:
+        1. Checks for uncommitted changes (git + workflows)
+        2. Snapshots current state
+        3. Performs git checkout
+        4. Reconciles nodes
+        5. Syncs Python packages
+        6. Restores workflows
+        7. NO AUTO-COMMIT (key difference from rollback)
+
+        Use cases:
+        - Explore old commits: `checkout(commit_hash)`
+        - Switch branches: `checkout(branch_name)`
+        - Create branch from commit: `checkout(commit, branch="new-branch")`
+
+        Args:
+            ref: Git reference (commit hash, branch, tag)
+            strategy: Optional strategy for confirming destructive checkout
+            force: If True, discard uncommitted changes without confirmation
+
+        Raises:
+            ValueError: If ref doesn't exist
+            OSError: If git commands fail
+            CDEnvironmentError: If uncommitted changes exist and no strategy/force
+        """
+        from comfygit_core.models.exceptions import CDEnvironmentError
+
+        # 1. Check for uncommitted changes
+        if not force:
+            has_git_changes = self.git_manager.has_uncommitted_changes()
+            status = self.status()
+            has_workflow_changes = status.workflow.sync_status.has_changes
+
+            if has_git_changes or has_workflow_changes:
+                if strategy is None:
+                    raise CDEnvironmentError(
+                        "Cannot checkout with uncommitted changes.\n"
+                        "Uncommitted changes detected:\n"
+                        + ("  • Git changes in .cec/\n" if has_git_changes else "")
+                        + ("  • Workflow changes in ComfyUI\n" if has_workflow_changes else "")
+                    )
+
+                if not strategy.confirm_destructive_rollback(
+                    git_changes=has_git_changes,
+                    workflow_changes=has_workflow_changes
+                ):
+                    raise CDEnvironmentError("Checkout cancelled by user")
+
+        # 2. Snapshot old state
+        old_nodes = self.pyproject.nodes.get_existing()
+
+        # 3. Git checkout (restore both HEAD and working tree)
+        from ..utils.git import _git
+        # Checkout ref and force update working tree
+        _git(["checkout", "--force", ref], self.cec_path)
+        # Clean untracked files if force=True
+        if force:
+            _git(["clean", "-fd"], self.cec_path)
+
+        # 4. Reload pyproject
+        self.pyproject.reset_lazy_handlers()
+        new_nodes = self.pyproject.nodes.get_existing()
+
+        # 5. Reconcile nodes
+        self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
+
+        # 6. Sync Python environment
+        self.uv_manager.sync_project(all_groups=True)
+
+        # 7. Restore workflows
+        self.workflow_manager.restore_all_from_cec()
+
+        # 8. NO AUTO-COMMIT (this is checkout, not rollback)
+        logger.info(f"Checkout complete: HEAD now at {ref}")
+
+    def reset(
+        self,
+        ref: str | None = None,
+        mode: str = "hard",
+        strategy: RollbackStrategy | None = None,
+        force: bool = False
+    ) -> None:
+        """Reset HEAD to ref with git reset semantics.
+
+        Modes:
+        - hard: Discard all changes, move HEAD (auto-commits for history)
+        - mixed: Keep changes in working tree, unstage
+        - soft: Keep changes staged
+
+        Args:
+            ref: Git reference to reset to (None = HEAD)
+            mode: Reset mode (hard/mixed/soft)
+            strategy: Optional strategy for confirming destructive reset
+            force: If True, skip confirmation
+
+        Raises:
+            ValueError: If ref doesn't exist or invalid mode
+            CDEnvironmentError: If uncommitted changes exist (hard mode only)
+        """
+        from comfygit_core.models.exceptions import CDEnvironmentError
+
+        if mode not in ("hard", "mixed", "soft"):
+            raise ValueError(f"Invalid reset mode: {mode}. Must be hard, mixed, or soft")
+
+        ref = ref or "HEAD"
+
+        # Hard mode requires confirmation for uncommitted changes
+        if mode == "hard" and not force:
+            has_git_changes = self.git_manager.has_uncommitted_changes()
+            status = self.status()
+            has_workflow_changes = status.workflow.sync_status.has_changes
+
+            if has_git_changes or has_workflow_changes:
+                if strategy is None:
+                    raise CDEnvironmentError(
+                        "Cannot reset with uncommitted changes.\n"
+                        "Uncommitted changes detected:\n"
+                        + ("  • Git changes in .cec/\n" if has_git_changes else "")
+                        + ("  • Workflow changes in ComfyUI\n" if has_workflow_changes else "")
+                    )
+
+                if not strategy.confirm_destructive_rollback(
+                    git_changes=has_git_changes,
+                    workflow_changes=has_workflow_changes
+                ):
+                    raise CDEnvironmentError("Reset cancelled by user")
+
+        # Perform git reset
+        if mode == "hard":
+            # Hard reset: full environment sync needed
+            old_nodes = self.pyproject.nodes.get_existing()
+            self.git_manager.reset_to(ref, mode="hard")
+            self.pyproject.reset_lazy_handlers()
+            new_nodes = self.pyproject.nodes.get_existing()
+            self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
+            self.uv_manager.sync_project(all_groups=True)
+            self.workflow_manager.restore_all_from_cec()
+            logger.info(f"Hard reset complete: HEAD now at {ref}")
+        else:
+            # Mixed/soft: just git operation, no env sync
+            self.git_manager.reset_to(ref, mode=mode)
+            logger.info(f"Reset ({mode}) complete: HEAD now at {ref}")
+
+    def create_branch(self, name: str, start_point: str = "HEAD") -> None:
+        """Create new branch at start_point.
+
+        Args:
+            name: Branch name
+            start_point: Commit to branch from (default: HEAD)
+        """
+        self.git_manager.create_branch(name, start_point)
+        logger.info(f"Created branch '{name}' at {start_point}")
+
+    def delete_branch(self, name: str, force: bool = False) -> None:
+        """Delete branch.
+
+        Args:
+            name: Branch name
+            force: Force delete even if unmerged
+        """
+        self.git_manager.delete_branch(name, force)
+        logger.info(f"Deleted branch '{name}'")
+
+    def switch_branch(self, branch: str, create: bool = False) -> None:
+        """Switch to branch and sync environment.
+
+        Args:
+            branch: Branch name
+            create: Create branch if it doesn't exist
+        """
+        # Snapshot old state
+        old_nodes = self.pyproject.nodes.get_existing()
+
+        # Switch branch
+        self.git_manager.switch_branch(branch, create)
+
+        # Sync environment to match new branch
+        self.pyproject.reset_lazy_handlers()
+        new_nodes = self.pyproject.nodes.get_existing()
+        self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
+        self.uv_manager.sync_project(all_groups=True)
+        self.workflow_manager.restore_all_from_cec()
+
+        logger.info(f"Switched to branch '{branch}'")
+
+    def list_branches(self) -> list[tuple[str, bool]]:
+        """List all branches with current branch marked.
+
+        Returns:
+            List of (branch_name, is_current) tuples
+        """
+        return self.git_manager.list_branches()
+
+    def get_current_branch(self) -> str | None:
+        """Get current branch name.
+
+        Returns:
+            Branch name or None if detached HEAD
+        """
+        return self.git_manager.get_current_branch()
+
+    def merge_branch(self, branch: str, message: str | None = None) -> None:
+        """Merge branch into current branch and sync environment.
+
+        Args:
+            branch: Branch to merge
+            message: Custom merge commit message
+        """
+        # Snapshot old state
+        old_nodes = self.pyproject.nodes.get_existing()
+
+        # Perform merge
+        self.git_manager.merge_branch(branch, message)
+
+        # Sync environment after merge
+        self.pyproject.reset_lazy_handlers()
+        new_nodes = self.pyproject.nodes.get_existing()
+        self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
+        self.uv_manager.sync_project(all_groups=True)
+        self.workflow_manager.restore_all_from_cec()
+
+        logger.info(f"Merged branch '{branch}'")
+
+    def revert_commit(self, commit: str) -> None:
+        """Revert a commit by creating new commit that undoes it.
+
+        Args:
+            commit: Commit hash to revert
+        """
+        # Snapshot old state
+        old_nodes = self.pyproject.nodes.get_existing()
+
+        # Perform revert
+        self.git_manager.revert_commit(commit)
+
+        # Sync environment after revert
+        self.pyproject.reset_lazy_handlers()
+        new_nodes = self.pyproject.nodes.get_existing()
+        self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
+        self.uv_manager.sync_project(all_groups=True)
+        self.workflow_manager.restore_all_from_cec()
+
+        logger.info(f"Reverted commit {commit}")
+
     def get_versions(self, limit: int = 10) -> list[dict]:
         """Get simplified version history for this environment.
 
