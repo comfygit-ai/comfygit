@@ -805,13 +805,97 @@ class Environment:
         self.git_manager.delete_branch(name, force)
         logger.info(f"Deleted branch '{name}'")
 
+    def _would_overwrite_workflows(self, target_branch: str) -> bool:
+        """Check if switching to target branch would overwrite uncommitted workflows.
+
+        Args:
+            target_branch: Branch name to check
+
+        Returns:
+            True if any uncommitted workflow exists in target branch's .cec,
+            False if safe to preserve uncommitted workflows
+        """
+        from ..utils.git import _git
+
+        # Get current uncommitted workflows
+        status = self.workflow_manager.get_workflow_sync_status()
+        uncommitted = set(status.new + status.modified)
+
+        if not uncommitted:
+            return False  # No uncommitted changes, no conflict possible
+
+        try:
+            # Check what workflows exist in target branch's .cec/workflows/
+            # Use git ls-tree to list files without checking out
+            result = _git(
+                ["ls-tree", "-r", "--name-only", target_branch, "workflows/"],
+                self.cec_path,
+                capture_output=True
+            )
+
+            # Parse workflow names from target branch
+            target_workflows = set()
+            for line in result.stdout.strip().split('\n'):
+                if line.startswith('workflows/') and line.endswith('.json'):
+                    # Extract workflow name (without workflows/ prefix and .json suffix)
+                    name = line[len('workflows/'):-len('.json')]
+                    target_workflows.add(name)
+
+            # Check for conflicts: uncommitted workflows that exist in target
+            conflicts = uncommitted & target_workflows
+
+            if conflicts:
+                logger.debug(f"Conflicting workflows detected: {conflicts}")
+                return True
+
+            return False
+
+        except Exception as e:
+            # If we can't determine, be conservative and assume conflict
+            logger.warning(f"Could not check target branch workflows: {e}")
+            return True
+
     def switch_branch(self, branch: str, create: bool = False) -> None:
         """Switch to branch and sync environment.
 
         Args:
             branch: Branch name
             create: Create branch if it doesn't exist
+
+        Raises:
+            CDEnvironmentError: If uncommitted workflow changes would be overwritten
         """
+        from comfygit_core.models.exceptions import CDEnvironmentError
+
+        # Check for uncommitted workflow changes BEFORE switching
+        # (only when switching to existing branch, not creating new)
+        preserve_uncommitted = False
+
+        if not create:
+            status = self.status()
+            has_workflow_changes = status.workflow.sync_status.has_changes
+
+            if has_workflow_changes:
+                # Check if target branch would overwrite uncommitted workflows
+                would_overwrite = self._would_overwrite_workflows(branch)
+
+                if would_overwrite:
+                    # Block switch - user must commit or use --force
+                    raise CDEnvironmentError(
+                        f"Cannot switch to branch '{branch}' with uncommitted workflow changes.\n"
+                        "Your changes to the following workflows would be overwritten:\n" +
+                        "\n".join(f"  • {wf}" for wf in status.workflow.sync_status.new + status.workflow.sync_status.modified) +
+                        "\n\nPlease commit your changes or use --force to discard them:\n"
+                        "  • Commit: cg commit -m '<message>'\n"
+                        "  • Force: cg switch <branch> --force"
+                    )
+                else:
+                    # Safe to preserve uncommitted workflows
+                    preserve_uncommitted = True
+        else:
+            # Creating new branch - always safe to preserve
+            preserve_uncommitted = True
+
         # Snapshot old state
         old_nodes = self.pyproject.nodes.get_existing()
 
@@ -823,7 +907,9 @@ class Environment:
         new_nodes = self.pyproject.nodes.get_existing()
         self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
         self.uv_manager.sync_project(all_groups=True)
-        self.workflow_manager.restore_all_from_cec()
+
+        # Restore workflows with appropriate preservation mode
+        self.workflow_manager.restore_all_from_cec(preserve_uncommitted=preserve_uncommitted)
 
         logger.info(f"Switched to branch '{branch}'")
 

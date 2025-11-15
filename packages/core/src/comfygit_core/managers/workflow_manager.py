@@ -458,29 +458,43 @@ class WorkflowManager:
             logger.error(f"Failed to restore workflow '{name}': {e}")
             return False
 
-    def restore_all_from_cec(self) -> dict[str, str]:
-        """Restore all workflows from .cec to ComfyUI (for rollback).
+    def restore_all_from_cec(self, preserve_uncommitted: bool = False) -> dict[str, str]:
+        """Restore all workflows from .cec to ComfyUI.
+
+        Args:
+            preserve_uncommitted: If True, don't delete workflows not in .cec.
+                                 This enables git-like behavior where uncommitted
+                                 changes are preserved during branch switches.
+                                 If False, force ComfyUI to match .cec exactly
+                                 (current behavior for rollback operations).
 
         Returns:
             Dictionary of workflow names to restore status
         """
         results = {}
 
-        if not self.cec_workflows.exists():
-            logger.info("No .cec workflows directory found")
-            return results
+        # Phase 1: Restore workflows that exist in .cec
+        if self.cec_workflows.exists():
+            # Copy every workflow from .cec to ComfyUI
+            for workflow_file in self.cec_workflows.glob("*.json"):
+                name = workflow_file.stem
+                if self.restore_from_cec(name):
+                    results[name] = "restored"
+                else:
+                    results[name] = "failed"
 
-        # Copy every workflow from .cec to ComfyUI
-        for workflow_file in self.cec_workflows.glob("*.json"):
-            name = workflow_file.stem
-            if self.restore_from_cec(name):
-                results[name] = "restored"
+        # Phase 2: Cleanup (ALWAYS run, even if .cec/workflows/ doesn't exist!)
+        # This ensures git semantics: switching to branch without workflows deletes them
+        if not preserve_uncommitted and self.comfyui_workflows.exists():
+            # Determine what workflows SHOULD exist
+            if self.cec_workflows.exists():
+                cec_names = {f.stem for f in self.cec_workflows.glob("*.json")}
             else:
-                results[name] = "failed"
+                # No .cec/workflows/ directory = no workflows should exist
+                # This happens when switching to branches that never had workflows committed
+                cec_names = set()
 
-        # Remove workflows from ComfyUI that don't exist in .cec (cleanup)
-        if self.comfyui_workflows.exists():
-            cec_names = {f.stem for f in self.cec_workflows.glob("*.json")}
+            # Remove workflows that shouldn't exist
             for comfyui_file in self.comfyui_workflows.glob("*.json"):
                 name = comfyui_file.stem
                 if name not in cec_names:
