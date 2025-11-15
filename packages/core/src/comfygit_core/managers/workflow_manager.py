@@ -1683,3 +1683,115 @@ class WorkflowManager:
                 return
 
         raise ValueError(f"Model with reference {reference} not found in workflow '{workflow_name}'")
+
+    def execute_pending_downloads(
+        self,
+        result: ResolutionResult,
+        callbacks: BatchDownloadCallbacks | None = None
+    ) -> list:
+        """Execute batch downloads for all download intents in result.
+
+        All user-facing output is delivered via callbacks.
+
+        Args:
+            result: Resolution result containing download intents
+            callbacks: Optional callbacks for progress/status (provided by CLI)
+
+        Returns:
+            List of DownloadResult objects
+        """
+        from ..models.workflow import DownloadResult
+
+        # Collect download intents
+        intents = [r for r in result.models_resolved if r.match_type == "download_intent"]
+
+        if not intents:
+            return []
+
+        # Notify batch start
+        if callbacks and callbacks.on_batch_start:
+            callbacks.on_batch_start(len(intents))
+
+        results = []
+        for idx, resolved in enumerate(intents, 1):
+            filename = resolved.reference.widget_value
+
+            # Notify file start
+            if callbacks and callbacks.on_file_start:
+                callbacks.on_file_start(filename, idx, len(intents))
+
+            # Check if already downloaded (deduplication)
+            if resolved.model_source:
+                existing = self.model_repository.find_by_source_url(resolved.model_source)
+                if existing:
+                    # Reuse existing model - update pyproject with hash
+                    self._update_model_hash(
+                        result.workflow_name,
+                        resolved.reference,
+                        existing.hash
+                    )
+                    # Notify success (reused existing)
+                    if callbacks and callbacks.on_file_complete:
+                        callbacks.on_file_complete(filename, True, None)
+                    results.append(DownloadResult(
+                        success=True,
+                        filename=filename,
+                        model=existing,
+                        reused=True
+                    ))
+                    continue
+
+            # Validate required fields
+            if not resolved.target_path or not resolved.model_source:
+                error_msg = "Download intent missing target_path or model_source"
+                if callbacks and callbacks.on_file_complete:
+                    callbacks.on_file_complete(filename, False, error_msg)
+                results.append(DownloadResult(
+                    success=False,
+                    filename=filename,
+                    error=error_msg
+                ))
+                continue
+
+            # Download new model
+            from ..services.model_downloader import DownloadRequest
+
+            target_path = self.downloader.models_dir / resolved.target_path
+            request = DownloadRequest(
+                url=resolved.model_source,
+                target_path=target_path,
+                workflow_name=result.workflow_name
+            )
+
+            # Use per-file progress callback if provided
+            progress_callback = callbacks.on_file_progress if callbacks else None
+            download_result = self.downloader.download(request, progress_callback=progress_callback)
+
+            if download_result.success and download_result.model:
+                # Update pyproject with actual hash
+                self._update_model_hash(
+                    result.workflow_name,
+                    resolved.reference,
+                    download_result.model.hash
+                )
+                # Notify success
+                if callbacks and callbacks.on_file_complete:
+                    callbacks.on_file_complete(filename, True, None)
+            else:
+                # Notify failure (model remains unresolved with source in pyproject)
+                if callbacks and callbacks.on_file_complete:
+                    callbacks.on_file_complete(filename, False, download_result.error)
+
+            results.append(DownloadResult(
+                success=download_result.success,
+                filename=filename,
+                model=download_result.model if download_result.success else None,
+                error=download_result.error if not download_result.success else None
+            ))
+
+        # Notify batch complete
+        if callbacks and callbacks.on_batch_complete:
+            success_count = sum(1 for r in results if r.success)
+            callbacks.on_batch_complete(success_count, len(results))
+
+        return results

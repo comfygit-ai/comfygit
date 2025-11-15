@@ -457,6 +457,111 @@ class UVProjectManager:
         result = self.uv.python_list()
         return result.stdout
 
+    # ===== Advanced Sync Operations =====
+
+    def sync_dependencies_progressive(
+        self,
+        dry_run: bool = False,
+        callbacks = None,
+        verbose: bool = False
+    ) -> dict:
+        """Install dependencies progressively with graceful optional group handling.
+
+        Installs dependencies in phases:
+        1. Base dependencies + all groups together with iterative optional group removal on failure
+
+        If optional groups fail to build, we iteratively:
+        - Parse the error to identify the failing group
+        - Remove that group from pyproject.toml
+        - Delete uv.lock to force re-resolution
+        - Retry the sync with all remaining groups
+        - Continue until success or max retries
+
+        Args:
+            dry_run: If True, don't actually install
+            callbacks: Optional callbacks for progress reporting
+            verbose: If True, show uv output in real-time
+
+        Returns:
+            Dict with keys:
+            - packages_synced: bool
+            - dependency_groups_installed: list[str]
+            - dependency_groups_failed: list[tuple[str, str]]
+        """
+        from ..constants import MAX_OPT_GROUP_RETRIES
+        from ..utils.uv_error_handler import parse_failed_dependency_group
+
+        result = {
+            "packages_synced": False,
+            "dependency_groups_installed": [],
+            "dependency_groups_failed": []
+        }
+
+        attempts = 0
+
+        logger.info("Installing dependencies with all groups...")
+
+        while attempts < MAX_OPT_GROUP_RETRIES:
+            try:
+                # Get all dependency groups (may have changed after removal)
+                dep_groups = self.pyproject.dependencies.get_groups()
+
+                if dep_groups:
+                    # Install base + all groups together
+                    group_list = list(dep_groups.keys())
+                    logger.debug(f"Syncing with groups: {group_list}")
+                    self.sync_project(group=group_list, dry_run=dry_run, verbose=verbose)
+
+                    # Track successful installations
+                    result["dependency_groups_installed"].extend(group_list)
+                else:
+                    # No groups - just sync base dependencies
+                    logger.debug("No dependency groups, syncing base only")
+                    self.sync_project(dry_run=dry_run, no_default_groups=True, verbose=verbose)
+
+                result["packages_synced"] = True
+                break  # Success - exit loop
+
+            except UVCommandError as e:
+                failed_group = parse_failed_dependency_group(e.stderr or "")
+
+                if failed_group and failed_group.startswith('optional-'):
+                    attempts += 1
+                    logger.warning(
+                        f"Build failed for optional group '{failed_group}' (attempt {attempts}/{MAX_OPT_GROUP_RETRIES}), "
+                        "removing and retrying..."
+                    )
+
+                    # Remove the problematic group
+                    try:
+                        self.pyproject.dependencies.remove_group(failed_group)
+                    except ValueError:
+                        pass  # Group already gone
+
+                    # Delete lockfile to force re-resolution
+                    lockfile = self.project_path / "uv.lock"
+                    if lockfile.exists():
+                        lockfile.unlink()
+                        logger.debug("Deleted uv.lock to force re-resolution")
+
+                    result["dependency_groups_failed"].append((failed_group, "Build failed (incompatible platform)"))
+
+                    if callbacks:
+                        callbacks.on_dependency_group_complete(failed_group, success=False, error="Build failed - removed")
+
+                    if attempts >= MAX_OPT_GROUP_RETRIES:
+                        raise RuntimeError(
+                            f"Failed to install dependencies after {MAX_OPT_GROUP_RETRIES} attempts. "
+                            f"Removed groups: {[g for g, _ in result['dependency_groups_failed']]}"
+                        )
+
+                    # Loop continues for retry
+                else:
+                    # Not an optional group failure - fail immediately
+                    raise
+
+        return result
+
     # ===== Utility =====
 
     def version(self) -> str:
