@@ -125,7 +125,7 @@ def test_repair_enriches_model_sources_from_pyproject(test_env, test_workspace):
     test_env.pyproject.save(config)
 
     # ACT: Run prepare_import_with_model_strategy (called by repair)
-    test_env.prepare_import_with_model_strategy(strategy="all")
+    test_env.model_manager.prepare_import_with_model_strategy(strategy="all")
 
     # ASSERT: Source URL should now be in SQLite index
     sources_after = test_workspace.model_repository.get_sources(model_hash)
@@ -185,7 +185,7 @@ def test_repair_skips_download_intent_for_existing_models(test_env, test_workspa
     test_env.pyproject.save(config)
 
     # ACT: Run prepare_import_with_model_strategy
-    workflows_with_intents = test_env.prepare_import_with_model_strategy(strategy="all")
+    workflows_with_intents = test_env.model_manager.prepare_import_with_model_strategy(strategy="all")
 
     # ASSERT: No download intents should be created
     assert len(workflows_with_intents) == 0, "No workflows should have download intents"
@@ -235,7 +235,7 @@ def test_repair_creates_download_intent_for_missing_models(test_env):
     test_env.pyproject.save(config)
 
     # ACT: Run prepare_import_with_model_strategy
-    workflows_with_intents = test_env.prepare_import_with_model_strategy(strategy="all")
+    workflows_with_intents = test_env.model_manager.prepare_import_with_model_strategy(strategy="all")
 
     # ASSERT: Download intent should be created
     assert len(workflows_with_intents) == 1
