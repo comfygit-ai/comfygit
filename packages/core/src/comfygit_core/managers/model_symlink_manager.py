@@ -1,36 +1,18 @@
 """ModelSymlinkManager - Creates and manages symlink from ComfyUI/models to global models directory."""
 from __future__ import annotations
 
-import os
 import shutil
-import subprocess
 from pathlib import Path
 
 from ..logging.logging_config import get_logger
 from ..models.exceptions import CDEnvironmentError
+from ..utils.symlink_utils import (
+    is_link,
+    create_platform_link,
+    is_safe_to_delete,
+)
 
 logger = get_logger(__name__)
-
-
-def is_link(path: Path) -> bool:
-    """Detect both symlinks and junctions (Windows).
-
-    Args:
-        path: Path to check
-
-    Returns:
-        True if path is a symlink or junction, False otherwise
-    """
-    if path.is_symlink():
-        return True
-    # Python 3.12+: Direct junction check
-    if hasattr(os.path, 'isjunction') and os.path.isjunction(path):
-        return True
-    # Fallback: Check if path resolution differs (works for junctions and symlinks)
-    try:
-        return path.exists() and path.absolute() != path.resolve()
-    except (OSError, RuntimeError):
-        return False
 
 
 class ModelSymlinkManager:
@@ -76,7 +58,8 @@ class ModelSymlinkManager:
                     self.models_link_path.unlink()
             else:
                 # Real directory - check if safe to delete
-                if self._is_safe_to_delete():
+                safe_files = {".gitkeep", ".gitignore", "Put models here.txt"}
+                if is_safe_to_delete(self.models_link_path, safe_files):
                     logger.info(
                         "Removing ComfyUI default models/ directory (empty or placeholder files only)"
                     )
@@ -94,17 +77,10 @@ class ModelSymlinkManager:
         self.comfyui_path.mkdir(parents=True, exist_ok=True)
 
         # Create platform-appropriate link
-        try:
-            if os.name == "nt":  # Windows
-                self._create_windows_junction()
-            else:  # Linux/macOS
-                os.symlink(self.global_models_path, self.models_link_path)
-
-            logger.info(
-                f"Created model link: {self.models_link_path} → {self.global_models_path}"
-            )
-        except Exception as e:
-            raise CDEnvironmentError(f"Failed to create model symlink: {e}") from e
+        create_platform_link(self.models_link_path, self.global_models_path, "models")
+        logger.info(
+            f"Created model link: {self.models_link_path} → {self.global_models_path}"
+        )
 
     def validate_symlink(self) -> bool:
         """Check if link exists and points to correct target.
@@ -188,57 +164,3 @@ class ModelSymlinkManager:
         """
         # Use resolve() which works for both symlinks and junctions
         return self.models_link_path.resolve()
-
-    def _is_safe_to_delete(self) -> bool:
-        """Check if models/ directory is safe to delete.
-
-        Safe to delete if:
-        - Completely empty
-        - Only contains empty subdirectories
-        - Only contains placeholder files (.gitkeep, .gitignore, etc.)
-
-        Returns:
-            True if safe to delete, False if contains actual content
-        """
-        # Get all files recursively
-        all_items = list(self.models_link_path.rglob("*"))
-        files = [f for f in all_items if f.is_file()]
-
-        if len(files) == 0:
-            return True  # Completely empty (or only empty dirs)
-
-        # Check if files are only placeholders
-        safe_files = {".gitkeep", ".gitignore", "Put models here.txt"}
-        for file in files:
-            if file.name not in safe_files:
-                # Has actual content (likely model files)
-                return False
-
-        return True  # Only placeholder files
-
-    def _create_windows_junction(self) -> None:
-        """Create junction on Windows using mklink command.
-
-        Raises:
-            CDEnvironmentError: If junction creation fails
-        """
-        # Use mklink /J for directory junction (no admin required)
-        result = subprocess.run(
-            [
-                "mklink",
-                "/J",
-                str(self.models_link_path),
-                str(self.global_models_path),
-            ],
-            shell=True,  # Required for mklink
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode != 0:
-            raise CDEnvironmentError(
-                f"Failed to create Windows junction:\n"
-                f"  Command: mklink /J {self.models_link_path} {self.global_models_path}\n"
-                f"  Error: {result.stderr}\n"
-                f"  Note: On Windows, you may need Administrator privileges or Developer Mode enabled"
-            )

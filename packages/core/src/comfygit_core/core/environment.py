@@ -16,6 +16,7 @@ from ..managers.git_manager import GitManager
 from ..managers.model_symlink_manager import ModelSymlinkManager
 from ..managers.node_manager import NodeManager
 from ..managers.pyproject_manager import PyprojectManager
+from ..managers.user_content_symlink_manager import UserContentSymlinkManager
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
@@ -139,6 +140,16 @@ class Environment:
         """Get model symlink manager."""
         return ModelSymlinkManager(
             self.comfyui_path, self.global_models_path
+        )
+
+    @cached_property
+    def user_content_manager(self) -> UserContentSymlinkManager:
+        """Get user content symlink manager for input/output directories."""
+        return UserContentSymlinkManager(
+            self.comfyui_path,
+            self.name,
+            self.workspace_paths.input,
+            self.workspace_paths.output,
         )
 
     @cached_property
@@ -344,6 +355,47 @@ class Environment:
             logger.warning(f"Failed to ensure model symlink: {e}")
             result.errors.append(f"Model symlink configuration failed: {e}")
             # Continue anyway - symlink might already exist from environment creation
+
+        # Auto-migrate existing environments (one-time operation)
+        # Check if input/output are real directories with content
+        needs_migration = False
+        if self.comfyui_path.exists():
+            from ..utils.symlink_utils import is_link
+
+            input_path = self.comfyui_path / "input"
+            output_path = self.comfyui_path / "output"
+
+            if input_path.exists() and not is_link(input_path):
+                needs_migration = True
+            if output_path.exists() and not is_link(output_path):
+                needs_migration = True
+
+        if needs_migration:
+            logger.info("Detected pre-symlink environment, migrating user data...")
+            try:
+                migration_stats = self.user_content_manager.migrate_existing_data()
+                total_moved = (
+                    migration_stats["input_files_moved"] +
+                    migration_stats["output_files_moved"]
+                )
+                if total_moved > 0:
+                    logger.info(
+                        f"Migration complete: {total_moved} files moved to workspace-level storage"
+                    )
+            except Exception as e:
+                logger.error(f"Migration failed: {e}")
+                result.errors.append(f"User data migration failed: {e}")
+                # Don't fail sync - user can migrate manually
+
+        # Ensure user content symlinks exist
+        try:
+            self.user_content_manager.create_directories()
+            self.user_content_manager.create_symlinks()
+            logger.debug("User content symlinks configured")
+        except Exception as e:
+            logger.warning(f"Failed to ensure user content symlinks: {e}")
+            result.errors.append(f"User content symlink configuration failed: {e}")
+            # Continue anyway - symlinks might already exist
 
         # Mark environment as complete after successful sync (repair operation)
         # This ensures environments that lost .complete (e.g., from manual git pull) are visible
@@ -1384,6 +1436,19 @@ class Environment:
         models_dir = self.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
             shutil.rmtree(models_dir)
+
+        # Remove ComfyUI's default input/output directories (will be replaced with symlinks)
+        from ..utils.symlink_utils import is_link
+
+        input_dir = self.comfyui_path / "input"
+        if input_dir.exists() and not is_link(input_dir):
+            shutil.rmtree(input_dir)
+            logger.debug("Removed ComfyUI's default input directory during import")
+
+        output_dir = self.comfyui_path / "output"
+        if output_dir.exists() and not is_link(output_dir):
+            shutil.rmtree(output_dir)
+            logger.debug("Removed ComfyUI's default output directory during import")
 
         # Phase 1.5: Create venv and optionally install PyTorch with specific backend
         # Read Python version from .python-version file

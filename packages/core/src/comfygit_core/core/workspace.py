@@ -51,7 +51,7 @@ def _validate_environment_name(name: str) -> None:
     """
     from ..models.exceptions import CDEnvironmentError
 
-    RESERVED_NAMES = {'workspace', 'logs', 'models', '.comfygit'}
+    RESERVED_NAMES = {'workspace', 'logs', 'models', 'input', 'output', '.comfygit'}
 
     # Ensure not empty first
     if not name or not name.strip():
@@ -107,6 +107,16 @@ class WorkspacePaths:
     def models(self) -> Path:
         return self.root / "models"
 
+    @property
+    def input(self) -> Path:
+        """Base directory for per-environment input directories."""
+        return self.root / "input"
+
+    @property
+    def output(self) -> Path:
+        """Base directory for per-environment output directories."""
+        return self.root / "output"
+
     def exists(self) -> bool:
         return self.root.exists() and self.metadata.exists()
 
@@ -116,6 +126,8 @@ class WorkspacePaths:
         self.cache.mkdir(parents=True, exist_ok=True)
         self.logs.mkdir(parents=True, exist_ok=True)
         self.models.mkdir(parents=True, exist_ok=True)
+        self.input.mkdir(parents=True, exist_ok=True)
+        self.output.mkdir(parents=True, exist_ok=True)
 
 class Workspace:
     """Manages ComfyDock workspace and all environments within it.
@@ -549,11 +561,13 @@ class Workspace:
                         f"You may need to delete it manually or reboot to release file locks."
                     )
 
-    def delete_environment(self, name: str):
+    def delete_environment(self, name: str, delete_user_data: bool = False):
         """Delete an environment permanently.
 
         Args:
             name: Environment name
+            delete_user_data: If True, also delete workspace input/output data.
+                             If False (default), preserve user content.
 
         Raises:
             CDEnvironmentNotFoundError: If environment not found
@@ -568,6 +582,37 @@ class Workspace:
         active = self.get_active_environment()
         if active and active.name == name:
             self.set_active_environment(None)
+
+        # Get user data info before deleting environment
+        try:
+            env = Environment(name=name, path=env_path, workspace=self)
+            user_data_size = env.user_content_manager.get_user_data_size()
+            has_user_data = (
+                user_data_size["input"][0] > 0 or
+                user_data_size["output"][0] > 0
+            )
+
+            if has_user_data:
+                input_count, input_size = user_data_size["input"]
+                output_count, output_size = user_data_size["output"]
+                logger.info(
+                    f"Environment '{name}' contains user data:\n"
+                    f"  Input: {input_count} files ({input_size / 1024 / 1024:.1f} MB)\n"
+                    f"  Output: {output_count} files ({output_size / 1024 / 1024:.1f} MB)"
+                )
+
+                if delete_user_data:
+                    logger.info("Deleting user data (--delete-data flag set)")
+                    env.user_content_manager.delete_user_data()
+                else:
+                    logger.info(
+                        f"User data preserved at:\n"
+                        f"  Input: {self.paths.input / name}\n"
+                        f"  Output: {self.paths.output / name}\n"
+                        f"Use --delete-data flag to remove"
+                    )
+        except Exception as e:
+            logger.warning(f"Could not check user data: {e}")
 
         # Delete using shared utility with platform-specific handling
         remove_environment_directory(env_path)
