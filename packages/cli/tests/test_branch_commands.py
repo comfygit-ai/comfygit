@@ -12,6 +12,7 @@ import pytest
 
 from comfygit_cli.env_commands import EnvironmentCommands
 from comfygit_cli.cli import create_parser
+from comfygit_cli.completers import branch_completer
 
 
 class TestCheckoutCommand:
@@ -221,6 +222,36 @@ class TestBranchCommand:
             cmd.branch(args)
 
         mock_env.delete_branch.assert_called_once_with("old-feature", force=True)
+
+    def test_branch_name_argument_has_completer(self):
+        """Test that branch command's name argument has branch_completer attached."""
+        parser = create_parser()
+
+        # Get the branch subparser by accessing _subparsers
+        subparsers_action = None
+        for action in parser._actions:
+            if isinstance(action, type(parser._subparsers._group_actions[0])):
+                subparsers_action = action
+                break
+
+        assert subparsers_action is not None, "Could not find subparsers"
+        assert hasattr(subparsers_action, 'choices'), "Subparsers should have choices"
+        assert 'branch' in subparsers_action.choices, "Should have 'branch' subcommand"
+
+        branch_parser = subparsers_action.choices['branch']
+
+        # Find the 'name' positional argument
+        name_action = None
+        for action in branch_parser._actions:
+            if action.dest == 'name':
+                name_action = action
+                break
+
+        assert name_action is not None, "Could not find 'name' argument in branch subparser"
+
+        # Verify the completer is attached
+        assert hasattr(name_action, 'completer'), "name argument should have a completer attribute"
+        assert name_action.completer == branch_completer, "name argument should use branch_completer"
 
 
 class TestSwitchCommand:

@@ -5,11 +5,14 @@ from unittest.mock import Mock, patch
 import pytest
 
 from comfygit_cli.completers import (
+    branch_completer,
+    commit_hash_completer,
     environment_completer,
     filter_by_prefix,
     get_env_from_args,
     get_workspace_safe,
     installed_node_completer,
+    ref_completer,
     workflow_completer,
 )
 from comfygit_core.models.exceptions import CDWorkspaceNotFoundError
@@ -248,4 +251,188 @@ class TestInstalledNodeCompleter:
         mock_get_env.return_value = None
 
         result = installed_node_completer("", Mock())
+        assert result == []
+
+
+class TestCommitHashCompleter:
+    """Test commit_hash_completer function."""
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_returns_only_hashes_not_messages(self, mock_get_workspace, mock_get_env):
+        """Test that completion returns only commit hashes, not messages."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+
+        mock_env = Mock()
+        # Simulate commit history with hash and message
+        mock_env.get_commit_history.return_value = [
+            {'hash': '7725f89', 'message': '3 models queued for download'},
+            {'hash': '5439eb6', 'message': '1 models not found, 2 models queued'},
+            {'hash': '9090f70', 'message': 'Initial environment setup'},
+        ]
+        mock_get_env.return_value = mock_env
+
+        result = commit_hash_completer("", Mock())
+
+        # Should return ONLY hashes, not "hash (message)" format
+        assert result == ['7725f89', '5439eb6', '9090f70']
+        # Verify no commit messages or parentheses in results
+        for item in result:
+            assert '(' not in item
+            assert ')' not in item
+            assert len(item) == 7  # Short hash length
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_filters_by_prefix(self, mock_get_workspace, mock_get_env):
+        """Test that completion filters hashes by prefix."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+
+        mock_env = Mock()
+        mock_env.get_commit_history.return_value = [
+            {'hash': '7725f89', 'message': 'Some message'},
+            {'hash': '5439eb6', 'message': 'Another message'},
+            {'hash': '9090f70', 'message': 'Third message'},
+        ]
+        mock_get_env.return_value = mock_env
+
+        result = commit_hash_completer("54", Mock())
+
+        # Should return only the hash starting with "54"
+        assert result == ['5439eb6']
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_no_environment_returns_empty(self, mock_get_workspace, mock_get_env):
+        """Test returns empty list when no environment."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+        mock_get_env.return_value = None
+
+        result = commit_hash_completer("", Mock())
+        assert result == []
+
+
+class TestBranchCompleter:
+    """Test branch_completer function."""
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_returns_branch_names(self, mock_get_workspace, mock_get_env):
+        """Test that completion returns branch names."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+
+        mock_env = Mock()
+        # list_branches returns list of (name, is_current) tuples
+        mock_env.list_branches.return_value = [
+            ('main', True),
+            ('feature-x', False),
+            ('bugfix-123', False),
+        ]
+        mock_get_env.return_value = mock_env
+
+        result = branch_completer("", Mock())
+
+        # Should return only branch names
+        assert result == ['main', 'feature-x', 'bugfix-123']
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_filters_by_prefix(self, mock_get_workspace, mock_get_env):
+        """Test that completion filters branches by prefix."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+
+        mock_env = Mock()
+        mock_env.list_branches.return_value = [
+            ('main', True),
+            ('feature-x', False),
+            ('feature-y', False),
+            ('bugfix-123', False),
+        ]
+        mock_get_env.return_value = mock_env
+
+        result = branch_completer("feat", Mock())
+
+        # Should return only branches starting with "feat"
+        assert result == ['feature-x', 'feature-y']
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_no_environment_returns_empty(self, mock_get_workspace, mock_get_env):
+        """Test returns empty list when no environment."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+        mock_get_env.return_value = None
+
+        result = branch_completer("", Mock())
+        assert result == []
+
+
+class TestRefCompleter:
+    """Test ref_completer function (branches + commits)."""
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_returns_branches_and_commits(self, mock_get_workspace, mock_get_env):
+        """Test that completion returns both branches and commits."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+
+        mock_env = Mock()
+        # Branches
+        mock_env.list_branches.return_value = [
+            ('main', True),
+            ('feature-x', False),
+        ]
+        # Commits
+        mock_env.get_commit_history.return_value = [
+            {'hash': '7725f89', 'message': 'Recent commit'},
+            {'hash': '5439eb6', 'message': 'Older commit'},
+        ]
+        mock_get_env.return_value = mock_env
+
+        result = ref_completer("", Mock())
+
+        # Should return branches first, then commits
+        assert result == ['main', 'feature-x', '7725f89', '5439eb6']
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_filters_branches_and_commits_by_prefix(self, mock_get_workspace, mock_get_env):
+        """Test that completion filters both branches and commits."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+
+        mock_env = Mock()
+        mock_env.list_branches.return_value = [
+            ('main', True),
+            ('feature-x', False),
+        ]
+        mock_env.get_commit_history.return_value = [
+            {'hash': '7725f89', 'message': 'Recent commit'},
+            {'hash': '5439eb6', 'message': 'Older commit'},
+        ]
+        mock_get_env.return_value = mock_env
+
+        # Filter for refs starting with 'f'
+        result = ref_completer("f", Mock())
+        assert result == ['feature-x']
+
+        # Filter for refs starting with '7'
+        result = ref_completer("7", Mock())
+        assert result == ['7725f89']
+
+    @patch('comfygit_cli.completers.get_env_from_args')
+    @patch('comfygit_cli.completers.get_workspace_safe')
+    def test_no_environment_returns_empty(self, mock_get_workspace, mock_get_env):
+        """Test returns empty list when no environment."""
+        mock_workspace = Mock()
+        mock_get_workspace.return_value = mock_workspace
+        mock_get_env.return_value = None
+
+        result = ref_completer("", Mock())
         assert result == []

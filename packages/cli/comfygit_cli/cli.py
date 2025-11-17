@@ -10,9 +10,11 @@ import argcomplete
 
 from .completion_commands import CompletionCommands
 from .completers import (
+    branch_completer,
     commit_hash_completer,
     environment_completer,
     installed_node_completer,
+    ref_completer,
     workflow_completer,
 )
 from .env_commands import EnvironmentCommands
@@ -368,7 +370,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
 
     # checkout - Move HEAD without committing
     checkout_parser = subparsers.add_parser("checkout", help="Checkout commits, branches, or files")
-    checkout_parser.add_argument("ref", nargs="?", help="Commit, branch, or tag to checkout (defaults to HEAD when using -b)").completer = commit_hash_completer  # type: ignore[attr-defined]
+    checkout_parser.add_argument("ref", nargs="?", help="Commit, branch, or tag to checkout (defaults to HEAD when using -b)").completer = ref_completer  # type: ignore[attr-defined]
     checkout_parser.add_argument("-b", "--branch", help="Create new branch and switch to it")
     checkout_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation for uncommitted changes")
     checkout_parser.add_argument("--force", action="store_true", help="Force checkout, discarding uncommitted changes")
@@ -376,14 +378,14 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
 
     # branch - Manage branches
     branch_parser = subparsers.add_parser("branch", help="List, create, or delete branches")
-    branch_parser.add_argument("name", nargs="?", help="Branch name (list all if omitted)")
+    branch_parser.add_argument("name", nargs="?", help="Branch name (list all if omitted)").completer = branch_completer  # type: ignore[attr-defined]
     branch_parser.add_argument("-d", "--delete", action="store_true", help="Delete branch")
     branch_parser.add_argument("-D", "--force-delete", action="store_true", help="Force delete branch (even if unmerged)")
     branch_parser.set_defaults(func=env_cmds.branch)
 
     # switch - Switch branches
     switch_parser = subparsers.add_parser("switch", help="Switch to a branch")
-    switch_parser.add_argument("branch", help="Branch name to switch to")
+    switch_parser.add_argument("branch", help="Branch name to switch to").completer = branch_completer  # type: ignore[attr-defined]
     switch_parser.add_argument("-c", "--create", action="store_true", help="Create branch if it doesn't exist")
     switch_parser.set_defaults(func=env_cmds.switch)
 
