@@ -25,6 +25,7 @@ def _get_version() -> str:
 if TYPE_CHECKING:
     from ..repositories.model_repository import ModelRepository
     from ..managers.pyproject_manager import PyprojectManager
+    from ..repositories.workspace_config_repository import WorkspaceConfigRepository
 
 logger = get_logger(__name__)
 
@@ -64,7 +65,8 @@ class WorkflowCacheRepository:
         self,
         db_path: Path,
         pyproject_manager: "PyprojectManager | None" = None,
-        model_repository: "ModelRepository | None" = None
+        model_repository: "ModelRepository | None" = None,
+        workspace_config_manager: "WorkspaceConfigRepository | None" = None
     ):
         """Initialize workflow cache repository.
 
@@ -72,11 +74,13 @@ class WorkflowCacheRepository:
             db_path: Path to SQLite database file
             pyproject_manager: Manager for pyproject.toml access (for context hashing)
             model_repository: Model repository (for context hashing)
+            workspace_config_manager: Workspace config for model sync timestamp (for context hashing)
         """
         self.db_path = db_path
         self.sqlite = SQLiteManager(db_path)
         self.pyproject_manager = pyproject_manager
         self.model_repository = model_repository
+        self.workspace_config_manager = workspace_config_manager
         self._session_cache: dict[str, CachedWorkflowAnalysis] = {}
 
         # Ensure schema exists
@@ -717,7 +721,24 @@ class WorkflowCacheRepository:
         step_elapsed = (time.perf_counter() - step_start) * 1000
         logger.debug(f"[CONTEXT] Step 4 (model index queries, {len(dependencies.found_models)} models) took {step_elapsed:.2f}ms")
 
-        # 5. Comfydock version (global invalidator)
+        # 5. Model index sync time (invalidate when model index changes)
+        step_start = time.perf_counter()
+        if self.workspace_config_manager:
+            try:
+                config = self.workspace_config_manager.load()
+                if config.global_model_directory and config.global_model_directory.last_sync:
+                    context["models_sync_time"] = config.global_model_directory.last_sync
+                else:
+                    context["models_sync_time"] = None
+            except Exception as e:
+                logger.warning(f"Failed to get model sync time: {e}")
+                context["models_sync_time"] = None
+        else:
+            context["models_sync_time"] = None
+        step_elapsed = (time.perf_counter() - step_start) * 1000
+        logger.debug(f"[CONTEXT] Step 5 (model sync time) took {step_elapsed:.2f}ms")
+
+        # 6. Comfygit version (global invalidator)
         context["comfygit_version"] = _get_version()
 
         # Hash the normalized context
@@ -727,7 +748,7 @@ class WorkflowCacheRepository:
         hasher.update(context_json.encode('utf-8'))
         hash_result = hasher.hexdigest()[:16]
         step_elapsed = (time.perf_counter() - step_start) * 1000
-        logger.debug(f"[CONTEXT] Step 5 (JSON + hash) took {step_elapsed:.2f}ms")
+        logger.debug(f"[CONTEXT] Step 6 (JSON + hash) took {step_elapsed:.2f}ms")
 
         total_elapsed = (time.perf_counter() - context_start) * 1000
         logger.debug(f"[CONTEXT] Total context hash computation: {total_elapsed:.2f}ms")

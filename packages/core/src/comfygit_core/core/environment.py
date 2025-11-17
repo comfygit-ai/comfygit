@@ -160,7 +160,8 @@ class Environment:
         return WorkflowCacheRepository(
             cache_db_path,
             pyproject_manager=self.pyproject,
-            model_repository=self.model_repository
+            model_repository=self.model_repository,
+            workspace_config_manager=self.workspace_config_manager
         )
 
     @cached_property

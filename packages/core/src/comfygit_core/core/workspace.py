@@ -841,9 +841,17 @@ class Workspace:
         if path.exists():
             result = self.model_scanner.scan_directory(path, quiet=True, progress=progress)
             logger.debug(f"Found {result.added_count} new, {result.updated_count} updated models")
-            results = result.added_count + result.updated_count
-            self.workspace_config_manager.update_models_sync_time()
-            logger.info(f"Sync complete: {results} changes")
+
+            # Calculate total changes (including removals)
+            total_changes = result.added_count + result.updated_count + result.removed_count
+            results = total_changes
+
+            # Only update timestamp if actual changes occurred
+            if total_changes > 0:
+                self.workspace_config_manager.update_models_sync_time()
+                logger.info(f"Sync complete: {total_changes} changes ({result.added_count} added, {result.updated_count} updated, {result.removed_count} removed)")
+            else:
+                logger.debug("Model index scan complete: no changes detected")
         else:
             logger.warning(f"Tracked directory no longer exists: {path}")
 
