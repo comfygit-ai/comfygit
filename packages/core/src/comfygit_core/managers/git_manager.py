@@ -247,28 +247,29 @@ __pycache__/
         git_checkout(self.repo_path, "HEAD", files=["."])
 
     def get_version_history(self, limit: int = 10) -> list[dict]:
-        """Get commit history with short hashes.
+        """Get commit history with short hashes and branch references.
 
         Args:
             limit: Maximum number of commits to return
 
         Returns:
-            List of commit dicts with keys: hash, message, date, date_relative
+            List of commit dicts with keys: hash, refs, message, date, date_relative
             (newest first)
         """
-        # Use %h for short hash (7 chars), %cr for relative date
+        # Use %h for short hash, %D for refs (branch names without parens), %cr for relative date
         result = git_history(
             self.repo_path,
             max_count=limit,
-            pretty="format:%h|%s|%ai|%cr"
+            pretty="format:%h|%D|%s|%ai|%cr"
         )
 
         commits = []
         for line in result.strip().split('\n'):
             if line:
-                hash_short, message, date, date_relative = line.split('|', 3)
+                hash_short, refs, message, date, date_relative = line.split('|', 4)
                 commits.append({
                     'hash': hash_short,           # 7-char short hash
+                    'refs': refs.strip(),          # Branch/tag refs: "HEAD -> main, origin/main" or ""
                     'message': message,
                     'date': date,                 # Absolute: 2025-11-15 14:23:45
                     'date_relative': date_relative  # Relative: "2 days ago"

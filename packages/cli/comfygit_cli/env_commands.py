@@ -670,14 +670,16 @@ class EnvironmentCommands:
             print(f"Commit history for environment '{env.name}':\n")
 
             if not args.verbose:
-                # Compact: hash + message + relative date
+                # Compact: hash + refs + message + relative date
                 for commit in history:  # Already newest first
-                    print(f"{commit['hash']}  {commit['message']} ({commit['date_relative']})")
+                    refs_display = f" ({commit['refs']})" if commit['refs'] else ""
+                    print(f"{commit['hash']}{refs_display}  {commit['message']} ({commit['date_relative']})")
                 print()
             else:
                 # Verbose: multi-line with full info
                 for commit in history:
-                    print(f"Commit:  {commit['hash']}")
+                    refs_display = f" ({commit['refs']})" if commit['refs'] else ""
+                    print(f"Commit:  {commit['hash']}{refs_display}")
                     print(f"Date:    {commit['date'][:19]}")
                     print(f"Message: {commit['message']}")
                     print()
