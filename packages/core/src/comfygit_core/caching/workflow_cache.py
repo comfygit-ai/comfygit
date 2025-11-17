@@ -34,7 +34,7 @@ logger = get_logger(__name__)
 # - Database: Add/remove/rename columns
 # - Resolution: Change node ID format (e.g., subgraph scoping), WorkflowNodeWidgetRef structure, etc.
 # Migration: Wipes cache and rebuilds (cache is ephemeral)
-SCHEMA_VERSION = 3  # Bumped for subgraph node ID scoping (breaking resolution format change)
+SCHEMA_VERSION = 4  # Bumped for models_sync_time column (cache invalidation on model index changes)
 
 
 class CachedWorkflowAnalysis:
@@ -125,6 +125,7 @@ class WorkflowCacheRepository:
                 workflow_size INTEGER NOT NULL,
                 resolution_context_hash TEXT NOT NULL,
                 pyproject_mtime REAL NOT NULL,
+                models_sync_time TEXT,
                 comfygit_version TEXT NOT NULL,
                 dependencies_json TEXT NOT NULL,
                 resolution_json TEXT,
@@ -219,7 +220,7 @@ class WorkflowCacheRepository:
         query_start = time.perf_counter()
         query = """
             SELECT workflow_hash, dependencies_json, resolution_json,
-                   resolution_context_hash, pyproject_mtime, comfygit_version
+                   resolution_context_hash, pyproject_mtime, models_sync_time, comfygit_version
             FROM workflow_cache
             WHERE environment_name = ? AND workflow_name = ?
               AND workflow_mtime = ? AND workflow_size = ?
@@ -246,7 +247,7 @@ class WorkflowCacheRepository:
             query_start = time.perf_counter()
             query = """
                 SELECT workflow_hash, dependencies_json, resolution_json,
-                       resolution_context_hash, pyproject_mtime, comfygit_version
+                       resolution_context_hash, pyproject_mtime, models_sync_time, comfygit_version
                 FROM workflow_cache
                 WHERE environment_name = ? AND workflow_name = ?
                   AND workflow_hash = ?
@@ -290,7 +291,37 @@ class WorkflowCacheRepository:
             logger.debug(f"[CACHE] Pyproject mtime check for '{workflow_name}': current={pyproject_mtime:.6f}, cached={cached_pyproject_mtime:.6f}, diff={mtime_diff:.6f}s")
 
             # Fast reject: if pyproject hasn't been touched, context can't have changed
+            # UNLESS the model index has changed (checked via models_sync_time)
             if pyproject_mtime == cached_pyproject_mtime:
+                # Check if model index has changed since cache was created
+                cached_sync_time = cached_row.get('models_sync_time')
+                current_sync_time = None
+
+                if self.workspace_config_manager:
+                    try:
+                        config = self.workspace_config_manager.load()
+                        if config.global_model_directory and config.global_model_directory.last_sync:
+                            current_sync_time = config.global_model_directory.last_sync
+                    except Exception as e:
+                        logger.warning(f"Failed to check current model sync time: {e}")
+
+                # Compare sync times (both might be None, which is fine)
+                if cached_sync_time != current_sync_time:
+                    # Model index changed - invalidate cache
+                    logger.debug(
+                        f"[CACHE] Model index changed for '{workflow_name}': "
+                        f"cached_sync={cached_sync_time}, current_sync={current_sync_time}"
+                    )
+                    cached = CachedWorkflowAnalysis(
+                        dependencies=dependencies,
+                        resolution=None,
+                        needs_reresolution=True
+                    )
+                    self._session_cache[session_key] = cached
+                    elapsed = (time.perf_counter() - start_time) * 1000
+                    logger.debug(f"[CACHE] PARTIAL HIT (model index changed) for '{workflow_name}' ({elapsed:.2f}ms total)")
+                    return cached
+
                 # Nothing changed - full cache hit
                 resolution = self._deserialize_resolution(cached_row['resolution_json']) if cached_row['resolution_json'] else None
                 cached = CachedWorkflowAnalysis(
@@ -300,7 +331,7 @@ class WorkflowCacheRepository:
                 )
                 self._session_cache[session_key] = cached
                 elapsed = (time.perf_counter() - start_time) * 1000
-                logger.debug(f"[CACHE] FULL HIT (pyproject unchanged) for '{workflow_name}' ({elapsed:.2f}ms total)")
+                logger.debug(f"[CACHE] FULL HIT (pyproject unchanged, model index unchanged) for '{workflow_name}' ({elapsed:.2f}ms total)")
                 return cached
 
             logger.debug(f"[CACHE] Pyproject mtime changed for '{workflow_name}', computing context hash...")
@@ -396,6 +427,16 @@ class WorkflowCacheRepository:
                 workflow_name
             )
 
+        # Get models_sync_time for cache invalidation check
+        models_sync_time = None
+        if self.workspace_config_manager:
+            try:
+                config = self.workspace_config_manager.load()
+                if config.global_model_directory and config.global_model_directory.last_sync:
+                    models_sync_time = config.global_model_directory.last_sync
+            except Exception:
+                pass
+
         # Serialize data
         dependencies_json = self._serialize_dependencies(dependencies)
         resolution_json = self._serialize_resolution(resolution) if resolution else None
@@ -405,15 +446,15 @@ class WorkflowCacheRepository:
         query = """
             INSERT OR REPLACE INTO workflow_cache
             (environment_name, workflow_name, workflow_hash, workflow_mtime,
-             workflow_size, resolution_context_hash, pyproject_mtime,
+             workflow_size, resolution_context_hash, pyproject_mtime, models_sync_time,
              comfygit_version, dependencies_json, resolution_json, cached_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cached_at = int(time.time())
         self.sqlite.execute_write(
             query,
             (env_name, workflow_name, workflow_hash, workflow_mtime, workflow_size,
-             resolution_context_hash, pyproject_mtime, comfygit_version,
+             resolution_context_hash, pyproject_mtime, models_sync_time, comfygit_version,
              dependencies_json, resolution_json, cached_at)
         )
 

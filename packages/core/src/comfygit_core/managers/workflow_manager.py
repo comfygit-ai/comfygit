@@ -901,9 +901,9 @@ class WorkflowManager:
         # Get global models table for download intent creation
         global_models_dict = {}
         try:
-            all_global_models = self.pyproject_manager.models.get_all()
-            for model_hash, model in all_global_models.items():
-                global_models_dict[model_hash] = model
+            all_global_models = self.pyproject.models.get_all()
+            for model in all_global_models:
+                global_models_dict[model.hash] = model
         except Exception as e:
             logger.warning(f"Failed to load global models table: {e}")
 
@@ -1094,9 +1094,9 @@ class WorkflowManager:
             # Get global models table for download intent creation
             global_models_dict = {}
             try:
-                all_global_models = self.pyproject_manager.models.get_all()
-                for model_hash, model in all_global_models.items():
-                    global_models_dict[model_hash] = model
+                all_global_models = self.pyproject.models.get_all()
+                for model in all_global_models:
+                    global_models_dict[model.hash] = model
             except Exception as e:
                 logger.warning(f"Failed to load global models table: {e}")
 
