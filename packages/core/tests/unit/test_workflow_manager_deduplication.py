@@ -5,11 +5,13 @@ and all node references should be grouped together in a single ManifestWorkflowM
 """
 import pytest
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, call
+from unittest.mock import Mock, MagicMock, call, patch
 
 from comfygit_core.managers.workflow_manager import WorkflowManager
 from comfygit_core.models.workflow import (
     WorkflowNodeWidgetRef,
+    WorkflowNode,
+    WorkflowDependencies,
     ResolvedModel,
     ResolutionResult,
     ModelResolutionContext,
@@ -256,3 +258,100 @@ class TestDeduplicationIntegration:
         assert len(groups[("model_a.safetensors", "VAELoader")]) == 2
         assert len(groups[("model_b.safetensors", "VAELoader")]) == 1
         assert len(groups[("model_a.safetensors", "CheckpointLoaderSimple")]) == 1
+
+
+class TestResolveWorkflowDeduplication:
+    """Test that resolve_workflow() deduplicates model refs in status reporting."""
+
+    @patch('comfygit_core.managers.workflow_manager.WorkflowRepository')
+    def test_resolve_workflow_deduplicates_model_refs_in_unresolved_list(self, mock_workflow_repo):
+        """When same model appears in multiple nodes, models_unresolved should contain unique refs only.
+
+        This test verifies that status reporting shows accurate counts by deduplicating
+        model references at the resolve_workflow() level, not just in fix_resolution().
+
+        Example: If workflow has qwen_image_vae.safetensors in nodes #39 and #337,
+        models_unresolved should contain 1 representative ref, not 2 duplicate refs.
+        """
+        # ARRANGE: Create workflow dependencies with duplicate model refs
+        ref1 = WorkflowNodeWidgetRef(
+            node_id="39",
+            node_type="VAELoader",
+            widget_index=0,
+            widget_value="qwen_image_vae.safetensors"
+        )
+        ref2 = WorkflowNodeWidgetRef(
+            node_id="337",
+            node_type="VAELoader",
+            widget_index=0,
+            widget_value="qwen_image_vae.safetensors"
+        )
+        ref3 = WorkflowNodeWidgetRef(
+            node_id="38",
+            node_type="CLIPLoader",
+            widget_index=0,
+            widget_value="qwen_2.5_vl_7b_fp8_scaled.safetensors"
+        )
+        ref4 = WorkflowNodeWidgetRef(
+            node_id="338",
+            node_type="CLIPLoader",
+            widget_index=0,
+            widget_value="qwen_2.5_vl_7b_fp8_scaled.safetensors"
+        )
+
+        # Create analysis with 4 model refs (2 unique models)
+        analysis = WorkflowDependencies(
+            workflow_name="test_workflow",
+            found_models=[ref1, ref2, ref3, ref4],
+            builtin_nodes=[],
+            non_builtin_nodes=[]
+        )
+
+        # Create mocked workflow manager
+        manager = Mock(spec=WorkflowManager)
+        manager.environment_name = "test_env"
+        manager.pyproject = Mock()
+        manager.pyproject.nodes = Mock()
+        manager.pyproject.nodes.get_existing.return_value = {}
+        manager.pyproject.workflows = Mock()
+        manager.pyproject.workflows.get_custom_node_map.return_value = {}
+        manager.pyproject.workflows.get_workflow_models.return_value = []
+        manager.pyproject_manager = Mock()
+        manager.pyproject_manager.models = Mock()
+        manager.pyproject_manager.models.get_all.return_value = {}
+
+        manager.global_node_resolver = Mock()
+        manager.model_resolver = Mock()
+        manager.workflow_cache = Mock()
+        manager.get_workflow_path = Mock(return_value=Path("/fake/path.json"))
+
+        # Mock WorkflowRepository to avoid file I/O
+        mock_workflow_repo.load.return_value = None
+
+        # All models unresolved (return None)
+        manager.model_resolver.resolve_model.return_value = None
+
+        # Bind actual resolve_workflow method
+        manager.resolve_workflow = WorkflowManager.resolve_workflow.__get__(manager)
+        manager._check_path_needs_sync = Mock(return_value=False)
+
+        # ACT: Resolve workflow
+        result = manager.resolve_workflow(analysis)
+
+        # ASSERT: Should have 2 unique unresolved models, not 4
+        # Current bug: This will fail because models_unresolved contains all 4 refs
+        # Expected: models_unresolved should contain 2 representative refs (one per unique model)
+        assert len(result.models_unresolved) == 2, (
+            f"Expected 2 unique unresolved models (deduplicated), "
+            f"got {len(result.models_unresolved)}: {result.models_unresolved}"
+        )
+
+        # Verify the unique models are the right ones
+        unresolved_keys = {(ref.widget_value, ref.node_type) for ref in result.models_unresolved}
+        expected_keys = {
+            ("qwen_image_vae.safetensors", "VAELoader"),
+            ("qwen_2.5_vl_7b_fp8_scaled.safetensors", "CLIPLoader")
+        }
+        assert unresolved_keys == expected_keys, (
+            f"Expected unique model keys {expected_keys}, got {unresolved_keys}"
+        )

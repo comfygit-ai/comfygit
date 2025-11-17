@@ -914,14 +914,26 @@ class WorkflowManager:
             auto_select_ambiguous=True # TODO: Make configurable
         )
 
-        # Resolve models - build mapping from ref to resolved model
+        # Deduplicate model refs by (widget_value, node_type) before resolving
+        # This ensures status reporting shows accurate counts (not inflated by duplicates)
+        model_groups: dict[tuple[str, str], list[WorkflowNodeWidgetRef]] = {}
         for model_ref in analysis.found_models:
-            result = self.model_resolver.resolve_model(model_ref, model_context)
+            key = (model_ref.widget_value, model_ref.node_type)
+            if key not in model_groups:
+                model_groups[key] = []
+            model_groups[key].append(model_ref)
+
+        # Resolve each unique model group (one resolution per unique model)
+        for (widget_value, node_type), refs_in_group in model_groups.items():
+            # Use first ref as representative for resolution
+            primary_ref = refs_in_group[0]
+
+            result = self.model_resolver.resolve_model(primary_ref, model_context)
 
             if result is None:
-                # Model not found at all
-                logger.debug(f"Failed to resolve model: {model_ref}")
-                models_unresolved.append(model_ref)
+                # Model not found at all - add primary ref only (deduplicated)
+                logger.debug(f"Failed to resolve model: {primary_ref}")
+                models_unresolved.append(primary_ref)
             elif len(result) == 1:
                 # Clean resolution (exact match or from pyproject cache)
                 resolved_model = result[0]
@@ -936,13 +948,13 @@ class WorkflowManager:
                 logger.debug(f"Resolved model: {resolved_model}")
                 models_resolved.append(resolved_model)
             elif len(result) > 1:
-                # Ambiguous - multiple matches
+                # Ambiguous - multiple matches (use primary ref)
                 logger.debug(f"Ambiguous model: {result}")
                 models_ambiguous.append(result)
             else:
-                # No resolution possible
-                logger.debug(f"Failed to resolve model: {model_ref}, result: {result}")
-                models_unresolved.append(model_ref)
+                # No resolution possible - add primary ref only (deduplicated)
+                logger.debug(f"Failed to resolve model: {primary_ref}, result: {result}")
+                models_unresolved.append(primary_ref)
 
         return ResolutionResult(
             workflow_name=workflow_name,
