@@ -635,39 +635,41 @@ class EnvironmentCommands:
 
     @with_env_logging("log")
     def log(self, args: argparse.Namespace, logger=None) -> None:
-        """Show environment version history with simple identifiers."""
+        """Show commit history for this environment."""
         env = self._get_env(args)
 
         try:
-            versions = env.get_versions(limit=20)
+            limit = args.limit if hasattr(args, 'limit') else 20
+            history = env.get_commit_history(limit=limit)
 
-            if not versions:
-                print("No version history yet")
-                print("\nTip: Run 'cg commit' to create your first version")
+            if not history:
+                print("No commits yet")
+                print("\nTip: Run 'cg commit' to create your first commit")
                 return
 
-            print(f"Version history for environment '{env.name}':\n")
+            print(f"Commit history for environment '{env.name}':\n")
 
             if not args.verbose:
-                # Compact format
-                for version in reversed(versions):  # Show newest first
-                    print(f"{version['version']}: {version['message']}")
+                # Compact: hash + message + relative date
+                for commit in history:  # Already newest first
+                    print(f"{commit['hash']}  {commit['message']} ({commit['date_relative']})")
                 print()
             else:
-                # Detailed format
-                for version in reversed(versions):  # Show newest first
-                    print(f"Version: {version['version']}")
-                    print(f"Message: {version['message']}")
-                    print(f"Date:    {version['date'][:19]}")  # Trim timezone for readability
-                    print(f"Commit:  {version['hash'][:8]}")
-                    print('\n')
+                # Verbose: multi-line with full info
+                for commit in history:
+                    print(f"Commit:  {commit['hash']}")
+                    print(f"Date:    {commit['date'][:19]}")
+                    print(f"Message: {commit['message']}")
+                    print()
 
-            print("Use 'cg rollback <version>' to restore to a specific version")
+            print("Use 'cg checkout <hash>' to view a specific commit")
+            print("Use 'cg revert <hash>' to undo changes from a commit (safe)")
+            print("Use 'cg checkout -b <branch> <hash>' to create branch from commit")
 
         except Exception as e:
             if logger:
-                logger.error(f"Failed to read version history for environment '{env.name}': {e}", exc_info=True)
-            print(f"✗ Could not read version history: {e}", file=sys.stderr)
+                logger.error(f"Failed to read commit history for environment '{env.name}': {e}", exc_info=True)
+            print(f"✗ Could not read commit history: {e}", file=sys.stderr)
             sys.exit(1)
 
     # === Node management ===
@@ -1685,7 +1687,7 @@ class EnvironmentCommands:
             print()
             print("💡 Options:")
             print("  • Commit: cg commit -m 'message'")
-            print("  • Discard: cg rollback")
+            print("  • Discard: cg reset --hard")
             print("  • Force: cg pull origin --force")
             sys.exit(1)
 

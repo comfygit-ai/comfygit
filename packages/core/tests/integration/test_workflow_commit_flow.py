@@ -412,16 +412,16 @@ class TestWorkflowModelResolution:
         # JSON formatting differences from our manual edit, but that's okay -
         # the important thing is the commit succeeded
 
-class TestWorkflowRollback:
-    """Tests for workflow versioning and rollback."""
+class TestWorkflowReset:
+    """Tests for workflow versioning and reset."""
 
-    def test_rollback_restores_workflow_content(
+    def test_reset_restores_workflow_content(
         self,
         test_env,
         workflow_fixtures,
         test_models
     ):
-        """Rollback should restore exact workflow content from previous version."""
+        """Reset should restore exact workflow content from previous commit."""
         import copy
 
         # First user commit: Save initial version
@@ -433,6 +433,10 @@ class TestWorkflowRollback:
             workflow_status=workflow_status,
             message="First workflow")
 
+        # Get hash of first commit
+        history = test_env.get_commit_history(limit=5)
+        first_commit_hash = history[0]['hash']  # Newest first
+
         # Second user commit: Modify and commit
         v2_workflow = copy.deepcopy(v1_workflow)
         v2_workflow["nodes"][1]["widgets_values"] = ["modified prompt v2"]
@@ -443,22 +447,21 @@ class TestWorkflowRollback:
             workflow_status=workflow_status,
             message="Modified workflow")
 
-        # Verify we're on v3 (modified version)
+        # Verify we're on modified version
         comfyui_workflow_path = test_env.comfyui_path / "user" / "default" / "workflows" / "test.json"
         with open(comfyui_workflow_path) as f:
             current = json.load(f)
         assert current["nodes"][1]["widgets_values"] == ["modified prompt v2"]
 
-        # Rollback to v2 (first user commit)
-        # Note: v1 is the "Initial test environment" from fixture
-        test_env.rollback("v2")
+        # Reset to first commit
+        test_env.reset(first_commit_hash, mode="hard")
 
-        # Verify v2 content restored
+        # Verify first commit content restored
         with open(comfyui_workflow_path) as f:
             restored = json.load(f)
 
         assert restored["nodes"][1]["widgets_values"] == v1_workflow["nodes"][1]["widgets_values"], \
-            "Rollback should restore exact v2 content"
+            "Reset should restore exact first commit content"
 
     def test_commit_creates_retrievable_version(
         self,
@@ -466,10 +469,10 @@ class TestWorkflowRollback:
         workflow_fixtures,
         test_models
     ):
-        """Each commit should create a new version in git history."""
-        # Get initial version count
-        initial_versions = test_env.get_versions()
-        initial_count = len(initial_versions)
+        """Each commit should create a new commit in git history."""
+        # Get initial commit count
+        initial_history = test_env.get_commit_history()
+        initial_count = len(initial_history)
 
         # Make change and commit
         workflow = load_workflow_fixture(workflow_fixtures, "simple_txt2img")
@@ -480,50 +483,53 @@ class TestWorkflowRollback:
             workflow_status=workflow_status,
             message="Add workflow")
 
-        # Verify new version exists
-        versions = test_env.get_versions()
-        assert len(versions) == initial_count + 1, \
-            f"Should have {initial_count + 1} versions. Found: {len(versions)}"
-        assert versions[-1]['message'] == "Add workflow"
-        assert versions[-1]['version'] == f"v{initial_count + 1}"
+        # Verify new commit exists
+        history = test_env.get_commit_history()
+        assert len(history) == initial_count + 1, \
+            f"Should have {initial_count + 1} commits. Found: {len(history)}"
+        assert history[0]['message'] == "Add workflow"  # Newest first
+        assert 'hash' in history[0]
+        assert len(history[0]['hash']) == 7  # Short hash
 
-    def test_rollback_removes_workflow_added_after_target(
+    def test_reset_removes_workflow_added_after_target(
         self,
         test_env,
         workflow_fixtures,
         test_models
     ):
         """
-        BUG: Rollback does not delete files added after target version.
+        Reset should delete files added after target commit.
 
-        Reproduces the exact bug:
-        1. v1: Create workflow_a
-        2. v2: Add workflow_b
-        3. v3: Modify workflow_a
-        4. Rollback to v1
-        5. BUG: workflow_b still exists in both .cec and ComfyUI
-
-        Expected: workflow_b should be deleted
+        Scenario:
+        1. Commit 1: Create workflow_a
+        2. Commit 2: Add workflow_b
+        3. Commit 3: Modify workflow_a
+        4. Rollback to Commit 1
+        5. Expected: workflow_b should be deleted
         """
-        # V1: Create initial workflow
+        # Commit 1: Create initial workflow
         workflow_a = load_workflow_fixture(workflow_fixtures, "simple_txt2img")
         simulate_comfyui_save_workflow(test_env, "test_default", workflow_a)
 
         workflow_status = test_env.workflow_manager.get_workflow_status()
         test_env.execute_commit(
             workflow_status=workflow_status,
-            message="v1: Initial setup")
+            message="Initial setup")
 
-        # V2: Add second workflow
+        # Get hash of first commit
+        history = test_env.get_commit_history(limit=5)
+        first_commit = history[0]['hash']
+
+        # Commit 2: Add second workflow
         workflow_b = load_workflow_fixture(workflow_fixtures, "simple_txt2img")
         simulate_comfyui_save_workflow(test_env, "test_default1", workflow_b)
 
         workflow_status = test_env.workflow_manager.get_workflow_status()
         test_env.execute_commit(
             workflow_status=workflow_status,
-            message="v2: Added test_default1")
+            message="Added test_default1")
 
-        # V3: Modify first workflow
+        # Commit 3: Modify first workflow
         import copy
         workflow_a_v3 = copy.deepcopy(workflow_a)
         workflow_a_v3["nodes"][1]["widgets_values"] = ["modified in v3"]
@@ -532,17 +538,16 @@ class TestWorkflowRollback:
         workflow_status = test_env.workflow_manager.get_workflow_status()
         test_env.execute_commit(
             workflow_status=workflow_status,
-            message="v3: Updated test_default")
+            message="Updated test_default")
 
-        # Verify v3 state: both workflows exist
+        # Verify current state: both workflows exist
         assert (test_env.cec_path / "workflows" / "test_default.json").exists()
         assert (test_env.cec_path / "workflows" / "test_default1.json").exists()
         assert (test_env.comfyui_path / "user" / "default" / "workflows" / "test_default.json").exists()
         assert (test_env.comfyui_path / "user" / "default" / "workflows" / "test_default1.json").exists()
 
-        # Rollback to v2 (first user commit with test_default)
-        # Note: v1 is the "Initial test environment" commit from fixture setup
-        test_env.rollback("v2")
+        # Reset to first commit
+        test_env.reset(first_commit, mode="hard")
 
         # BUG FIX: test_default1 should be DELETED from .cec
         assert not (test_env.cec_path / "workflows" / "test_default1.json").exists(), \
@@ -639,143 +644,21 @@ class TestWorkflowRollback:
         assert comfyui_content == cec_content, \
             "ComfyUI and .cec versions should be identical after commit"
 
-    def test_rollback_creates_clean_state_with_auto_commit(
+    def test_reset_to_current_version_with_no_changes(
         self,
         test_env,
         workflow_fixtures,
         test_models
     ):
         """
-        Rollback should create a clean state with no uncommitted changes.
+        Rollback to current commit when already clean should be a no-op.
 
-        Design: "Checkpoint-style" rollback
-        - Rollback = instant teleportation to old state
-        - Auto-commits the rollback as a new version
-        - No "uncommitted changes" after rollback
-        - Full history preserved (v1→v2→v3→v4[rollback to v2])
-
-        This test verifies:
-        1. Rollback restores the target version's state
-        2. Rollback auto-commits as a new version
-        3. Status shows clean state (no uncommitted changes)
-        4. Full history is preserved
-        """
-        import copy
-        import subprocess
-
-        # Create v2: First workflow commit
-        v2_workflow = load_workflow_fixture(workflow_fixtures, "simple_txt2img")
-        for node in v2_workflow["nodes"]:
-            if node.get("type") == "CheckpointLoaderSimple":
-                node["widgets_values"] = ["checkpoints/sd15_v1.safetensors"]
-
-        simulate_comfyui_save_workflow(test_env, "test", v2_workflow)
-        workflow_status = test_env.workflow_manager.get_workflow_status()
-        test_env.execute_commit(
-            workflow_status=workflow_status,
-            message="v2: Initial workflow")
-
-        # Create v3: Modify workflow
-        v3_workflow = copy.deepcopy(v2_workflow)
-        v3_workflow["nodes"][1]["widgets_values"] = ["v3 prompt"]
-        simulate_comfyui_save_workflow(test_env, "test", v3_workflow)
-        workflow_status = test_env.workflow_manager.get_workflow_status()
-        test_env.execute_commit(
-            workflow_status=workflow_status,
-            message="v3: Modified prompt")
-
-        # Create v4: Modify again
-        v4_workflow = copy.deepcopy(v2_workflow)
-        v4_workflow["nodes"][1]["widgets_values"] = ["v4 prompt"]
-        simulate_comfyui_save_workflow(test_env, "test", v4_workflow)
-        workflow_status = test_env.workflow_manager.get_workflow_status()
-        test_env.execute_commit(
-            workflow_status=workflow_status,
-            message="v4: Changed prompt again")
-
-        # Verify we're at v4
-        versions = test_env.get_versions()
-        assert len(versions) == 4  # v1 (init), v2, v3, v4
-        assert versions[-1]["message"] == "v4: Changed prompt again"
-
-        # ROLLBACK TO v2
-        test_env.rollback("v2")
-
-        # TEST 1: Rollback created a new version (v5)
-        versions_after = test_env.get_versions()
-        assert len(versions_after) == 5, \
-            f"Rollback should create new version. Expected 5, got {len(versions_after)}"
-
-        assert "rollback" in versions_after[-1]["message"].lower(), \
-            f"Latest version should be rollback commit. Got: {versions_after[-1]['message']}"
-
-        # TEST 2: Git status is CLEAN (no uncommitted changes)
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=test_env.cec_path,
-            capture_output=True,
-            text=True
-        )
-        assert result.stdout.strip() == "", \
-            f"Git should be clean after rollback. Found uncommitted changes:\n{result.stdout}"
-
-        # TEST 3: Status shows clean state
-        status = test_env.status()
-        assert status.is_synced, \
-            "Status should show synced state after rollback (no uncommitted changes)"
-
-        # TEST 4: Workflow content matches v2
-        comfyui_path = test_env.comfyui_path / "user" / "default" / "workflows" / "test.json"
-        with open(comfyui_path) as f:
-            current = json.load(f)
-
-        # v2 had original prompt from fixture
-        assert current["nodes"][1]["widgets_values"] == v2_workflow["nodes"][1]["widgets_values"], \
-            "Workflow content should match v2 after rollback"
-
-        # TEST 5: Full history is preserved (can still see v3, v4)
-        assert versions_after[0]["version"] == "v1"
-        assert versions_after[1]["version"] == "v2"
-        assert versions_after[2]["version"] == "v3"
-        assert versions_after[3]["version"] == "v4"
-        assert versions_after[4]["version"] == "v5"
-
-        # TEST 6: Can rollback to v4 (forward in history)
-        test_env.rollback("v4")
-        versions_after_forward = test_env.get_versions()
-        assert len(versions_after_forward) == 6, "Second rollback should create v6"
-
-        # Verify v4 content restored
-        with open(comfyui_path) as f:
-            current = json.load(f)
-        assert current["nodes"][1]["widgets_values"] == ["v4 prompt"], \
-            "Rolling forward should restore v4 content"
-
-        # Git should still be clean
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=test_env.cec_path,
-            capture_output=True,
-            text=True
-        )
-        assert result.stdout.strip() == "", \
-            "Git should be clean after second rollback"
-
-    def test_rollback_to_current_version_with_no_changes(
-        self,
-        test_env,
-        workflow_fixtures,
-        test_models
-    ):
-        """
-        Rollback to current version when already clean should be a no-op.
-
-        Scenario: User runs 'rollback v4' when already at v4 with no changes
+        Scenario: User rolls back to HEAD with no changes
         Expected: Success (no error), no new commit created, clean state
         """
         import subprocess
 
-        # Create v2
+        # Create commit
         workflow = load_workflow_fixture(workflow_fixtures, "simple_txt2img")
         for node in workflow["nodes"]:
             if node.get("type") == "CheckpointLoaderSimple":
@@ -785,24 +668,28 @@ class TestWorkflowRollback:
         workflow_status = test_env.workflow_manager.get_workflow_status()
         test_env.execute_commit(
             workflow_status=workflow_status,
-            message="v2: Initial workflow")
+            message="Initial workflow")
+
+        # Get current commit hash
+        history = test_env.get_commit_history(limit=5)
+        current_commit = history[0]['hash']
 
         # Verify clean state
         status = test_env.status()
         assert status.is_synced, "Should start with clean state"
 
-        versions_before = test_env.get_versions()
-        version_count_before = len(versions_before)
+        history_before = test_env.get_commit_history()
+        count_before = len(history_before)
 
-        # Rollback to current version (v2)
-        test_env.rollback("v2")
+        # Reset to current commit
+        test_env.reset(current_commit, mode="hard")
 
         # Should succeed (no error)
-        # Should NOT create new commit (already at v2)
-        versions_after = test_env.get_versions()
-        assert len(versions_after) == version_count_before, \
+        # Should NOT create new commit
+        history_after = test_env.get_commit_history()
+        assert len(history_after) == count_before, \
             f"Should not create new commit when rolling back to current. " \
-            f"Before: {version_count_before}, After: {len(versions_after)}"
+            f"Before: {count_before}, After: {len(history_after)}"
 
         # Git should not have modified or deleted files (untracked is OK from uv sync)
         result = subprocess.run(
@@ -821,36 +708,40 @@ class TestWorkflowRollback:
         status = test_env.status()
         assert status.is_synced, "Status should remain synced"
 
-    def test_rollback_to_current_version_discards_uncommitted_changes(
+    def test_reset_to_current_version_discards_uncommitted_changes(
         self,
         test_env,
         workflow_fixtures,
         test_models
     ):
         """
-        Rollback to current version with uncommitted changes should discard them.
+        Rollback to current commit with uncommitted changes should discard them.
 
-        Scenario: User has uncommitted changes, runs 'rollback v4' to discard
+        Scenario: User has uncommitted changes, rolls back to HEAD to discard
         Expected: Changes discarded, no new commit, clean state
         """
         import subprocess
         import copy
         import json
 
-        # Create v2
-        v2_workflow = load_workflow_fixture(workflow_fixtures, "simple_txt2img")
-        for node in v2_workflow["nodes"]:
+        # Create commit
+        first_workflow = load_workflow_fixture(workflow_fixtures, "simple_txt2img")
+        for node in first_workflow["nodes"]:
             if node.get("type") == "CheckpointLoaderSimple":
                 node["widgets_values"] = ["checkpoints/sd15_v1.safetensors"]
 
-        simulate_comfyui_save_workflow(test_env, "test", v2_workflow)
+        simulate_comfyui_save_workflow(test_env, "test", first_workflow)
         workflow_status = test_env.workflow_manager.get_workflow_status()
         test_env.execute_commit(
             workflow_status=workflow_status,
-            message="v2: Initial workflow")
+            message="Initial workflow")
+
+        # Get current commit hash
+        history = test_env.get_commit_history(limit=5)
+        current_commit = history[0]['hash']
 
         # Make uncommitted changes
-        modified_workflow = copy.deepcopy(v2_workflow)
+        modified_workflow = copy.deepcopy(first_workflow)
         modified_workflow["nodes"][1]["widgets_values"] = ["uncommitted change"]
         simulate_comfyui_save_workflow(test_env, "test", modified_workflow)
 
@@ -858,17 +749,17 @@ class TestWorkflowRollback:
         status_before = test_env.status()
         assert not status_before.is_synced, "Should have uncommitted changes"
 
-        versions_before = test_env.get_versions()
-        version_count_before = len(versions_before)
+        history_before = test_env.get_commit_history()
+        count_before = len(history_before)
 
-        # Rollback to current version (v2) - should discard changes
-        test_env.rollback("v2", force=True)
+        # Reset to current commit - should discard changes
+        test_env.reset(current_commit, mode="hard", force=True)
 
         # Should NOT create new commit
-        versions_after = test_env.get_versions()
-        assert len(versions_after) == version_count_before, \
+        history_after = test_env.get_commit_history()
+        assert len(history_after) == count_before, \
             f"Should not create new commit when discarding to current. " \
-            f"Before: {version_count_before}, After: {len(versions_after)}"
+            f"Before: {count_before}, After: {len(history_after)}"
 
         # Git should not have modified or deleted files (untracked is OK from uv sync)
         result = subprocess.run(
@@ -887,14 +778,14 @@ class TestWorkflowRollback:
         status_after = test_env.status()
         assert status_after.is_synced, "Status should be synced after discard"
 
-        # Verify changes were actually discarded (workflow restored to v2)
+        # Verify changes were actually discarded (workflow restored to first commit)
         comfyui_path = test_env.comfyui_path / "user" / "default" / "workflows" / "test.json"
         with open(comfyui_path) as f:
             current = json.load(f)
-        assert current["nodes"][1]["widgets_values"] == v2_workflow["nodes"][1]["widgets_values"], \
-            "Changes should be discarded, workflow should match v2"
+        assert current["nodes"][1]["widgets_values"] == first_workflow["nodes"][1]["widgets_values"], \
+            "Changes should be discarded, workflow should match first commit"
 
-    def test_rollback_without_target_discards_uncommitted_changes(
+    def test_reset_without_target_discards_uncommitted_changes(
         self,
         test_env,
         workflow_fixtures,
@@ -933,14 +824,14 @@ class TestWorkflowRollback:
         status_before = test_env.status()
         assert not status_before.is_synced, "Should have uncommitted changes"
 
-        versions_before = test_env.get_versions()
+        versions_before = test_env.get_commit_history()
         version_count_before = len(versions_before)
 
-        # Rollback with NO target - should discard changes
-        test_env.rollback(target=None, force=True)
+        # Reset with NO target - should discard changes
+        test_env.reset(mode="hard", force=True)
 
         # Should NOT create new commit
-        versions_after = test_env.get_versions()
+        versions_after = test_env.get_commit_history()
         assert len(versions_after) == version_count_before, \
             f"Empty rollback should not create new commit. " \
             f"Before: {version_count_before}, After: {len(versions_after)}"

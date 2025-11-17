@@ -200,36 +200,28 @@ __pycache__/
 
         return {line for line in result.splitlines() if line}
 
-    def apply_version(self, version: str, leave_unstaged: bool = True) -> None:
-        """Apply files from a specific version to working directory.
-
-        This is a high-level rollback operation that:
-        - Resolves version identifiers (v1, v2, etc.) to commits
-        - Applies files from that commit
-        - Deletes files that don't exist in target commit
-        - Optionally leaves them unstaged for review
+    def apply_commit(self, commit_ref: str, leave_unstaged: bool = True) -> None:
+        """Apply files from a specific commit to working directory.
 
         Args:
-            version: Version identifier (e.g., "v1", "v2") or commit hash
+            commit_ref: Any valid git ref (hash, branch, tag, HEAD~N)
             leave_unstaged: If True, files are left as uncommitted changes
 
         Raises:
-            ValueError: If version doesn't exist
+            OSError: If git commands fail (invalid ref, etc.)
         """
-        # Resolve version to commit hash
-        commit_hash = self.resolve_version(version)
-
-        logger.info(f"Applying files from version {version} (commit {commit_hash[:8]})")
+        # Git will validate the ref - no manual resolution needed
+        logger.info(f"Applying files from commit {commit_ref}")
 
         # Phase 1: Get file lists
-        target_files = self._get_files_in_commit(commit_hash)
+        target_files = self._get_files_in_commit(commit_ref)
         current_files = self._get_tracked_files()
         files_to_delete = current_files - target_files
 
         # Phase 2: Restore files from target commit
-        git_checkout(self.repo_path, commit_hash, files=["."], unstage=leave_unstaged)
+        git_checkout(self.repo_path, commit_ref, files=["."], unstage=leave_unstaged)
 
-        # Phase 3: Delete files that don't exist in target version
+        # Phase 3: Delete files that don't exist in target commit
         if files_to_delete:
             from ..utils.common import run_command
 
@@ -237,7 +229,7 @@ __pycache__/
                 full_path = self.repo_path / file_path
                 if full_path.exists():
                     full_path.unlink()
-                    logger.info(f"Deleted {file_path} (not in target version)")
+                    logger.info(f"Deleted {file_path} (not in target commit)")
 
             # Stage only the specific deletions (not all modifications)
             # git add <file> will stage the deletion when file doesn't exist
@@ -255,32 +247,36 @@ __pycache__/
         git_checkout(self.repo_path, "HEAD", files=["."])
 
     def get_version_history(self, limit: int = 10) -> list[dict]:
-        """Get simplified version history with v1, v2 labels.
+        """Get commit history with short hashes.
 
         Args:
-            limit: DEPRECATED - Now always shows all commits for version stability.
-                   Parameter kept for API compatibility but is ignored.
+            limit: Maximum number of commits to return
 
         Returns:
-            List of version info dicts with stable version numbers
+            List of commit dicts with keys: hash, message, date, date_relative
+            (newest first)
         """
-        # Always get ALL commits to ensure version numbers remain stable
-        # Pagination can be added post-MVP if needed
-        return self._get_commit_versions(limit=1000)
+        # Use %h for short hash (7 chars), %cr for relative date
+        result = git_history(
+            self.repo_path,
+            max_count=limit,
+            pretty="format:%h|%s|%ai|%cr"
+        )
 
-    def resolve_version(self, version: str) -> str:
-        """Resolve a version identifier to a commit hash.
+        commits = []
+        for line in result.strip().split('\n'):
+            if line:
+                hash_short, message, date, date_relative = line.split('|', 3)
+                commits.append({
+                    'hash': hash_short,           # 7-char short hash
+                    'message': message,
+                    'date': date,                 # Absolute: 2025-11-15 14:23:45
+                    'date_relative': date_relative  # Relative: "2 days ago"
+                })
 
-        Args:
-            version: Version identifier (e.g., "v1", "v2") or commit hash
+        # git log returns newest first by default
+        return commits
 
-        Returns:
-            Full commit hash
-
-        Raises:
-            ValueError: If version doesn't exist
-        """
-        return self._resolve_version_to_commit(version)
 
     def get_pyproject_diff(self) -> str:
         """Get the git diff specifically for pyproject.toml.
@@ -291,20 +287,19 @@ __pycache__/
         pyproject_path = Path("pyproject.toml")
         return git_diff(self.repo_path, pyproject_path) or ""
 
-    def get_pyproject_from_version(self, version: str) -> str:
-        """Get pyproject.toml content from a specific version.
+    def get_pyproject_from_commit(self, commit_ref: str) -> str:
+        """Get pyproject.toml content from a specific commit.
 
         Args:
-            version: Version identifier or commit hash
+            commit_ref: Any valid git ref (hash, branch, tag, HEAD~N)
 
         Returns:
             File content as string
 
         Raises:
-            ValueError: If version or file doesn't exist
+            OSError: If commit or file doesn't exist
         """
-        commit_hash = self.resolve_version(version)
-        return git_show(self.repo_path, commit_hash, Path("pyproject.toml"))
+        return git_show(self.repo_path, commit_ref, Path("pyproject.toml"))
 
     def commit_all(self, message: str | None = None) -> None:
         """Commit all changes in the repository.
@@ -365,66 +360,6 @@ __pycache__/
         gitignore_path = self.repo_path / ".gitignore"
         gitignore_path.write_text(self.gitignore_content)
 
-    def _get_commit_versions(self, limit: int = 10) -> list[dict]:
-        """Get simplified version list from git history.
-
-        Returns commits with simple identifiers instead of full hashes.
-
-        Args:
-            limit: Maximum number of commits to return
-
-        Returns:
-            List of commit info dicts with keys: version, hash, message, date
-
-        Raises:
-            OSError: If git command fails
-        """
-        result = git_history(self.repo_path, max_count=limit, pretty="format:%H|%s|%ai")
-
-        commits = []
-        for line in result.strip().split('\n'):
-            if line:
-                hash_val, message, date = line.split('|', 2)
-                commits.append({
-                    'hash': hash_val,
-                    'message': message,
-                    'date': date
-                })
-
-        # Reverse so oldest commit is first (chronological order)
-        commits.reverse()
-
-        # Now assign version numbers: oldest = v1, newest = v<highest>
-        for i, commit in enumerate(commits):
-            commit['version'] = f"v{i + 1}"
-
-        return commits
-
-    def _resolve_version_to_commit(self, version: str) -> str:
-        """Resolve a simple version identifier to a git commit hash.
-        
-        Args:
-            repo_path: Path to git repository
-            version: Version identifier (e.g., "v1", "v2")
-            
-        Returns:
-            Full commit hash
-            
-        Raises:
-            ValueError: If version doesn't exist
-            OSError: If git command fails
-        """
-        # If it's already a commit hash, return as-is
-        if len(version) >= 7 and all(c in '0123456789abcdef' for c in version.lower()):
-            return version
-
-        commits = self._get_commit_versions(limit=100)
-
-        for commit in commits:
-            if commit['version'] == version:
-                return commit['hash']
-
-        raise ValueError(f"Version '{version}' not found")
 
     def get_status(self, pyproject_manager: PyprojectManager | None = None) -> GitStatus:
         """Get complete git status with optional change parsing.
@@ -466,13 +401,13 @@ __pycache__/
         return status
 
     def create_checkpoint(self, description: str | None = None) -> str:
-        """Create a version checkpoint of the current state.
+        """Create a checkpoint of the current state.
 
         Args:
             description: Optional description for the checkpoint
 
         Returns:
-            Version identifier (e.g., "v3")
+            Commit hash of the checkpoint
         """
         # Generate automatic message if not provided
         if not description:
@@ -483,60 +418,28 @@ __pycache__/
         # Commit current state
         self.commit_with_identity(description)
 
-        # Get the new version number
-        versions = self.get_version_history(limit=1)
-        if versions:
-            return versions[-1]["version"]
-        return "v1"
+        # Get the new commit hash
+        history = self.get_version_history(limit=1)
+        if history:
+            return history[0]["hash"]  # Newest first
+        return ""
 
-    def rollback_to(self, version: str, safe: bool = False, force: bool = False) -> None:
-        """Rollback environment to a previous version.
-
-        Args:
-            version: Version to rollback to
-            safe: If True, leaves changes unstaged for review (default: False for clean state)
-            force: If True, discard uncommitted changes without error
-
-        Raises:
-            ValueError: If version doesn't exist
-            CDEnvironmentError: If uncommitted changes exist and force=False
-        """
-        from comfygit_core.models.exceptions import CDEnvironmentError
-
-        # Check for uncommitted changes
-        if self.has_uncommitted_changes():
-            if not force:
-                raise CDEnvironmentError(
-                    "Cannot rollback with uncommitted changes.\n"
-                    "Options:\n"
-                    "  • Commit: comfygit commit -m '<message>'\n"
-                    "  • Force discard: comfygit rollback --force <version>\n"
-                    "  • See changes: comfydock status"
-                )
-            logger.warning("Discarding uncommitted changes (--force flag used)")
-            self.discard_uncommitted()
-
-        # Apply the target version (clean state by default)
-        self.apply_version(version, leave_unstaged=safe)
-
-        logger.info(f"Rolled back to {version}")
-
-    def get_version_summary(self) -> dict:
-        """Get a summary of the version state.
+    def get_commit_summary(self) -> dict:
+        """Get a summary of the commit state.
 
         Returns:
-            Dict with current version, has_changes, total_versions
+            Dict with current_commit, has_uncommitted_changes, total_commits, latest_message
         """
-        versions = self.get_version_history(limit=100)
+        history = self.get_version_history(limit=100)
         has_changes = self.has_uncommitted_changes()
 
-        current_version = versions[-1]["version"] if versions else None
+        current_commit = history[0]["hash"] if history else None  # Newest first
 
         return {
-            "current_version": current_version,
+            "current_commit": current_commit,
             "has_uncommitted_changes": has_changes,
-            "total_versions": len(versions),
-            "latest_message": versions[-1]["message"] if versions else None,
+            "total_commits": len(history),
+            "latest_message": history[0]["message"] if history else None,
         }
 
     # =============================================================================

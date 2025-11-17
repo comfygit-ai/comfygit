@@ -10,6 +10,7 @@ import argcomplete
 
 from .completion_commands import CompletionCommands
 from .completers import (
+    commit_hash_completer,
     environment_completer,
     installed_node_completer,
     workflow_completer,
@@ -351,8 +352,9 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     repair_parser.set_defaults(func=env_cmds.repair)
 
-    # log - Show version history
-    log_parser = subparsers.add_parser("log", help="Show environment version history")
+    # log - Show commit history
+    log_parser = subparsers.add_parser("log", help="Show commit history")
+    log_parser.add_argument("-n", "--limit", type=int, default=20, metavar="N", help="Number of commits to show (default: 20)")
     log_parser.add_argument("-v", "--verbose", action="store_true", help="Show full details")
     log_parser.set_defaults(func=env_cmds.log)
 
@@ -365,7 +367,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
 
     # checkout - Move HEAD without committing
     checkout_parser = subparsers.add_parser("checkout", help="Checkout commits, branches, or files")
-    checkout_parser.add_argument("ref", nargs="?", help="Commit, branch, or tag to checkout (defaults to HEAD when using -b)")
+    checkout_parser.add_argument("ref", nargs="?", help="Commit, branch, or tag to checkout (defaults to HEAD when using -b)").completer = commit_hash_completer  # type: ignore[attr-defined]
     checkout_parser.add_argument("-b", "--branch", help="Create new branch and switch to it")
     checkout_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation for uncommitted changes")
     checkout_parser.add_argument("--force", action="store_true", help="Force checkout, discarding uncommitted changes")
@@ -386,7 +388,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
 
     # reset - Reset current HEAD to ref
     reset_parser = subparsers.add_parser("reset", help="Reset current HEAD to specified state")
-    reset_parser.add_argument("ref", nargs="?", default="HEAD", help="Commit to reset to (default: HEAD)")
+    reset_parser.add_argument("ref", nargs="?", default="HEAD", help="Commit to reset to (default: HEAD)").completer = commit_hash_completer  # type: ignore[attr-defined]
     reset_parser.add_argument("--hard", action="store_true", help="Discard all changes (hard reset)")
     reset_parser.add_argument("--mixed", action="store_true", help="Keep changes in working tree, unstage (default)")
     reset_parser.add_argument("--soft", action="store_true", help="Keep changes staged")

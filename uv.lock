@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.10"
 
 [manifest]
@@ -310,7 +310,7 @@ wheels = [
 
 [[package]]
 name = "comfygit"
-version = "0.0.2"
+version = "0.1.0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "argcomplete" },
@@ -325,7 +325,7 @@ requires-dist = [
 
 [[package]]
 name = "comfygit-core"
-version = "0.0.2"
+version = "0.1.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "aiohttp" },
