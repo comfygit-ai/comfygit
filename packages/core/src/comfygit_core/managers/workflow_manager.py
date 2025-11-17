@@ -211,6 +211,105 @@ class WorkflowManager:
         # Progressive JSON updates fail when cache has stale node IDs (node lookup mismatch)
         # Batch update is more efficient and ensures consistent node IDs within same parse session
 
+    def _write_model_resolution_grouped(
+        self,
+        workflow_name: str,
+        resolved: ResolvedModel,
+        all_refs: list[WorkflowNodeWidgetRef]
+    ) -> None:
+        """Write model resolution for multiple node references (deduplicated).
+
+        This is the deduplication-aware version of _write_single_model_resolution().
+        When the same model appears in multiple nodes, all refs are written together
+        in a single ManifestWorkflowModel entry.
+
+        Args:
+            workflow_name: Workflow being resolved
+            resolved: ResolvedModel with resolution result
+            all_refs: ALL node references for this model (deduplicated group)
+        """
+        from comfygit_core.models.manifest import ManifestModel, ManifestWorkflowModel
+
+        # Use primary ref for category determination
+        primary_ref = resolved.reference
+        model = resolved.resolved_model
+
+        # Determine category and criticality
+        category = self._get_category_for_node_ref(primary_ref)
+
+        # Override criticality if marked optional
+        if resolved.is_optional:
+            criticality = "optional"
+        else:
+            criticality = self._get_default_criticality(category)
+
+        # Handle download intent case
+        if resolved.match_type == "download_intent":
+            manifest_model = ManifestWorkflowModel(
+                filename=primary_ref.widget_value,
+                category=category,
+                criticality=criticality,
+                status="unresolved",
+                nodes=all_refs,  # ALL REFS!
+                sources=[resolved.model_source] if resolved.model_source else [],
+                relative_path=str(resolved.target_path) if resolved.target_path else None
+            )
+            self.pyproject.workflows.add_workflow_model(workflow_name, manifest_model)
+
+            # Invalidate cache
+            self.workflow_cache.invalidate(
+                env_name=self.environment_name,
+                workflow_name=workflow_name
+            )
+            return
+
+        # Build manifest model
+        if model is None:
+            # Model without hash - unresolved
+            manifest_model = ManifestWorkflowModel(
+                filename=primary_ref.widget_value,
+                category=category,
+                criticality=criticality,
+                status="unresolved",
+                nodes=all_refs,  # ALL REFS!
+                sources=[]
+            )
+        else:
+            # Resolved model - fetch sources from repository
+            sources = []
+            if model.hash:
+                sources_from_repo = self.model_repository.get_sources(model.hash)
+                sources = [s['url'] for s in sources_from_repo]
+
+            manifest_model = ManifestWorkflowModel(
+                hash=model.hash,
+                filename=model.filename,
+                category=category,
+                criticality=criticality,
+                status="resolved",
+                nodes=all_refs,  # ALL REFS!
+                sources=sources
+            )
+
+            # Add to global table with sources
+            global_model = ManifestModel(
+                hash=model.hash,
+                filename=model.filename,
+                size=model.file_size,
+                relative_path=model.relative_path,
+                category=category,
+                sources=sources
+            )
+            self.pyproject.models.add_model(global_model)
+
+        # Progressive write to workflow
+        self.pyproject.workflows.add_workflow_model(workflow_name, manifest_model)
+
+        # Log grouped write
+        if len(all_refs) > 1:
+            node_ids = ", ".join(f"#{ref.node_id}" for ref in all_refs)
+            logger.debug(f"Wrote grouped model resolution for nodes: {node_ids}")
+
     def _update_single_workflow_node_path(
         self,
         workflow_name: str,
@@ -815,14 +914,26 @@ class WorkflowManager:
             auto_select_ambiguous=True # TODO: Make configurable
         )
 
-        # Resolve models - build mapping from ref to resolved model
+        # Deduplicate model refs by (widget_value, node_type) before resolving
+        # This ensures status reporting shows accurate counts (not inflated by duplicates)
+        model_groups: dict[tuple[str, str], list[WorkflowNodeWidgetRef]] = {}
         for model_ref in analysis.found_models:
-            result = self.model_resolver.resolve_model(model_ref, model_context)
+            key = (model_ref.widget_value, model_ref.node_type)
+            if key not in model_groups:
+                model_groups[key] = []
+            model_groups[key].append(model_ref)
+
+        # Resolve each unique model group (one resolution per unique model)
+        for (widget_value, node_type), refs_in_group in model_groups.items():
+            # Use first ref as representative for resolution
+            primary_ref = refs_in_group[0]
+
+            result = self.model_resolver.resolve_model(primary_ref, model_context)
 
             if result is None:
-                # Model not found at all
-                logger.debug(f"Failed to resolve model: {model_ref}")
-                models_unresolved.append(model_ref)
+                # Model not found at all - add primary ref only (deduplicated)
+                logger.debug(f"Failed to resolve model: {primary_ref}")
+                models_unresolved.append(primary_ref)
             elif len(result) == 1:
                 # Clean resolution (exact match or from pyproject cache)
                 resolved_model = result[0]
@@ -837,13 +948,13 @@ class WorkflowManager:
                 logger.debug(f"Resolved model: {resolved_model}")
                 models_resolved.append(resolved_model)
             elif len(result) > 1:
-                # Ambiguous - multiple matches
+                # Ambiguous - multiple matches (use primary ref)
                 logger.debug(f"Ambiguous model: {result}")
                 models_ambiguous.append(result)
             else:
-                # No resolution possible
-                logger.debug(f"Failed to resolve model: {model_ref}, result: {result}")
-                models_unresolved.append(model_ref)
+                # No resolution possible - add primary ref only (deduplicated)
+                logger.debug(f"Failed to resolve model: {primary_ref}, result: {result}")
+                models_unresolved.append(primary_ref)
 
         return ResolutionResult(
             workflow_name=workflow_name,
@@ -1011,35 +1122,71 @@ class WorkflowManager:
             for model_ref in resolution.models_unresolved:
                 all_unresolved_models.append((model_ref, []))
 
-            # Resolve each model
+            # DEDUPLICATION: Group by (widget_value, node_type)
+            model_groups: dict[tuple[str, str], list[tuple[WorkflowNodeWidgetRef, list[ResolvedModel]]]] = {}
+
             for model_ref, candidates in all_unresolved_models:
+                # Group key: (widget_value, node_type)
+                # This ensures same model in same loader type gets resolved once
+                key = (model_ref.widget_value, model_ref.node_type)
+                if key not in model_groups:
+                    model_groups[key] = []
+                model_groups[key].append((model_ref, candidates))
+
+            # Resolve each group (one prompt per unique model)
+            for (widget_value, node_type), group in model_groups.items():
+                # Extract all refs and candidates
+                all_refs_in_group = [ref for ref, _ in group]
+                primary_ref, primary_candidates = group[0]
+
+                # Log deduplication for debugging
+                if len(all_refs_in_group) > 1:
+                    node_ids = ", ".join(f"#{ref.node_id}" for ref in all_refs_in_group)
+                    logger.info(f"Deduplicating model '{widget_value}' found in nodes: {node_ids}")
+
                 try:
-                    resolved = model_strategy.resolve_model(model_ref, candidates, model_context)
+                    # Prompt user once for this model
+                    resolved = model_strategy.resolve_model(primary_ref, primary_candidates, model_context)
 
                     if resolved is None:
-                        # User skipped - remains unresolved
-                        remaining_models_unresolved.append(model_ref)
-                        logger.debug(f"Skipped: {model_ref.widget_value}")
+                        # User skipped - remains unresolved for ALL refs
+                        for ref in all_refs_in_group:
+                            remaining_models_unresolved.append(ref)
+                        logger.debug(f"Skipped: {widget_value}")
                         continue
 
-                    # Add to resolved list
-                    models_to_add.append(resolved)
-
-                    # PROGRESSIVE: Write immediately to pyproject + workflow JSON
+                    # PROGRESSIVE: Write with ALL refs at once
                     if workflow_name:
-                        self._write_single_model_resolution(workflow_name, resolved)
+                        self._write_model_resolution_grouped(workflow_name, resolved, all_refs_in_group)
+
+                    # Add to results for ALL refs (needed for update_workflow_model_paths)
+                    for ref in all_refs_in_group:
+                        # Create ResolvedModel for each ref pointing to same resolved model
+                        ref_resolved = ResolvedModel(
+                            workflow=workflow_name,
+                            reference=ref,
+                            resolved_model=resolved.resolved_model,
+                            model_source=resolved.model_source,
+                            is_optional=resolved.is_optional,
+                            match_type=resolved.match_type,
+                            match_confidence=resolved.match_confidence,
+                            target_path=resolved.target_path,
+                            needs_path_sync=resolved.needs_path_sync
+                        )
+                        models_to_add.append(ref_resolved)
 
                     # Log result
                     if resolved.is_optional:
-                        logger.info(f"Marked as optional: {model_ref.widget_value}")
+                        logger.info(f"Marked as optional: {widget_value}")
                     elif resolved.resolved_model:
-                        logger.info(f"Resolved: {model_ref.widget_value} → {resolved.resolved_model.filename}")
+                        logger.info(f"Resolved: {widget_value} → {resolved.resolved_model.filename}")
                     else:
-                        logger.info(f"Marked as optional (unresolved): {model_ref.widget_value}")
+                        logger.info(f"Marked as optional (unresolved): {widget_value}")
 
                 except Exception as e:
-                    logger.error(f"Failed to resolve {model_ref.widget_value}: {e}")
-                    remaining_models_unresolved.append(model_ref)
+                    logger.error(f"Failed to resolve {widget_value}: {e}")
+                    for ref in all_refs_in_group:
+                        remaining_models_unresolved.append(ref)
 
         # Build updated result
         result = ResolutionResult(

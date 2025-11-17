@@ -84,3 +84,4 @@ docs/contexts
 
 # Any test environment exports
 *.tar.gz
+.claude/context
