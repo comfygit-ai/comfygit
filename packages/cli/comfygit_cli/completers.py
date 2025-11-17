@@ -144,3 +144,42 @@ def installed_node_completer(prefix: str, parsed_args: argparse.Namespace, **kwa
     except Exception as e:
         warn(f"Error listing nodes: {e}")
         return []
+
+
+def commit_hash_completer(prefix: str, parsed_args: argparse.Namespace, **kwargs: Any) -> list[str]:
+    """Complete commit hashes from environment history.
+
+    Shows recent commits with hash + message for context.
+
+    Used for:
+    - cg checkout <TAB>
+    - cg reset <TAB>
+    """
+    workspace = get_workspace_safe()
+    if not workspace:
+        return []
+
+    env = get_env_from_args(parsed_args, workspace)
+    if not env:
+        return []
+
+    try:
+        # Get recent commits (50 should cover most use cases)
+        history = env.get_commit_history(limit=50)
+
+        # Build candidates with context
+        candidates = []
+        for commit in history:
+            # Format: "a28f333 (Updated workflow)"
+            message = commit['message']
+            if len(message) > 50:
+                message = message[:47] + "..."
+
+            candidate = f"{commit['hash']} ({message})"
+            candidates.append(candidate)
+
+        return filter_by_prefix(candidates, prefix)
+
+    except Exception as e:
+        warn(f"Error loading commits: {e}")
+        return []

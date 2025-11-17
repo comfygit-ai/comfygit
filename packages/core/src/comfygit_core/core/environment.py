@@ -448,7 +448,7 @@ class Environment:
             raise CDEnvironmentError(
                 "Cannot pull with uncommitted changes.\n"
                 "  • Commit: comfygit commit -m 'message'\n"
-                "  • Discard: comfygit rollback"
+                "  • Discard: comfygit reset --hard"
             )
 
         # Capture pre-pull state for atomic rollback
@@ -530,25 +530,6 @@ class Environment:
         # Push
         logger.info("Pushing commits to remote...")
         return self.git_manager.push(remote, branch, force=force)
-
-    def rollback(
-        self,
-        target: str | None = None,
-        force: bool = False,
-        strategy: RollbackStrategy | None = None
-    ) -> None:
-        """Rollback environment to a previous state.
-
-        Args:
-            target: Version identifier (e.g., "v1", "v2") or commit hash
-            force: If True, discard uncommitted changes without confirmation
-            strategy: Optional strategy for confirming destructive rollback
-
-        Raises:
-            ValueError: If target version doesn't exist
-            CDEnvironmentError: If uncommitted changes exist and no strategy/force
-        """
-        self.git_orchestrator.rollback(target, force, strategy)
 
     def checkout(
         self,
@@ -653,14 +634,14 @@ class Environment:
         """
         self.git_orchestrator.revert_commit(commit)
 
-    def get_versions(self, limit: int = 10) -> list[dict]:
-        """Get simplified version history for this environment.
+    def get_commit_history(self, limit: int = 10) -> list[dict]:
+        """Get commit history for this environment.
 
         Args:
-            limit: Maximum number of versions to return
+            limit: Maximum number of commits to return
 
         Returns:
-            List of version info dicts with keys: version, hash, message, date
+            List of commit dicts with keys: hash, message, date, date_relative
         """
         return self.git_manager.get_version_history(limit)
 

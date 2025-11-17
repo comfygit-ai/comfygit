@@ -1,11 +1,11 @@
-"""Rollback confirmation strategies for CLI."""
+"""Confirmation strategies for destructive git operations (checkout, reset)."""
 
 
 class InteractiveRollbackStrategy:
-    """Interactive strategy that prompts user to confirm destructive rollback."""
+    """Interactive strategy that prompts user to confirm destructive operations."""
 
     def confirm_destructive_rollback(self, git_changes: bool, workflow_changes: bool) -> bool:
-        """Prompt user to confirm rollback that will discard changes.
+        """Prompt user to confirm operation that will discard changes.
 
         Args:
             git_changes: Whether there are uncommitted git changes in .cec/
@@ -28,7 +28,7 @@ class AutoRollbackStrategy:
     """Auto-confirm strategy for --yes flag."""
 
     def confirm_destructive_rollback(self, git_changes: bool, workflow_changes: bool) -> bool:
-        """Always confirm rollback (used with --yes flag).
+        """Always confirm operation (used with --yes flag).
 
         Args:
             git_changes: Whether there are uncommitted git changes in .cec/

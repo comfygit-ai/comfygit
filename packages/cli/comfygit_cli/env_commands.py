@@ -192,7 +192,11 @@ class EnvironmentCommands:
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
 
-        print(f"🎮 Starting ComfyUI in environment: {env.name}")
+        # Get branch info
+        current_branch = env.get_current_branch()
+        branch_display = f" (on {current_branch})" if current_branch else " (detached HEAD)"
+
+        print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
         if comfyui_args:
             print(f"   Arguments: {' '.join(comfyui_args)}")
 
@@ -260,15 +264,29 @@ class EnvironmentCommands:
 
         status = env.status()
 
-        # Format branch info
+        # Always show git state - never leave it blank
         if status.git.current_branch:
             branch_info = f" (on {status.git.current_branch})"
         else:
-            branch_info = ""  # Detached HEAD - show warning separately
+            branch_info = " (detached HEAD)"
 
-        # Clean state - everything is good
+        # Clean state - everything is good (but check for detached HEAD)
         if status.is_synced and not status.git.has_changes and status.workflow.sync_status.total_count == 0:
-            print(f"Environment: {env.name}{branch_info} ✓")
+            # Determine status indicator
+            if status.git.current_branch is None:
+                status_indicator = "⚠️"  # Warning for detached HEAD even when clean
+            else:
+                status_indicator = "✓"   # All good
+
+            print(f"Environment: {env.name}{branch_info} {status_indicator}")
+
+            # Show detached HEAD warning even in clean state
+            if status.git.current_branch is None:
+                print("⚠️  You are in detached HEAD state")
+                print("   Any commits you make will not be saved to a branch!")
+                print("   Create a branch: cg checkout -b <branch-name>")
+                print()  # Extra spacing before clean state messages
+
             print("\n✓ No workflows")
             print("✓ No uncommitted changes")
             return
@@ -278,8 +296,10 @@ class EnvironmentCommands:
 
         # Detached HEAD warning (shown prominently at top)
         if status.git.current_branch is None:
-            print("⚠️  Detached HEAD - commits will not be saved to any branch!")
-            print("   Create a branch with: cg checkout -b <branch-name>")
+            print("⚠️  You are in detached HEAD state")
+            print("   Any commits you make will not be saved to a branch!")
+            print("   Create a branch: cg checkout -b <branch-name>")
+            print()  # Extra spacing
 
         # Workflows section - consolidated with issues
         if status.workflow.sync_status.total_count > 0 or status.workflow.sync_status.has_changes:
@@ -635,39 +655,50 @@ class EnvironmentCommands:
 
     @with_env_logging("log")
     def log(self, args: argparse.Namespace, logger=None) -> None:
-        """Show environment version history with simple identifiers."""
+        """Show commit history for this environment."""
         env = self._get_env(args)
 
         try:
-            versions = env.get_versions(limit=20)
+            limit = args.limit if hasattr(args, 'limit') else 20
+            history = env.get_commit_history(limit=limit)
 
-            if not versions:
-                print("No version history yet")
-                print("\nTip: Run 'cg commit' to create your first version")
+            if not history:
+                print("No commits yet")
+                print("\nTip: Run 'cg commit' to create your first commit")
                 return
 
-            print(f"Version history for environment '{env.name}':\n")
+            print(f"Commit history for environment '{env.name}':\n")
 
             if not args.verbose:
-                # Compact format
-                for version in reversed(versions):  # Show newest first
-                    print(f"{version['version']}: {version['message']}")
+                # Compact: hash + message + relative date
+                for commit in history:  # Already newest first
+                    print(f"{commit['hash']}  {commit['message']} ({commit['date_relative']})")
                 print()
             else:
-                # Detailed format
-                for version in reversed(versions):  # Show newest first
-                    print(f"Version: {version['version']}")
-                    print(f"Message: {version['message']}")
-                    print(f"Date:    {version['date'][:19]}")  # Trim timezone for readability
-                    print(f"Commit:  {version['hash'][:8]}")
-                    print('\n')
+                # Verbose: multi-line with full info
+                for commit in history:
+                    print(f"Commit:  {commit['hash']}")
+                    print(f"Date:    {commit['date'][:19]}")
+                    print(f"Message: {commit['message']}")
+                    print()
 
-            print("Use 'cg rollback <version>' to restore to a specific version")
+            # Show detached HEAD status if applicable
+            current_branch = env.get_current_branch()
+            if current_branch is None:
+                print()
+                print("⚠️  You are currently in detached HEAD state")
+                print("   Commits will not be saved to any branch!")
+                print("   Create a branch: cg checkout -b <branch-name>")
+                print()
+
+            print("Use 'cg checkout <hash>' to view a specific commit")
+            print("Use 'cg revert <hash>' to undo changes from a commit (safe)")
+            print("Use 'cg checkout -b <branch> <hash>' to create branch from commit")
 
         except Exception as e:
             if logger:
-                logger.error(f"Failed to read version history for environment '{env.name}': {e}", exc_info=True)
-            print(f"✗ Could not read version history: {e}", file=sys.stderr)
+                logger.error(f"Failed to read commit history for environment '{env.name}': {e}", exc_info=True)
+            print(f"✗ Could not read commit history: {e}", file=sys.stderr)
             sys.exit(1)
 
     # === Node management ===
@@ -1507,9 +1538,19 @@ class EnvironmentCommands:
                     return
 
                 print("Branches:")
+                is_detached = False
                 for name, is_current in branches:
                     marker = "* " if is_current else "  "
                     print(f"{marker}{name}")
+                    if is_current and 'detached' in name.lower():
+                        is_detached = True
+
+                # Show help if in detached HEAD
+                if is_detached:
+                    print()
+                    print("⚠️  You are in detached HEAD state")
+                    print("   To save your work, create a branch:")
+                    print("   cg checkout -b <branch-name>")
             elif args.delete or args.force_delete:
                 # Delete branch
                 force = args.force_delete
@@ -1612,6 +1653,22 @@ class EnvironmentCommands:
         """Commit workflows with optional issue resolution."""
         env = self._get_env(args)
 
+        # Warn if in detached HEAD before allowing commit
+        current_branch = env.get_current_branch()
+        if current_branch is None and not args.yes:
+            print("⚠️  Warning: You are in detached HEAD state!")
+            print("   Commits made here will not be saved to any branch.")
+            print()
+            print("Options:")
+            print("  • Create a branch first: cg checkout -b <branch-name>")
+            print("  • Commit anyway (not recommended): use --yes flag")
+            print()
+            response = input("Continue with commit in detached HEAD? (y/N): ")
+            if response.lower() != 'y':
+                print("Commit cancelled. Create a branch first.")
+                sys.exit(0)
+            print()  # Extra spacing before commit output
+
         print("📋 Analyzing workflows...")
 
         # Get workflow status (read-only analysis)
@@ -1685,7 +1742,7 @@ class EnvironmentCommands:
             print()
             print("💡 Options:")
             print("  • Commit: cg commit -m 'message'")
-            print("  • Discard: cg rollback")
+            print("  • Discard: cg reset --hard")
             print("  • Force: cg pull origin --force")
             sys.exit(1)
 
