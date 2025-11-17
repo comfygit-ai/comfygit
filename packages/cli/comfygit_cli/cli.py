@@ -363,6 +363,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     commit_parser.add_argument("-m", "--message", help="Commit message (auto-generated if not provided)")
     commit_parser.add_argument("--auto", action="store_true", help="Auto-resolve issues without interaction")
     commit_parser.add_argument("--allow-issues", action="store_true", help="Allow committing workflows with unresolved issues")
+    commit_parser.add_argument("-y", "--yes", action="store_true", help="Skip detached HEAD warning (allow commit anyway)")
     commit_parser.set_defaults(func=env_cmds.commit)
 
     # checkout - Move HEAD without committing

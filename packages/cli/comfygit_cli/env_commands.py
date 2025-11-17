@@ -192,7 +192,11 @@ class EnvironmentCommands:
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
 
-        print(f"🎮 Starting ComfyUI in environment: {env.name}")
+        # Get branch info
+        current_branch = env.get_current_branch()
+        branch_display = f" (on {current_branch})" if current_branch else " (detached HEAD)"
+
+        print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
         if comfyui_args:
             print(f"   Arguments: {' '.join(comfyui_args)}")
 
@@ -260,15 +264,29 @@ class EnvironmentCommands:
 
         status = env.status()
 
-        # Format branch info
+        # Always show git state - never leave it blank
         if status.git.current_branch:
             branch_info = f" (on {status.git.current_branch})"
         else:
-            branch_info = ""  # Detached HEAD - show warning separately
+            branch_info = " (detached HEAD)"
 
-        # Clean state - everything is good
+        # Clean state - everything is good (but check for detached HEAD)
         if status.is_synced and not status.git.has_changes and status.workflow.sync_status.total_count == 0:
-            print(f"Environment: {env.name}{branch_info} ✓")
+            # Determine status indicator
+            if status.git.current_branch is None:
+                status_indicator = "⚠️"  # Warning for detached HEAD even when clean
+            else:
+                status_indicator = "✓"   # All good
+
+            print(f"Environment: {env.name}{branch_info} {status_indicator}")
+
+            # Show detached HEAD warning even in clean state
+            if status.git.current_branch is None:
+                print("⚠️  You are in detached HEAD state")
+                print("   Any commits you make will not be saved to a branch!")
+                print("   Create a branch: cg checkout -b <branch-name>")
+                print()  # Extra spacing before clean state messages
+
             print("\n✓ No workflows")
             print("✓ No uncommitted changes")
             return
@@ -278,8 +296,10 @@ class EnvironmentCommands:
 
         # Detached HEAD warning (shown prominently at top)
         if status.git.current_branch is None:
-            print("⚠️  Detached HEAD - commits will not be saved to any branch!")
-            print("   Create a branch with: cg checkout -b <branch-name>")
+            print("⚠️  You are in detached HEAD state")
+            print("   Any commits you make will not be saved to a branch!")
+            print("   Create a branch: cg checkout -b <branch-name>")
+            print()  # Extra spacing
 
         # Workflows section - consolidated with issues
         if status.workflow.sync_status.total_count > 0 or status.workflow.sync_status.has_changes:
@@ -661,6 +681,15 @@ class EnvironmentCommands:
                     print(f"Date:    {commit['date'][:19]}")
                     print(f"Message: {commit['message']}")
                     print()
+
+            # Show detached HEAD status if applicable
+            current_branch = env.get_current_branch()
+            if current_branch is None:
+                print()
+                print("⚠️  You are currently in detached HEAD state")
+                print("   Commits will not be saved to any branch!")
+                print("   Create a branch: cg checkout -b <branch-name>")
+                print()
 
             print("Use 'cg checkout <hash>' to view a specific commit")
             print("Use 'cg revert <hash>' to undo changes from a commit (safe)")
@@ -1509,9 +1538,19 @@ class EnvironmentCommands:
                     return
 
                 print("Branches:")
+                is_detached = False
                 for name, is_current in branches:
                     marker = "* " if is_current else "  "
                     print(f"{marker}{name}")
+                    if is_current and 'detached' in name.lower():
+                        is_detached = True
+
+                # Show help if in detached HEAD
+                if is_detached:
+                    print()
+                    print("⚠️  You are in detached HEAD state")
+                    print("   To save your work, create a branch:")
+                    print("   cg checkout -b <branch-name>")
             elif args.delete or args.force_delete:
                 # Delete branch
                 force = args.force_delete
@@ -1613,6 +1652,22 @@ class EnvironmentCommands:
     def commit(self, args: argparse.Namespace, logger=None) -> None:
         """Commit workflows with optional issue resolution."""
         env = self._get_env(args)
+
+        # Warn if in detached HEAD before allowing commit
+        current_branch = env.get_current_branch()
+        if current_branch is None and not args.yes:
+            print("⚠️  Warning: You are in detached HEAD state!")
+            print("   Commits made here will not be saved to any branch.")
+            print()
+            print("Options:")
+            print("  • Create a branch first: cg checkout -b <branch-name>")
+            print("  • Commit anyway (not recommended): use --yes flag")
+            print()
+            response = input("Continue with commit in detached HEAD? (y/N): ")
+            if response.lower() != 'y':
+                print("Commit cancelled. Create a branch first.")
+                sys.exit(0)
+            print()  # Extra spacing before commit output
 
         print("📋 Analyzing workflows...")
 
