@@ -54,6 +54,7 @@ class ScanResult:
     skipped_count: int
     error_count: int
     errors: list[str]
+    removed_count: int = 0
 
 
 class ModelScanProgress:
@@ -149,6 +150,8 @@ class ModelScanner:
 
         # Clean up stale locations
         removed_count = self.index_manager.clean_stale_locations(models_dir)
+        result.removed_count = removed_count
+
         if removed_count > 0 and not self.quiet:
             logger.info(f"Cleaned up {removed_count} stale locations")
 

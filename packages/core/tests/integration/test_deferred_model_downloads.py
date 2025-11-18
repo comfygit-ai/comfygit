@@ -243,8 +243,8 @@ class TestDeferredModelDownloads:
             ]
         )
 
-        # Mock _execute_pending_downloads to prevent actual HTTP requests to fake URLs
-        with patch.object(test_env, '_execute_pending_downloads', return_value=[]):
+        # Mock execute_pending_downloads to prevent actual HTTP requests to fake URLs
+        with patch.object(test_env.workflow_manager, 'execute_pending_downloads', return_value=[]):
             result1 = test_env.resolve_workflow(
                 name="test",
                 model_strategy=mock_strategy_session1,
@@ -287,7 +287,7 @@ class TestDeferredModelDownloads:
             )
         )
 
-        with patch.object(test_env, '_execute_pending_downloads', return_value=[]):
+        with patch.object(test_env.workflow_manager, 'execute_pending_downloads', return_value=[]):
             result2 = test_env.resolve_workflow(
                 name="test",
                 model_strategy=mock_strategy_session2,

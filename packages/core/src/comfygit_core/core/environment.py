@@ -10,18 +10,25 @@ from typing import TYPE_CHECKING
 from ..analyzers.status_scanner import StatusScanner
 from ..factories.uv_factory import create_uv_for_environment
 from ..logging.logging_config import get_logger
+from ..managers.environment_git_orchestrator import EnvironmentGitOrchestrator
+from ..managers.environment_model_manager import EnvironmentModelManager
 from ..managers.git_manager import GitManager
 from ..managers.model_symlink_manager import ModelSymlinkManager
 from ..managers.node_manager import NodeManager
 from ..managers.pyproject_manager import PyprojectManager
+from ..managers.user_content_symlink_manager import UserContentSymlinkManager
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
-from ..models.shared import ModelSourceResult, ModelSourceStatus, NodeInfo, NodeRemovalResult, UpdateResult
+from ..models.shared import (
+    ModelSourceResult,
+    ModelSourceStatus,
+    NodeInfo,
+    NodeRemovalResult,
+    UpdateResult,
+)
 from ..models.sync import SyncResult
-from ..models.workflow import DownloadResult
 from ..strategies.confirmation import ConfirmationStrategy
-from ..services.model_downloader import DownloadRequest
 from ..utils.common import run_command
 from ..utils.pytorch import extract_pip_show_package_version
 from ..validation.resolution_tester import ResolutionTester
@@ -84,6 +91,12 @@ class Environment:
         self.models_path = self.comfyui_path / "models"
 
     ## Cached properties ##
+    #
+    # Orchestrators coordinate git and model operations with environment state:
+    # - git_orchestrator: Wraps git operations with node reconciliation + package sync + workflow restore
+    # - model_manager: Coordinates model operations across pyproject, repository, and downloader
+    #
+    # This pattern keeps environment.py thin by delegating complex multi-step operations.
 
     @cached_property
     def uv_manager(self) -> UVProjectManager:
@@ -130,6 +143,16 @@ class Environment:
         )
 
     @cached_property
+    def user_content_manager(self) -> UserContentSymlinkManager:
+        """Get user content symlink manager for input/output directories."""
+        return UserContentSymlinkManager(
+            self.comfyui_path,
+            self.name,
+            self.workspace_paths.input,
+            self.workspace_paths.output,
+        )
+
+    @cached_property
     def workflow_cache(self) -> WorkflowCacheRepository:
         """Get workflow cache repository."""
         from ..caching.workflow_cache import WorkflowCacheRepository
@@ -137,7 +160,8 @@ class Environment:
         return WorkflowCacheRepository(
             cache_db_path,
             pyproject_manager=self.pyproject,
-            model_repository=self.model_repository
+            model_repository=self.model_repository,
+            workspace_config_manager=self.workspace_config_manager
         )
 
     @cached_property
@@ -156,6 +180,26 @@ class Environment:
     @cached_property
     def git_manager(self) -> GitManager:
         return GitManager(self.cec_path)
+
+    @cached_property
+    def git_orchestrator(self) -> EnvironmentGitOrchestrator:
+        """Get environment-aware git orchestrator."""
+        return EnvironmentGitOrchestrator(
+            git_manager=self.git_manager,
+            node_manager=self.node_manager,
+            pyproject_manager=self.pyproject,
+            uv_manager=self.uv_manager,
+            workflow_manager=self.workflow_manager,
+        )
+
+    @cached_property
+    def model_manager(self) -> EnvironmentModelManager:
+        """Get environment model manager."""
+        return EnvironmentModelManager(
+            pyproject=self.pyproject,
+            model_repository=self.model_repository,
+            model_downloader=self.model_downloader,
+        )
 
     ## Helper methods ##
 
@@ -181,7 +225,7 @@ class Environment:
         workflow_status = self.workflow_manager.get_workflow_status()
 
         # Detect missing models
-        missing_models = self.detect_missing_models()
+        missing_models = self.model_manager.detect_missing_models()
 
         # Assemble final status
         return EnvironmentStatus.create(
@@ -198,7 +242,7 @@ class Environment:
         model_callbacks: BatchDownloadCallbacks | None = None,
         node_callbacks: NodeInstallCallbacks | None = None,
         remove_extra_nodes: bool = True,
-        sync_callbacks: "SyncCallbacks | None" = None,
+        sync_callbacks: SyncCallbacks | None = None,
         verbose: bool = False
     ) -> SyncResult:
         """Apply changes: sync packages, nodes, workflows, and models with environment.
@@ -223,7 +267,14 @@ class Environment:
 
         # Sync packages with UV - progressive installation
         try:
-            self._sync_dependencies_progressive(result, dry_run=dry_run, callbacks=sync_callbacks, verbose=verbose)
+            sync_result = self.uv_manager.sync_dependencies_progressive(
+                dry_run=dry_run,
+                callbacks=sync_callbacks,
+                verbose=verbose
+            )
+            result.packages_synced = sync_result["packages_synced"]
+            result.dependency_groups_installed.extend(sync_result["dependency_groups_installed"])
+            result.dependency_groups_failed.extend(sync_result["dependency_groups_failed"])
         except Exception as e:
             # Progressive sync handles optional groups gracefully
             # Only base or required groups cause this exception
@@ -258,7 +309,7 @@ class Environment:
         if not dry_run and model_strategy != "skip":
             try:
                 # Reuse existing import machinery
-                workflows_with_intents = self.prepare_import_with_model_strategy(
+                workflows_with_intents = self.model_manager.prepare_import_with_model_strategy(
                     strategy=model_strategy
                 )
 
@@ -306,6 +357,47 @@ class Environment:
             result.errors.append(f"Model symlink configuration failed: {e}")
             # Continue anyway - symlink might already exist from environment creation
 
+        # Auto-migrate existing environments (one-time operation)
+        # Check if input/output are real directories with content
+        needs_migration = False
+        if self.comfyui_path.exists():
+            from ..utils.symlink_utils import is_link
+
+            input_path = self.comfyui_path / "input"
+            output_path = self.comfyui_path / "output"
+
+            if input_path.exists() and not is_link(input_path):
+                needs_migration = True
+            if output_path.exists() and not is_link(output_path):
+                needs_migration = True
+
+        if needs_migration:
+            logger.info("Detected pre-symlink environment, migrating user data...")
+            try:
+                migration_stats = self.user_content_manager.migrate_existing_data()
+                total_moved = (
+                    migration_stats["input_files_moved"] +
+                    migration_stats["output_files_moved"]
+                )
+                if total_moved > 0:
+                    logger.info(
+                        f"Migration complete: {total_moved} files moved to workspace-level storage"
+                    )
+            except Exception as e:
+                logger.error(f"Migration failed: {e}")
+                result.errors.append(f"User data migration failed: {e}")
+                # Don't fail sync - user can migrate manually
+
+        # Ensure user content symlinks exist
+        try:
+            self.user_content_manager.create_directories()
+            self.user_content_manager.create_symlinks()
+            logger.debug("User content symlinks configured")
+        except Exception as e:
+            logger.warning(f"Failed to ensure user content symlinks: {e}")
+            result.errors.append(f"User content symlink configuration failed: {e}")
+            # Continue anyway - symlinks might already exist
+
         # Mark environment as complete after successful sync (repair operation)
         # This ensures environments that lost .complete (e.g., from manual git pull) are visible
         if result.success and not dry_run:
@@ -320,108 +412,13 @@ class Environment:
 
         return result
 
-    def _sync_dependencies_progressive(
-        self,
-        result: SyncResult,
-        dry_run: bool = False,
-        callbacks: "SyncCallbacks | None" = None,
-        verbose: bool = False
-    ) -> None:
-        """Install dependencies progressively with graceful optional group handling.
-
-        Installs dependencies in phases:
-        1. Base dependencies + all groups together with iterative optional group removal on failure
-        2. Track which optional groups failed and were removed
-
-        If optional groups fail to build, we iteratively:
-        - Parse the error to identify the failing group
-        - Remove that group from pyproject.toml
-        - Delete uv.lock to force re-resolution
-        - Retry the sync with all remaining groups
-        - Continue until success or max retries
-
-        Args:
-            result: SyncResult to populate with outcomes
-            dry_run: If True, don't actually install
-            callbacks: Optional callbacks for progress reporting
-            verbose: If True, show uv output in real-time
-        """
-        from ..models.exceptions import UVCommandError
-        from ..utils.uv_error_handler import parse_failed_dependency_group
-
-        # Phase 1: Install base dependencies + all groups with iterative optional group removal
-        attempts = 0
-
-        from ..constants import MAX_OPT_GROUP_RETRIES
-
-        logger.info("Installing dependencies with all groups...")
-
-        while attempts < MAX_OPT_GROUP_RETRIES:
-            try:
-                # Get all dependency groups (may have changed after removal in previous iterations)
-                dep_groups = self.pyproject.dependencies.get_groups()
-
-                if dep_groups:
-                    # Install base + all groups together using multiple --group flags
-                    group_list = list(dep_groups.keys())
-                    logger.debug(f"Syncing with groups: {group_list}")
-                    self.uv_manager.sync_project(group=group_list, dry_run=dry_run, verbose=verbose)
-
-                    # Track successful installations (no per-group callbacks since installed as batch)
-                    result.dependency_groups_installed.extend(group_list)
-                else:
-                    # No groups - just sync base dependencies
-                    logger.debug("No dependency groups, syncing base only")
-                    self.uv_manager.sync_project(dry_run=dry_run, no_default_groups=True, verbose=verbose)
-
-                result.packages_synced = True
-                break  # Success - exit loop
-
-            except UVCommandError as e:
-                failed_group = parse_failed_dependency_group(e.stderr or "")
-
-                if failed_group and failed_group.startswith('optional-'):
-                    attempts += 1
-                    logger.warning(
-                        f"Build failed for optional group '{failed_group}' (attempt {attempts}/{MAX_OPT_GROUP_RETRIES}), "
-                        "removing and retrying..."
-                    )
-
-                    # Remove the problematic group
-                    try:
-                        self.pyproject.dependencies.remove_group(failed_group)
-                    except ValueError:
-                        pass  # Group already gone
-
-                    # Delete lockfile to force re-resolution
-                    lockfile = self.cec_path / "uv.lock"
-                    if lockfile.exists():
-                        lockfile.unlink()
-                        logger.debug("Deleted uv.lock to force re-resolution")
-
-                    result.dependency_groups_failed.append((failed_group, "Build failed (incompatible platform)"))
-
-                    if callbacks:
-                        callbacks.on_dependency_group_complete(failed_group, success=False, error="Build failed - removed")
-
-                    if attempts >= MAX_OPT_GROUP_RETRIES:
-                        raise RuntimeError(
-                            f"Failed to install dependencies after {MAX_OPT_GROUP_RETRIES} attempts. "
-                            f"Removed groups: {[g for g, _ in result.dependency_groups_failed]}"
-                        )
-
-                    # Loop continues for retry with remaining groups
-                else:
-                    # Not an optional group failure - fail immediately
-                    raise
-
     def pull_and_repair(
         self,
         remote: str = "origin",
         branch: str | None = None,
         model_strategy: str = "all",
-        model_callbacks: "BatchDownloadCallbacks | None" = None,
-        node_callbacks: "NodeInstallCallbacks | None" = None,
+        model_callbacks: BatchDownloadCallbacks | None = None,
+        node_callbacks: NodeInstallCallbacks | None = None,
     ) -> dict:
         """Pull from remote and auto-repair environment (atomic operation).
 
@@ -451,7 +448,7 @@ class Environment:
             raise CDEnvironmentError(
                 "Cannot pull with uncommitted changes.\n"
                 "  • Commit: comfygit commit -m 'message'\n"
-                "  • Discard: comfygit rollback"
+                "  • Discard: comfygit reset --hard"
             )
 
         # Capture pre-pull state for atomic rollback
@@ -534,115 +531,117 @@ class Environment:
         logger.info("Pushing commits to remote...")
         return self.git_manager.push(remote, branch, force=force)
 
-    def rollback(
+    def checkout(
         self,
-        target: str | None = None,
-        force: bool = False,
-        strategy: RollbackStrategy | None = None
+        ref: str,
+        strategy: RollbackStrategy | None = None,
+        force: bool = False
     ) -> None:
-        """Rollback environment to a previous state - checkpoint-style instant restoration.
-
-        This is an atomic operation that:
-        1. Checks for uncommitted changes (git + workflows)
-        2. Snapshots current state
-        3. Restores git files (pyproject.toml, uv.lock, workflows/)
-        4. Reconciles nodes with full context
-        5. Syncs Python packages
-        6. Restores workflows to ComfyUI
-        7. Auto-commits the rollback as a new version
-
-        Design: Checkpoint-style rollback (like video game saves)
-        - Rollback = instant teleportation to old state
-        - Auto-commits as new version (preserves history)
-        - Requires strategy confirmation or --force to discard uncommitted changes
-        - Full history preserved (v1→v2→v3→v4[rollback to v2]→v5)
+        """Checkout commit/branch without auto-committing.
 
         Args:
-            target: Version identifier (e.g., "v1", "v2") or commit hash
-                   If None, discards uncommitted changes
+            ref: Git reference (commit hash, branch, tag)
+            strategy: Optional strategy for confirming destructive checkout
             force: If True, discard uncommitted changes without confirmation
-            strategy: Optional strategy for confirming destructive rollback
-                     If None and changes exist, raises error (safe default)
 
         Raises:
-            ValueError: If target version doesn't exist
-            OSError: If git commands fail
+            ValueError: If ref doesn't exist
             CDEnvironmentError: If uncommitted changes exist and no strategy/force
         """
-        from comfygit_core.models.exceptions import CDEnvironmentError
+        self.git_orchestrator.checkout(ref, strategy, force)
 
-        # 1. Check for ALL uncommitted changes (both git and workflows)
-        if not force:
-            has_git_changes = self.git_manager.has_uncommitted_changes()
-            status = self.status()
-            has_workflow_changes = status.workflow.sync_status.has_changes
-
-            if has_git_changes or has_workflow_changes:
-                # Changes detected - need confirmation or force
-                if strategy is None:
-                    # No strategy provided - strict mode, raise error
-                    raise CDEnvironmentError(
-                        "Cannot rollback with uncommitted changes.\n"
-                        "Uncommitted changes detected:\n"
-                        + ("  • Git changes in .cec/\n" if has_git_changes else "")
-                        + ("  • Workflow changes in ComfyUI\n" if has_workflow_changes else "")
-                    )
-
-                # Strategy provided - ask for confirmation
-                if not strategy.confirm_destructive_rollback(
-                    git_changes=has_git_changes,
-                    workflow_changes=has_workflow_changes
-                ):
-                    raise CDEnvironmentError("Rollback cancelled by user")
-
-        # 2. Snapshot old state BEFORE git changes it
-        old_nodes = self.pyproject.nodes.get_existing()
-
-        # 3. Git operations (restore pyproject.toml, uv.lock, .cec/workflows/)
-        if target:
-            # Get version name for commit message
-            target_version = target
-            self.git_manager.rollback_to(target, safe=False, force=True)  # Always force after confirmation
-        else:
-            # Empty rollback = discard uncommitted changes (rollback to current)
-            target_version = "HEAD"  # For commit message consistency
-            self.git_manager.discard_uncommitted()
-
-        # 4. Check if there were any changes BEFORE doing expensive operations
-        # This handles "rollback to current version" case
-        had_changes = self.git_manager.has_uncommitted_changes()
-
-        # 5. Force reload pyproject after git changed it (reset lazy handlers)
-        self.pyproject.reset_lazy_handlers()
-        new_nodes = self.pyproject.nodes.get_existing()
-
-        # 6. Reconcile nodes with full context (no git history needed!)
-        self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
-
-        # 7. Sync Python environment to match restored uv.lock
-        # Note: This may create/modify files (uv.lock updates, cache, etc.)
-        self.uv_manager.sync_project(all_groups=True)
-
-        # 8. Restore workflows from .cec to ComfyUI (overwrite active with tracked)
-        self.workflow_manager.restore_all_from_cec()
-
-        # 9. Auto-commit only if there were changes initially (checkpoint-style)
-        # We check had_changes (before uv sync) not current changes (after uv sync)
-        # This prevents committing when rolling back to current version
-        if had_changes:
-            self.git_manager.commit_all(f"Rollback to {target_version}")
-            logger.info(f"Rollback complete: created new version from {target_version}")
-        else:
-            logger.info(f"Rollback complete: already at {target_version} (no changes)")
-
-    def get_versions(self, limit: int = 10) -> list[dict]:
-        """Get simplified version history for this environment.
+    def reset(
+        self,
+        ref: str | None = None,
+        mode: str = "hard",
+        strategy: RollbackStrategy | None = None,
+        force: bool = False
+    ) -> None:
+        """Reset HEAD to ref with git reset semantics.
 
         Args:
-            limit: Maximum number of versions to return
+            ref: Git reference to reset to (None = HEAD)
+            mode: Reset mode (hard/mixed/soft)
+            strategy: Optional strategy for confirming destructive reset
+            force: If True, skip confirmation
+
+        Raises:
+            ValueError: If ref doesn't exist or invalid mode
+            CDEnvironmentError: If uncommitted changes exist (hard mode only)
+        """
+        self.git_orchestrator.reset(ref, mode, strategy, force)
+
+    def create_branch(self, name: str, start_point: str = "HEAD") -> None:
+        """Create new branch at start_point.
+
+        Args:
+            name: Branch name
+            start_point: Commit to branch from (default: HEAD)
+        """
+        self.git_orchestrator.create_branch(name, start_point)
+
+    def delete_branch(self, name: str, force: bool = False) -> None:
+        """Delete branch.
+
+        Args:
+            name: Branch name
+            force: Force delete even if unmerged
+        """
+        self.git_orchestrator.delete_branch(name, force)
+
+    def switch_branch(self, branch: str, create: bool = False) -> None:
+        """Switch to branch and sync environment.
+
+        Args:
+            branch: Branch name
+            create: Create branch if it doesn't exist
+
+        Raises:
+            CDEnvironmentError: If uncommitted workflow changes would be overwritten
+        """
+        self.git_orchestrator.switch_branch(branch, create)
+
+    def list_branches(self) -> list[tuple[str, bool]]:
+        """List all branches with current branch marked.
 
         Returns:
-            List of version info dicts with keys: version, hash, message, date
+            List of (branch_name, is_current) tuples
+        """
+        return self.git_manager.list_branches()
+
+    def get_current_branch(self) -> str | None:
+        """Get current branch name.
+
+        Returns:
+            Branch name or None if detached HEAD
+        """
+        return self.git_manager.get_current_branch()
+
+    def merge_branch(self, branch: str, message: str | None = None) -> None:
+        """Merge branch into current branch and sync environment.
+
+        Args:
+            branch: Branch to merge
+            message: Custom merge commit message
+        """
+        self.git_orchestrator.merge_branch(branch, message)
+
+    def revert_commit(self, commit: str) -> None:
+        """Revert a commit by creating new commit that undoes it.
+
+        Args:
+            commit: Commit hash to revert
+        """
+        self.git_orchestrator.revert_commit(commit)
+
+    def get_commit_history(self, limit: int = 10) -> list[dict]:
+        """Get commit history for this environment.
+
+        Args:
+            limit: Maximum number of commits to return
+
+        Returns:
+            List of commit dicts with keys: hash, message, date, date_relative
         """
         return self.git_manager.get_version_history(limit)
 
@@ -699,7 +698,7 @@ class Environment:
         is_development: bool = False,
         no_test: bool = False,
         force: bool = False,
-        confirmation_strategy: 'ConfirmationStrategy | None' = None
+        confirmation_strategy: ConfirmationStrategy | None = None
     ) -> NodeInfo:
         """Add a custom node to the environment.
 
@@ -897,7 +896,7 @@ class Environment:
 
         # Execute pending downloads if any download intents exist
         if result.has_download_intents:
-            result.download_results = self._execute_pending_downloads(result, download_callbacks)
+            result.download_results = self.workflow_manager.execute_pending_downloads(result, download_callbacks)
 
             # After successful downloads, update workflow JSON with resolved paths
             # Re-resolve to get fresh model data (cached, so minimal cost)
@@ -1116,8 +1115,6 @@ class Environment:
     def add_model_source(self, identifier: str, url: str) -> ModelSourceResult:
         """Add a download source URL to a model.
 
-        Updates both pyproject.toml and the workspace model index.
-
         Args:
             identifier: Model hash or filename
             url: Download URL for the model
@@ -1125,72 +1122,7 @@ class Environment:
         Returns:
             ModelSourceResult with success status and model details
         """
-        # Find model by hash or filename
-        all_models = self.pyproject.models.get_all()
-
-        model = None
-
-        # Try exact hash match first (unambiguous)
-        hash_matches = [m for m in all_models if m.hash == identifier]
-        if hash_matches:
-            model = hash_matches[0]
-        else:
-            # Try filename match (potentially ambiguous)
-            filename_matches = [m for m in all_models if m.filename == identifier]
-
-            if len(filename_matches) == 0:
-                return ModelSourceResult(
-                    success=False,
-                    error="model_not_found",
-                    identifier=identifier
-                )
-            elif len(filename_matches) > 1:
-                return ModelSourceResult(
-                    success=False,
-                    error="ambiguous_filename",
-                    identifier=identifier,
-                    matches=filename_matches
-                )
-            else:
-                model = filename_matches[0]
-
-        # Check if URL already exists
-        if url in model.sources:
-            return ModelSourceResult(
-                success=False,
-                error="url_exists",
-                model=model,
-                model_hash=model.hash
-            )
-
-        # Detect source type
-        source_type = self.model_downloader.detect_url_type(url)
-
-        # Update pyproject.toml
-        config = self.pyproject.load()
-        if url not in config["tool"]["comfygit"]["models"][model.hash].get("sources", []):
-            if "sources" not in config["tool"]["comfygit"]["models"][model.hash]:
-                config["tool"]["comfygit"]["models"][model.hash]["sources"] = []
-            config["tool"]["comfygit"]["models"][model.hash]["sources"].append(url)
-            self.pyproject.save(config)
-
-        # Update model repository (SQLite index) - only if model exists locally
-        if self.model_repository.has_model(model.hash):
-            self.model_repository.add_source(
-                model_hash=model.hash,
-                source_type=source_type,
-                source_url=url
-            )
-
-        logger.info(f"Added source to model {model.filename}: {url}")
-
-        return ModelSourceResult(
-            success=True,
-            model=model,
-            model_hash=model.hash,
-            source_type=source_type,
-            url=url
-        )
+        return self.model_manager.add_model_source(identifier, url)
 
     def get_models_without_sources(self) -> list[ModelSourceStatus]:
         """Get all models in pyproject that don't have download sources.
@@ -1198,20 +1130,7 @@ class Environment:
         Returns:
             List of ModelSourceStatus objects with model and local availability
         """
-        all_models = self.pyproject.models.get_all()
-
-        results = []
-        for model in all_models:
-            if not model.sources:
-                # Check if model exists in local index
-                local_model = self.model_repository.get_model(model.hash)
-
-                results.append(ModelSourceStatus(
-                    model=model,
-                    available_locally=local_model is not None
-                ))
-
-        return results
+        return self.model_manager.get_models_without_sources()
 
     # =====================================================
     # Constraint Management
@@ -1312,113 +1231,6 @@ class Environment:
 
         return result
 
-    def _execute_pending_downloads(
-        self,
-        result: ResolutionResult,
-        callbacks: BatchDownloadCallbacks | None = None
-    ) -> list[DownloadResult]:
-        """Execute batch downloads for all download intents in result.
-        All user-facing output is delivered via callbacks.
-
-        Args:
-            result: Resolution result containing download intents
-            callbacks: Optional callbacks for progress/status (provided by CLI)
-
-        Returns:
-            List of DownloadResult objects
-        """
-        # Collect download intents
-        intents = [r for r in result.models_resolved if r.match_type == "download_intent"]
-
-        if not intents:
-            return []
-
-        # Notify batch start
-        if callbacks and callbacks.on_batch_start:
-            callbacks.on_batch_start(len(intents))
-
-        results = []
-        for idx, resolved in enumerate(intents, 1):
-            filename = resolved.reference.widget_value
-
-            # Notify file start
-            if callbacks and callbacks.on_file_start:
-                callbacks.on_file_start(filename, idx, len(intents))
-
-            # Check if already downloaded (deduplication)
-            if resolved.model_source:
-                existing = self.model_repository.find_by_source_url(resolved.model_source)
-                if existing:
-                    # Reuse existing model - update pyproject with hash
-                    self.workflow_manager._update_model_hash(
-                        result.workflow_name,
-                        resolved.reference,
-                        existing.hash
-                    )
-                    # Notify success (reused existing)
-                    if callbacks and callbacks.on_file_complete:
-                        callbacks.on_file_complete(filename, True, None)
-                    results.append(DownloadResult(
-                        success=True,
-                        filename=filename,
-                        model=existing,
-                        reused=True
-                    ))
-                    continue
-
-            # Validate required fields
-            if not resolved.target_path or not resolved.model_source:
-                error_msg = "Download intent missing target_path or model_source"
-                if callbacks and callbacks.on_file_complete:
-                    callbacks.on_file_complete(filename, False, error_msg)
-                results.append(DownloadResult(
-                    success=False,
-                    filename=filename,
-                    error=error_msg
-                ))
-                continue
-
-            # Download new model
-            target_path = self.model_downloader.models_dir / resolved.target_path
-            request = DownloadRequest(
-                url=resolved.model_source,
-                target_path=target_path,
-                workflow_name=result.workflow_name
-            )
-
-            # Use per-file progress callback if provided
-            progress_callback = callbacks.on_file_progress if callbacks else None
-            download_result = self.model_downloader.download(request, progress_callback=progress_callback)
-
-            if download_result.success and download_result.model:
-                # Update pyproject with actual hash
-                self.workflow_manager._update_model_hash(
-                    result.workflow_name,
-                    resolved.reference,
-                    download_result.model.hash
-                )
-                # Notify success
-                if callbacks and callbacks.on_file_complete:
-                    callbacks.on_file_complete(filename, True, None)
-            else:
-                # Notify failure (model remains unresolved with source in pyproject)
-                if callbacks and callbacks.on_file_complete:
-                    callbacks.on_file_complete(filename, False, download_result.error)
-
-            results.append(DownloadResult(
-                success=download_result.success,
-                filename=filename,
-                model=download_result.model if download_result.success else None,
-                error=download_result.error if not download_result.success else None
-            ))
-
-        # Notify batch complete
-        if callbacks and callbacks.on_batch_complete:
-            success_count = sum(1 for r in results if r.success)
-            callbacks.on_batch_complete(success_count, len(results))
-
-        return results
-
     # =====================================================
     # Export/Import
     # =====================================================
@@ -1510,178 +1322,6 @@ class Environment:
         # Create export
         manager = ExportImportManager(self.cec_path, self.comfyui_path)
         return manager.create_export(output_path, self.pyproject)
-
-    def detect_missing_models(self) -> list:
-        """Detect models in pyproject that don't exist in local index.
-
-        Checks both resolved workflow models (with hash) and models in the global table
-        that aren't present in the local repository with valid file locations.
-
-        Returns:
-            List of MissingModelInfo for models that need downloading
-        """
-        from comfygit_core.models.environment import MissingModelInfo
-
-        missing_by_hash: dict[str, MissingModelInfo] = {}
-
-        # First pass: Check all workflow models for missing resolved models
-        all_workflows = self.pyproject.workflows.get_all_with_resolutions()
-        for workflow_name in all_workflows.keys():
-            workflow_models = self.pyproject.workflows.get_workflow_models(workflow_name)
-
-            for wf_model in workflow_models:
-                # Check both resolved models and models that reference a filename
-                model_hash = wf_model.hash
-
-                # If model has a hash, check if it exists WITH a valid location
-                # get_model() returns None if model has no locations (file deleted)
-                if model_hash and not self.model_repository.get_model(model_hash):
-                    # Model is missing!
-                    if model_hash not in missing_by_hash:
-                        # Get global model entry
-                        global_model = self.pyproject.models.get_by_hash(model_hash)
-                        if global_model:
-                            missing_by_hash[model_hash] = MissingModelInfo(
-                                model=global_model,
-                                workflow_names=[workflow_name],
-                                criticality=wf_model.criticality,
-                                can_download=bool(global_model.sources)
-                            )
-                    else:
-                        # Already tracking this model, add workflow and update criticality
-                        missing_info = missing_by_hash[model_hash]
-                        if workflow_name not in missing_info.workflow_names:
-                            missing_info.workflow_names.append(workflow_name)
-                        # Upgrade criticality (required > flexible > optional)
-                        if wf_model.criticality == "required":
-                            missing_info.criticality = "required"
-                        elif wf_model.criticality == "flexible" and missing_info.criticality == "optional":
-                            missing_info.criticality = "flexible"
-
-        # Second pass: Check global models table for any models not in repository
-        # This catches models that were resolved but file was deleted
-        global_models = self.pyproject.models.get_all()
-        for global_model in global_models:
-            if global_model.hash not in missing_by_hash:
-                # Check if this model exists in repository WITH a valid location
-                if not self.model_repository.get_model(global_model.hash):
-                    # Find which workflows use this model
-                    workflows_using_model = []
-                    criticality = "flexible"  # Default
-
-                    for workflow_name in all_workflows.keys():
-                        workflow_models = self.pyproject.workflows.get_workflow_models(workflow_name)
-                        for wf_model in workflow_models:
-                            if wf_model.hash == global_model.hash:
-                                workflows_using_model.append(workflow_name)
-                                # Track highest criticality
-                                if wf_model.criticality == "required":
-                                    criticality = "required"
-                                elif wf_model.criticality == "flexible" and criticality == "optional":
-                                    criticality = "flexible"
-
-                    # Only add if used by at least one workflow
-                    if workflows_using_model:
-                        missing_by_hash[global_model.hash] = MissingModelInfo(
-                            model=global_model,
-                            workflow_names=workflows_using_model,
-                            criticality=criticality,
-                            can_download=bool(global_model.sources)
-                        )
-
-        return list(missing_by_hash.values())
-
-    def prepare_import_with_model_strategy(
-        self,
-        strategy: str = "all"
-    ) -> list[str]:
-        """Prepare import by converting missing models to download intents.
-
-        This is the key import method - it detects which models are missing locally
-        and temporarily converts them back to download intents in pyproject.toml.
-        The subsequent resolve_workflow() call will download them.
-
-        Args:
-            strategy: Model download strategy
-                - "all": Download all models with sources
-                - "required": Download only required models
-                - "skip": Skip all downloads (leave as optional unresolved)
-
-        Returns:
-            List of workflow names that had download intents prepared
-        """
-        logger.info(f"Preparing import with model strategy: {strategy}")
-
-        workflows_with_intents = []
-
-        # Get all workflows from pyproject
-        all_workflows = self.pyproject.workflows.get_all_with_resolutions()
-
-        for workflow_name in all_workflows.keys():
-            models = self.pyproject.workflows.get_workflow_models(workflow_name)
-            models_modified = False
-
-            for idx, model in enumerate(models):
-                # Skip if already unresolved (nothing to prepare)
-                if model.status == "unresolved":
-                    continue
-
-                # Check if model exists locally
-                if model.hash:
-                    existing = self.model_repository.get_model(model.hash)
-                    if existing:
-                        # Model exists - enrich SQLite with sources from pyproject
-                        global_model = self.pyproject.models.get_by_hash(model.hash)
-                        if global_model and global_model.sources:
-                            # Get existing sources from SQLite
-                            existing_sources_list = self.model_repository.get_sources(model.hash)
-                            existing_source_urls = {s["url"] for s in existing_sources_list}
-
-                            # Add any missing sources
-                            for source_url in global_model.sources:
-                                if source_url not in existing_source_urls:
-                                    source_type = self.model_downloader.detect_url_type(source_url)
-                                    self.model_repository.add_source(
-                                        model_hash=model.hash,
-                                        source_type=source_type,
-                                        source_url=source_url
-                                    )
-                                    logger.info(f"Enriched model {global_model.filename} with source: {source_url}")
-
-                        # Model exists - no download needed
-                        continue
-
-                # Model missing - prepare download intent with sources
-                # Read sources from global table
-                if model.hash:
-                    global_model = self.pyproject.models.get_by_hash(model.hash)
-                    if global_model and global_model.sources:
-                        # Preserve download intent with sources for later resolution
-                        models[idx].status = "unresolved"
-                        models[idx].sources = global_model.sources
-                        models[idx].relative_path = global_model.relative_path
-                        models[idx].hash = None  # Clear hash - will be set after download
-                        models_modified = True
-                        logger.debug(f"Prepared download intent for {model.filename} in {workflow_name}")
-
-            # Save modified models
-            if models_modified:
-                self.pyproject.workflows.set_workflow_models(workflow_name, models)
-
-                # Only add to workflows_with_intents if we should attempt downloads
-                # For "required" strategy, only if workflow has required models with download intents
-                if strategy == "all":
-                    workflows_with_intents.append(workflow_name)
-                elif strategy == "required":
-                    has_required_intents = any(
-                        m.status == "unresolved" and m.sources and m.criticality == "required"
-                        for m in models
-                    )
-                    if has_required_intents:
-                        workflows_with_intents.append(workflow_name)
-
-        logger.info(f"Prepared {len(workflows_with_intents)} workflows with download intents")
-        return workflows_with_intents
 
     def finalize_import(
         self,
@@ -1778,6 +1418,19 @@ class Environment:
         models_dir = self.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
             shutil.rmtree(models_dir)
+
+        # Remove ComfyUI's default input/output directories (will be replaced with symlinks)
+        from ..utils.symlink_utils import is_link
+
+        input_dir = self.comfyui_path / "input"
+        if input_dir.exists() and not is_link(input_dir):
+            shutil.rmtree(input_dir)
+            logger.debug("Removed ComfyUI's default input directory during import")
+
+        output_dir = self.comfyui_path / "output"
+        if output_dir.exists() and not is_link(output_dir):
+            shutil.rmtree(output_dir)
+            logger.debug("Removed ComfyUI's default output directory during import")
 
         # Phase 1.5: Create venv and optionally install PyTorch with specific backend
         # Read Python version from .python-version file
@@ -1917,14 +1570,14 @@ class Environment:
 
         # Always prepare models to copy sources from global table, even for "skip"
         # This ensures download intents are preserved for later resolution
-        workflows_with_intents = self.prepare_import_with_model_strategy(model_strategy)
+        workflows_with_intents = self.model_manager.prepare_import_with_model_strategy(model_strategy)
 
         # Only auto-resolve if not "skip" strategy
         workflows_to_resolve = [] if model_strategy == "skip" else workflows_with_intents
 
         # Resolve workflows with download intents
-        from ..strategies.auto import AutoModelStrategy, AutoNodeStrategy
         from ..models.workflow import BatchDownloadCallbacks
+        from ..strategies.auto import AutoModelStrategy, AutoNodeStrategy
 
         download_failures = []
 

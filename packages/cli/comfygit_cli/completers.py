@@ -144,3 +144,96 @@ def installed_node_completer(prefix: str, parsed_args: argparse.Namespace, **kwa
     except Exception as e:
         warn(f"Error listing nodes: {e}")
         return []
+
+
+def branch_completer(prefix: str, parsed_args: argparse.Namespace, **kwargs: Any) -> list[str]:
+    """Complete branch names from environment.
+
+    Returns only branch names for commands that accept branches.
+
+    Used for:
+    - cg switch <TAB>
+    """
+    workspace = get_workspace_safe()
+    if not workspace:
+        return []
+
+    env = get_env_from_args(parsed_args, workspace)
+    if not env:
+        return []
+
+    try:
+        # Get branches (returns list of (name, is_current) tuples)
+        branches = env.list_branches()
+        names = [name for name, _ in branches]
+        return filter_by_prefix(names, prefix)
+
+    except Exception as e:
+        warn(f"Error loading branches: {e}")
+        return []
+
+
+def commit_hash_completer(prefix: str, parsed_args: argparse.Namespace, **kwargs: Any) -> list[str]:
+    """Complete commit hashes from environment history.
+
+    Returns only short commit hashes for clean tab completion.
+    Users can run 'cg log' to see commit messages.
+
+    Used for:
+    - cg reset <TAB>
+    """
+    workspace = get_workspace_safe()
+    if not workspace:
+        return []
+
+    env = get_env_from_args(parsed_args, workspace)
+    if not env:
+        return []
+
+    try:
+        # Get recent commits (50 should cover most use cases)
+        history = env.get_commit_history(limit=50)
+
+        # Return only hashes for clean completion
+        hashes = [commit['hash'] for commit in history]
+        return filter_by_prefix(hashes, prefix)
+
+    except Exception as e:
+        warn(f"Error loading commits: {e}")
+        return []
+
+
+def ref_completer(prefix: str, parsed_args: argparse.Namespace, **kwargs: Any) -> list[str]:
+    """Complete git refs (branches and commits) from environment.
+
+    Returns branches first (most common use case), then recent commit hashes.
+    This provides comprehensive completion for commands like checkout that
+    accept both branches and commits.
+
+    Used for:
+    - cg checkout <TAB>
+    """
+    workspace = get_workspace_safe()
+    if not workspace:
+        return []
+
+    env = get_env_from_args(parsed_args, workspace)
+    if not env:
+        return []
+
+    try:
+        candidates = []
+
+        # Priority 1: Branches (most common for checkout)
+        branches = env.list_branches()
+        candidates.extend([name for name, _ in branches])
+
+        # Priority 2: Recent commits
+        history = env.get_commit_history(limit=50)
+        candidates.extend([commit['hash'] for commit in history])
+
+        return filter_by_prefix(candidates, prefix)
+
+    except Exception as e:
+        warn(f"Error loading refs: {e}")
+        return []

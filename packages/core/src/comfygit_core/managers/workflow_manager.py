@@ -211,6 +211,105 @@ class WorkflowManager:
         # Progressive JSON updates fail when cache has stale node IDs (node lookup mismatch)
         # Batch update is more efficient and ensures consistent node IDs within same parse session
 
+    def _write_model_resolution_grouped(
+        self,
+        workflow_name: str,
+        resolved: ResolvedModel,
+        all_refs: list[WorkflowNodeWidgetRef]
+    ) -> None:
+        """Write model resolution for multiple node references (deduplicated).
+
+        This is the deduplication-aware version of _write_single_model_resolution().
+        When the same model appears in multiple nodes, all refs are written together
+        in a single ManifestWorkflowModel entry.
+
+        Args:
+            workflow_name: Workflow being resolved
+            resolved: ResolvedModel with resolution result
+            all_refs: ALL node references for this model (deduplicated group)
+        """
+        from comfygit_core.models.manifest import ManifestModel, ManifestWorkflowModel
+
+        # Use primary ref for category determination
+        primary_ref = resolved.reference
+        model = resolved.resolved_model
+
+        # Determine category and criticality
+        category = self._get_category_for_node_ref(primary_ref)
+
+        # Override criticality if marked optional
+        if resolved.is_optional:
+            criticality = "optional"
+        else:
+            criticality = self._get_default_criticality(category)
+
+        # Handle download intent case
+        if resolved.match_type == "download_intent":
+            manifest_model = ManifestWorkflowModel(
+                filename=primary_ref.widget_value,
+                category=category,
+                criticality=criticality,
+                status="unresolved",
+                nodes=all_refs,  # ALL REFS!
+                sources=[resolved.model_source] if resolved.model_source else [],
+                relative_path=str(resolved.target_path) if resolved.target_path else None
+            )
+            self.pyproject.workflows.add_workflow_model(workflow_name, manifest_model)
+
+            # Invalidate cache
+            self.workflow_cache.invalidate(
+                env_name=self.environment_name,
+                workflow_name=workflow_name
+            )
+            return
+
+        # Build manifest model
+        if model is None:
+            # Model without hash - unresolved
+            manifest_model = ManifestWorkflowModel(
+                filename=primary_ref.widget_value,
+                category=category,
+                criticality=criticality,
+                status="unresolved",
+                nodes=all_refs,  # ALL REFS!
+                sources=[]
+            )
+        else:
+            # Resolved model - fetch sources from repository
+            sources = []
+            if model.hash:
+                sources_from_repo = self.model_repository.get_sources(model.hash)
+                sources = [s['url'] for s in sources_from_repo]
+
+            manifest_model = ManifestWorkflowModel(
+                hash=model.hash,
+                filename=model.filename,
+                category=category,
+                criticality=criticality,
+                status="resolved",
+                nodes=all_refs,  # ALL REFS!
+                sources=sources
+            )
+
+            # Add to global table with sources
+            global_model = ManifestModel(
+                hash=model.hash,
+                filename=model.filename,
+                size=model.file_size,
+                relative_path=model.relative_path,
+                category=category,
+                sources=sources
+            )
+            self.pyproject.models.add_model(global_model)
+
+        # Progressive write to workflow
+        self.pyproject.workflows.add_workflow_model(workflow_name, manifest_model)
+
+        # Log grouped write
+        if len(all_refs) > 1:
+            node_ids = ", ".join(f"#{ref.node_id}" for ref in all_refs)
+            logger.debug(f"Wrote grouped model resolution for nodes: {node_ids}")
+
     def _update_single_workflow_node_path(
         self,
         workflow_name: str,
@@ -458,29 +557,43 @@ class WorkflowManager:
             logger.error(f"Failed to restore workflow '{name}': {e}")
             return False
 
-    def restore_all_from_cec(self) -> dict[str, str]:
-        """Restore all workflows from .cec to ComfyUI (for rollback).
+    def restore_all_from_cec(self, preserve_uncommitted: bool = False) -> dict[str, str]:
+        """Restore all workflows from .cec to ComfyUI.
+
+        Args:
+            preserve_uncommitted: If True, don't delete workflows not in .cec.
+                                 This enables git-like behavior where uncommitted
+                                 changes are preserved during branch switches.
+                                 If False, force ComfyUI to match .cec exactly
+                                 (current behavior for rollback operations).
 
         Returns:
             Dictionary of workflow names to restore status
         """
         results = {}
 
-        if not self.cec_workflows.exists():
-            logger.info("No .cec workflows directory found")
-            return results
+        # Phase 1: Restore workflows that exist in .cec
+        if self.cec_workflows.exists():
+            # Copy every workflow from .cec to ComfyUI
+            for workflow_file in self.cec_workflows.glob("*.json"):
+                name = workflow_file.stem
+                if self.restore_from_cec(name):
+                    results[name] = "restored"
+                else:
+                    results[name] = "failed"
 
-        # Copy every workflow from .cec to ComfyUI
-        for workflow_file in self.cec_workflows.glob("*.json"):
-            name = workflow_file.stem
-            if self.restore_from_cec(name):
-                results[name] = "restored"
+        # Phase 2: Cleanup (ALWAYS run, even if .cec/workflows/ doesn't exist!)
+        # This ensures git semantics: switching to branch without workflows deletes them
+        if not preserve_uncommitted and self.comfyui_workflows.exists():
+            # Determine what workflows SHOULD exist
+            if self.cec_workflows.exists():
+                cec_names = {f.stem for f in self.cec_workflows.glob("*.json")}
             else:
-                results[name] = "failed"
+                # No .cec/workflows/ directory = no workflows should exist
+                # This happens when switching to branches that never had workflows committed
+                cec_names = set()
 
-        # Remove workflows from ComfyUI that don't exist in .cec (cleanup)
-        if self.comfyui_workflows.exists():
-            cec_names = {f.stem for f in self.cec_workflows.glob("*.json")}
+            # Remove workflows that shouldn't exist
             for comfyui_file in self.comfyui_workflows.glob("*.json"):
                 name = comfyui_file.stem
                 if name not in cec_names:
@@ -788,9 +901,9 @@ class WorkflowManager:
         # Get global models table for download intent creation
         global_models_dict = {}
         try:
-            all_global_models = self.pyproject_manager.models.get_all()
-            for model_hash, model in all_global_models.items():
-                global_models_dict[model_hash] = model
+            all_global_models = self.pyproject.models.get_all()
+            for model in all_global_models:
+                global_models_dict[model.hash] = model
         except Exception as e:
             logger.warning(f"Failed to load global models table: {e}")
 
@@ -801,14 +914,26 @@ class WorkflowManager:
             auto_select_ambiguous=True # TODO: Make configurable
         )
 
-        # Resolve models - build mapping from ref to resolved model
+        # Deduplicate model refs by (widget_value, node_type) before resolving
+        # This ensures status reporting shows accurate counts (not inflated by duplicates)
+        model_groups: dict[tuple[str, str], list[WorkflowNodeWidgetRef]] = {}
         for model_ref in analysis.found_models:
-            result = self.model_resolver.resolve_model(model_ref, model_context)
+            key = (model_ref.widget_value, model_ref.node_type)
+            if key not in model_groups:
+                model_groups[key] = []
+            model_groups[key].append(model_ref)
+
+        # Resolve each unique model group (one resolution per unique model)
+        for (widget_value, node_type), refs_in_group in model_groups.items():
+            # Use first ref as representative for resolution
+            primary_ref = refs_in_group[0]
+
+            result = self.model_resolver.resolve_model(primary_ref, model_context)
 
             if result is None:
-                # Model not found at all
-                logger.debug(f"Failed to resolve model: {model_ref}")
-                models_unresolved.append(model_ref)
+                # Model not found at all - add primary ref only (deduplicated)
+                logger.debug(f"Failed to resolve model: {primary_ref}")
+                models_unresolved.append(primary_ref)
             elif len(result) == 1:
                 # Clean resolution (exact match or from pyproject cache)
                 resolved_model = result[0]
@@ -823,13 +948,13 @@ class WorkflowManager:
                 logger.debug(f"Resolved model: {resolved_model}")
                 models_resolved.append(resolved_model)
             elif len(result) > 1:
-                # Ambiguous - multiple matches
+                # Ambiguous - multiple matches (use primary ref)
                 logger.debug(f"Ambiguous model: {result}")
                 models_ambiguous.append(result)
             else:
-                # No resolution possible
-                logger.debug(f"Failed to resolve model: {model_ref}, result: {result}")
-                models_unresolved.append(model_ref)
+                # No resolution possible - add primary ref only (deduplicated)
+                logger.debug(f"Failed to resolve model: {primary_ref}, result: {result}")
+                models_unresolved.append(primary_ref)
 
         return ResolutionResult(
             workflow_name=workflow_name,
@@ -969,9 +1094,9 @@ class WorkflowManager:
             # Get global models table for download intent creation
             global_models_dict = {}
             try:
-                all_global_models = self.pyproject_manager.models.get_all()
-                for model_hash, model in all_global_models.items():
-                    global_models_dict[model_hash] = model
+                all_global_models = self.pyproject.models.get_all()
+                for model in all_global_models:
+                    global_models_dict[model.hash] = model
             except Exception as e:
                 logger.warning(f"Failed to load global models table: {e}")
 
@@ -997,35 +1122,71 @@ class WorkflowManager:
             for model_ref in resolution.models_unresolved:
                 all_unresolved_models.append((model_ref, []))
 
-            # Resolve each model
+            # DEDUPLICATION: Group by (widget_value, node_type)
+            model_groups: dict[tuple[str, str], list[tuple[WorkflowNodeWidgetRef, list[ResolvedModel]]]] = {}
+
             for model_ref, candidates in all_unresolved_models:
+                # Group key: (widget_value, node_type)
+                # This ensures same model in same loader type gets resolved once
+                key = (model_ref.widget_value, model_ref.node_type)
+                if key not in model_groups:
+                    model_groups[key] = []
+                model_groups[key].append((model_ref, candidates))
+
+            # Resolve each group (one prompt per unique model)
+            for (widget_value, node_type), group in model_groups.items():
+                # Extract all refs and candidates
+                all_refs_in_group = [ref for ref, _ in group]
+                primary_ref, primary_candidates = group[0]
+
+                # Log deduplication for debugging
+                if len(all_refs_in_group) > 1:
+                    node_ids = ", ".join(f"#{ref.node_id}" for ref in all_refs_in_group)
+                    logger.info(f"Deduplicating model '{widget_value}' found in nodes: {node_ids}")
+
                 try:
-                    resolved = model_strategy.resolve_model(model_ref, candidates, model_context)
+                    # Prompt user once for this model
+                    resolved = model_strategy.resolve_model(primary_ref, primary_candidates, model_context)
 
                     if resolved is None:
-                        # User skipped - remains unresolved
-                        remaining_models_unresolved.append(model_ref)
-                        logger.debug(f"Skipped: {model_ref.widget_value}")
+                        # User skipped - remains unresolved for ALL refs
+                        for ref in all_refs_in_group:
+                            remaining_models_unresolved.append(ref)
+                        logger.debug(f"Skipped: {widget_value}")
                         continue
 
-                    # Add to resolved list
-                    models_to_add.append(resolved)
-
-                    # PROGRESSIVE: Write immediately to pyproject + workflow JSON
+                    # PROGRESSIVE: Write with ALL refs at once
                     if workflow_name:
-                        self._write_single_model_resolution(workflow_name, resolved)
+                        self._write_model_resolution_grouped(workflow_name, resolved, all_refs_in_group)
+
+                    # Add to results for ALL refs (needed for update_workflow_model_paths)
+                    for ref in all_refs_in_group:
+                        # Create ResolvedModel for each ref pointing to same resolved model
+                        ref_resolved = ResolvedModel(
+                            workflow=workflow_name,
+                            reference=ref,
+                            resolved_model=resolved.resolved_model,
+                            model_source=resolved.model_source,
+                            is_optional=resolved.is_optional,
+                            match_type=resolved.match_type,
+                            match_confidence=resolved.match_confidence,
+                            target_path=resolved.target_path,
+                            needs_path_sync=resolved.needs_path_sync
+                        )
+                        models_to_add.append(ref_resolved)
 
                     # Log result
                     if resolved.is_optional:
-                        logger.info(f"Marked as optional: {model_ref.widget_value}")
+                        logger.info(f"Marked as optional: {widget_value}")
                     elif resolved.resolved_model:
-                        logger.info(f"Resolved: {model_ref.widget_value} → {resolved.resolved_model.filename}")
+                        logger.info(f"Resolved: {widget_value} → {resolved.resolved_model.filename}")
                     else:
-                        logger.info(f"Marked as optional (unresolved): {model_ref.widget_value}")
+                        logger.info(f"Marked as optional (unresolved): {widget_value}")
 
                 except Exception as e:
-                    logger.error(f"Failed to resolve {model_ref.widget_value}: {e}")
-                    remaining_models_unresolved.append(model_ref)
+                    logger.error(f"Failed to resolve {widget_value}: {e}")
+                    for ref in all_refs_in_group:
+                        remaining_models_unresolved.append(ref)
 
         # Build updated result
         result = ResolutionResult(
@@ -1669,3 +1830,115 @@ class WorkflowManager:
                 return
 
         raise ValueError(f"Model with reference {reference} not found in workflow '{workflow_name}'")
+
+    def execute_pending_downloads(
+        self,
+        result: ResolutionResult,
+        callbacks: BatchDownloadCallbacks | None = None
+    ) -> list:
+        """Execute batch downloads for all download intents in result.
+
+        All user-facing output is delivered via callbacks.
+
+        Args:
+            result: Resolution result containing download intents
+            callbacks: Optional callbacks for progress/status (provided by CLI)
+
+        Returns:
+            List of DownloadResult objects
+        """
+        from ..models.workflow import DownloadResult
+
+        # Collect download intents
+        intents = [r for r in result.models_resolved if r.match_type == "download_intent"]
+
+        if not intents:
+            return []
+
+        # Notify batch start
+        if callbacks and callbacks.on_batch_start:
+            callbacks.on_batch_start(len(intents))
+
+        results = []
+        for idx, resolved in enumerate(intents, 1):
+            filename = resolved.reference.widget_value
+
+            # Notify file start
+            if callbacks and callbacks.on_file_start:
+                callbacks.on_file_start(filename, idx, len(intents))
+
+            # Check if already downloaded (deduplication)
+            if resolved.model_source:
+                existing = self.model_repository.find_by_source_url(resolved.model_source)
+                if existing:
+                    # Reuse existing model - update pyproject with hash
+                    self._update_model_hash(
+                        result.workflow_name,
+                        resolved.reference,
+                        existing.hash
+                    )
+                    # Notify success (reused existing)
+                    if callbacks and callbacks.on_file_complete:
+                        callbacks.on_file_complete(filename, True, None)
+                    results.append(DownloadResult(
+                        success=True,
+                        filename=filename,
+                        model=existing,
+                        reused=True
+                    ))
+                    continue
+
+            # Validate required fields
+            if not resolved.target_path or not resolved.model_source:
+                error_msg = "Download intent missing target_path or model_source"
+                if callbacks and callbacks.on_file_complete:
+                    callbacks.on_file_complete(filename, False, error_msg)
+                results.append(DownloadResult(
+                    success=False,
+                    filename=filename,
+                    error=error_msg
+                ))
+                continue
+
+            # Download new model
+            from ..services.model_downloader import DownloadRequest
+
+            target_path = self.downloader.models_dir / resolved.target_path
+            request = DownloadRequest(
+                url=resolved.model_source,
+                target_path=target_path,
+                workflow_name=result.workflow_name
+            )
+
+            # Use per-file progress callback if provided
+            progress_callback = callbacks.on_file_progress if callbacks else None
+            download_result = self.downloader.download(request, progress_callback=progress_callback)
+
+            if download_result.success and download_result.model:
+                # Update pyproject with actual hash
+                self._update_model_hash(
+                    result.workflow_name,
+                    resolved.reference,
+                    download_result.model.hash
+                )
+                # Notify success
+                if callbacks and callbacks.on_file_complete:
+                    callbacks.on_file_complete(filename, True, None)
+            else:
+                # Notify failure (model remains unresolved with source in pyproject)
+                if callbacks and callbacks.on_file_complete:
+                    callbacks.on_file_complete(filename, False, download_result.error)
+
+            results.append(DownloadResult(
+                success=download_result.success,
+                filename=filename,
+                model=download_result.model if download_result.success else None,
+                error=download_result.error if not download_result.success else None
+            ))
+
+        # Notify batch complete
+        if callbacks and callbacks.on_batch_complete:
+            success_count = sum(1 for r in results if r.success)
+            callbacks.on_batch_complete(success_count, len(results))
+
+        return results

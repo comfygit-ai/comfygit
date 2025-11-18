@@ -121,6 +121,24 @@ class EnvironmentFactory:
             shutil.rmtree(models_dir)
             logger.debug("Removed ComfyUI's default models directory")
 
+        # Remove ComfyUI's default input/output directories (will be replaced with symlinks)
+        from ..utils.symlink_utils import is_link
+
+        input_dir = env.comfyui_path / "input"
+        if input_dir.exists() and not is_link(input_dir):
+            shutil.rmtree(input_dir)
+            logger.debug("Removed ComfyUI's default input directory")
+
+        output_dir = env.comfyui_path / "output"
+        if output_dir.exists() and not is_link(output_dir):
+            shutil.rmtree(output_dir)
+            logger.debug("Removed ComfyUI's default output directory")
+
+        # Create workspace directories and symlinks for user content
+        env.user_content_manager.create_directories()
+        env.user_content_manager.create_symlinks()
+        logger.debug("Created user content symlinks")
+
         # Create initial pyproject.toml
         config = EnvironmentFactory._create_initial_pyproject(
             name,

@@ -10,8 +10,11 @@ import argcomplete
 
 from .completion_commands import CompletionCommands
 from .completers import (
+    branch_completer,
+    commit_hash_completer,
     environment_completer,
     installed_node_completer,
+    ref_completer,
     workflow_completer,
 )
 from .env_commands import EnvironmentCommands
@@ -63,6 +66,14 @@ def _check_for_old_docker_installation() -> None:
 
 def main() -> None:
     """Main entry point for ComfyDock CLI."""
+    # Enable readline for input() line editing (arrow keys, history)
+    # Unix/Linux/macOS: provides full editing capability
+    # Windows: gracefully falls back to native console editing
+    try:
+        import readline  # noqa: F401
+    except ImportError:
+        pass
+
     # Check for old Docker installation (show warning once)
     _check_for_old_docker_installation()
 
@@ -343,8 +354,9 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     repair_parser.set_defaults(func=env_cmds.repair)
 
-    # log - Show version history
-    log_parser = subparsers.add_parser("log", help="Show environment version history")
+    # log - Show commit history
+    log_parser = subparsers.add_parser("log", help="Show commit history")
+    log_parser.add_argument("-n", "--limit", type=int, default=20, metavar="N", help="Number of commits to show (default: 20)")
     log_parser.add_argument("-v", "--verbose", action="store_true", help="Show full details")
     log_parser.set_defaults(func=env_cmds.log)
 
@@ -353,14 +365,49 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     commit_parser.add_argument("-m", "--message", help="Commit message (auto-generated if not provided)")
     commit_parser.add_argument("--auto", action="store_true", help="Auto-resolve issues without interaction")
     commit_parser.add_argument("--allow-issues", action="store_true", help="Allow committing workflows with unresolved issues")
+    commit_parser.add_argument("-y", "--yes", action="store_true", help="Skip detached HEAD warning (allow commit anyway)")
     commit_parser.set_defaults(func=env_cmds.commit)
 
-    # rollback - Revert changes
-    rollback_parser = subparsers.add_parser("rollback", help="Rollback to a previous version or discard uncommitted changes")
-    rollback_parser.add_argument("target", nargs="?", help="Version to rollback to (e.g., 'v1', 'v2') - leave empty to discard uncommitted changes")
-    rollback_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
-    rollback_parser.add_argument("--force", action="store_true", help="Force rollback, discarding uncommitted changes without error")
-    rollback_parser.set_defaults(func=env_cmds.rollback)
+    # checkout - Move HEAD without committing
+    checkout_parser = subparsers.add_parser("checkout", help="Checkout commits, branches, or files")
+    checkout_parser.add_argument("ref", nargs="?", help="Commit, branch, or tag to checkout (defaults to HEAD when using -b)").completer = ref_completer  # type: ignore[attr-defined]
+    checkout_parser.add_argument("-b", "--branch", help="Create new branch and switch to it")
+    checkout_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation for uncommitted changes")
+    checkout_parser.add_argument("--force", action="store_true", help="Force checkout, discarding uncommitted changes")
+    checkout_parser.set_defaults(func=env_cmds.checkout)
+
+    # branch - Manage branches
+    branch_parser = subparsers.add_parser("branch", help="List, create, or delete branches")
+    branch_parser.add_argument("name", nargs="?", help="Branch name (list all if omitted)").completer = branch_completer  # type: ignore[attr-defined]
+    branch_parser.add_argument("-d", "--delete", action="store_true", help="Delete branch")
+    branch_parser.add_argument("-D", "--force-delete", action="store_true", help="Force delete branch (even if unmerged)")
+    branch_parser.set_defaults(func=env_cmds.branch)
+
+    # switch - Switch branches
+    switch_parser = subparsers.add_parser("switch", help="Switch to a branch")
+    switch_parser.add_argument("branch", help="Branch name to switch to").completer = branch_completer  # type: ignore[attr-defined]
+    switch_parser.add_argument("-c", "--create", action="store_true", help="Create branch if it doesn't exist")
+    switch_parser.set_defaults(func=env_cmds.switch)
+
+    # reset - Reset current HEAD to ref
+    reset_parser = subparsers.add_parser("reset", help="Reset current HEAD to specified state")
+    reset_parser.add_argument("ref", nargs="?", default="HEAD", help="Commit to reset to (default: HEAD)").completer = commit_hash_completer  # type: ignore[attr-defined]
+    reset_parser.add_argument("--hard", action="store_true", help="Discard all changes (hard reset)")
+    reset_parser.add_argument("--mixed", action="store_true", help="Keep changes in working tree, unstage (default)")
+    reset_parser.add_argument("--soft", action="store_true", help="Keep changes staged")
+    reset_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+    reset_parser.set_defaults(func=env_cmds.reset_git)
+
+    # merge - Merge branches
+    merge_parser = subparsers.add_parser("merge", help="Merge branch into current")
+    merge_parser.add_argument("branch", help="Branch to merge")
+    merge_parser.add_argument("-m", "--message", help="Merge commit message")
+    merge_parser.set_defaults(func=env_cmds.merge)
+
+    # revert - Revert commits
+    revert_parser = subparsers.add_parser("revert", help="Create new commit that undoes previous commit")
+    revert_parser.add_argument("commit", help="Commit to revert")
+    revert_parser.set_defaults(func=env_cmds.revert)
 
     # pull - Pull from remote and sync
     pull_parser = subparsers.add_parser(

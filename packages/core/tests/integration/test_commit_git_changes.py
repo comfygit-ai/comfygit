@@ -101,7 +101,7 @@ class TestCommitWithGitChangesOnly:
 
         # ASSERT: Commit should have succeeded
         # Check git history
-        versions = test_env.get_versions()
+        versions = test_env.get_commit_history()
         assert len(versions) >= 3, \
             "Should have created new commit (v1, v1-sync, v3-node-resolution)"
 
@@ -156,7 +156,7 @@ class TestCommitWithGitChangesOnly:
         )
 
         # ASSERT: Commit should succeed even without workflows
-        versions = test_env.get_versions()
+        versions = test_env.get_commit_history()
         assert len(versions) == 2, \
             "Should have created new commit"
 
@@ -258,7 +258,7 @@ class TestCommitWithGitChangesOnly:
         )
 
         # ASSERT: Should not create new commit
-        versions = test_env.get_versions()
+        versions = test_env.get_commit_history()
         assert len(versions) == 1, "Should not create new commit when no changes"
 
 

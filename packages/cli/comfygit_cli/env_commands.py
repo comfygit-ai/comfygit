@@ -192,7 +192,11 @@ class EnvironmentCommands:
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
 
-        print(f"🎮 Starting ComfyUI in environment: {env.name}")
+        # Get branch info
+        current_branch = env.get_current_branch()
+        branch_display = f" (on {current_branch})" if current_branch else " (detached HEAD)"
+
+        print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
         if comfyui_args:
             print(f"   Arguments: {' '.join(comfyui_args)}")
 
@@ -260,15 +264,42 @@ class EnvironmentCommands:
 
         status = env.status()
 
-        # Clean state - everything is good
+        # Always show git state - never leave it blank
+        if status.git.current_branch:
+            branch_info = f" (on {status.git.current_branch})"
+        else:
+            branch_info = " (detached HEAD)"
+
+        # Clean state - everything is good (but check for detached HEAD)
         if status.is_synced and not status.git.has_changes and status.workflow.sync_status.total_count == 0:
-            print(f"Environment: {env.name} ✓")
+            # Determine status indicator
+            if status.git.current_branch is None:
+                status_indicator = "⚠️"  # Warning for detached HEAD even when clean
+            else:
+                status_indicator = "✓"   # All good
+
+            print(f"Environment: {env.name}{branch_info} {status_indicator}")
+
+            # Show detached HEAD warning even in clean state
+            if status.git.current_branch is None:
+                print("⚠️  You are in detached HEAD state")
+                print("   Any commits you make will not be saved to a branch!")
+                print("   Create a branch: cg checkout -b <branch-name>")
+                print()  # Extra spacing before clean state messages
+
             print("\n✓ No workflows")
             print("✓ No uncommitted changes")
             return
 
-        # Show environment name
-        print(f"Environment: {env.name}")
+        # Show environment name with branch
+        print(f"Environment: {env.name}{branch_info}")
+
+        # Detached HEAD warning (shown prominently at top)
+        if status.git.current_branch is None:
+            print("⚠️  You are in detached HEAD state")
+            print("   Any commits you make will not be saved to a branch!")
+            print("   Create a branch: cg checkout -b <branch-name>")
+            print()  # Extra spacing
 
         # Workflows section - consolidated with issues
         if status.workflow.sync_status.total_count > 0 or status.workflow.sync_status.has_changes:
@@ -368,10 +399,17 @@ class EnvironmentCommands:
                 if status.git.workflow_changes:
                     count = len(status.git.workflow_changes)
                     print(f"  • {count} workflow(s) changed")
+
+                # Show other changes if present
+                if status.git.has_other_changes:
+                    print("  • Other files modified in .cec/")
             else:
                 # Generic message for other changes (e.g., model resolutions)
                 print("\n📦 Uncommitted changes:")
-                print("  • Configuration updated")
+                if status.git.has_other_changes:
+                    print("  • Other files modified in .cec/")
+                else:
+                    print("  • Configuration updated")
 
         # Dev node drift (requirements changed)
         dev_drift = env.check_development_node_drift()
@@ -617,39 +655,52 @@ class EnvironmentCommands:
 
     @with_env_logging("log")
     def log(self, args: argparse.Namespace, logger=None) -> None:
-        """Show environment version history with simple identifiers."""
+        """Show commit history for this environment."""
         env = self._get_env(args)
 
         try:
-            versions = env.get_versions(limit=20)
+            limit = args.limit if hasattr(args, 'limit') else 20
+            history = env.get_commit_history(limit=limit)
 
-            if not versions:
-                print("No version history yet")
-                print("\nTip: Run 'cg commit' to create your first version")
+            if not history:
+                print("No commits yet")
+                print("\nTip: Run 'cg commit' to create your first commit")
                 return
 
-            print(f"Version history for environment '{env.name}':\n")
+            print(f"Commit history for environment '{env.name}':\n")
 
             if not args.verbose:
-                # Compact format
-                for version in reversed(versions):  # Show newest first
-                    print(f"{version['version']}: {version['message']}")
+                # Compact: hash + refs + message + relative date
+                for commit in history:  # Already newest first
+                    refs_display = f" ({commit['refs']})" if commit['refs'] else ""
+                    print(f"{commit['hash']}{refs_display}  {commit['message']} ({commit['date_relative']})")
                 print()
             else:
-                # Detailed format
-                for version in reversed(versions):  # Show newest first
-                    print(f"Version: {version['version']}")
-                    print(f"Message: {version['message']}")
-                    print(f"Date:    {version['date'][:19]}")  # Trim timezone for readability
-                    print(f"Commit:  {version['hash'][:8]}")
-                    print('\n')
+                # Verbose: multi-line with full info
+                for commit in history:
+                    refs_display = f" ({commit['refs']})" if commit['refs'] else ""
+                    print(f"Commit:  {commit['hash']}{refs_display}")
+                    print(f"Date:    {commit['date'][:19]}")
+                    print(f"Message: {commit['message']}")
+                    print()
 
-            print("Use 'cg rollback <version>' to restore to a specific version")
+            # Show detached HEAD status if applicable
+            current_branch = env.get_current_branch()
+            if current_branch is None:
+                print()
+                print("⚠️  You are currently in detached HEAD state")
+                print("   Commits will not be saved to any branch!")
+                print("   Create a branch: cg checkout -b <branch-name>")
+                print()
+
+            print("Use 'cg checkout <hash>' to view a specific commit")
+            print("Use 'cg revert <hash>' to undo changes from a commit (safe)")
+            print("Use 'cg checkout -b <branch> <hash>' to create branch from commit")
 
         except Exception as e:
             if logger:
-                logger.error(f"Failed to read version history for environment '{env.name}': {e}", exc_info=True)
-            print(f"✗ Could not read version history: {e}", file=sys.stderr)
+                logger.error(f"Failed to read commit history for environment '{env.name}': {e}", exc_info=True)
+            print(f"✗ Could not read commit history: {e}", file=sys.stderr)
             sys.exit(1)
 
     # === Node management ===
@@ -1432,60 +1483,193 @@ class EnvironmentCommands:
         print("✓ Changes applied successfully!")
         print(f"\nEnvironment '{env.name}' is ready to use")
 
-    @with_env_logging("env rollback")
-    def rollback(self, args: argparse.Namespace, logger=None) -> None:
-        """Rollback to previous state or discard uncommitted changes."""
+    @with_env_logging("env checkout")
+    def checkout(self, args: argparse.Namespace, logger=None) -> None:
+        """Checkout commits, branches, or files."""
         from .strategies.rollback import AutoRollbackStrategy, InteractiveRollbackStrategy
 
         env = self._get_env(args)
 
         try:
-            if args.target:
-                print(f"⏮ Rolling back environment '{env.name}' to {args.target}")
+            if args.branch:
+                # Create new branch and switch
+                # If ref is None, create_branch defaults to HEAD
+                start_point = args.ref if args.ref is not None else "HEAD"
+                print(f"Creating and switching to branch '{args.branch}'...")
+                env.create_branch(args.branch, start_point=start_point)
+                env.switch_branch(args.branch)
+                print(f"✓ Switched to new branch '{args.branch}'")
             else:
-                print(f"⏮ Discarding uncommitted changes in environment '{env.name}'")
+                # Just checkout ref - ref is required when not using -b
+                if args.ref is None:
+                    print("✗ Error: ref argument is required when not using -b", file=sys.stderr)
+                    sys.exit(1)
 
-            # Choose strategy based on --yes flag
-            if getattr(args, 'yes', False) or getattr(args, 'force', False):
-                strategy = AutoRollbackStrategy()
-            else:
-                strategy = InteractiveRollbackStrategy()
+                print(f"Checking out '{args.ref}'...")
 
-            # Execute rollback with strategy
-            env.rollback(
-                target=args.target,
-                force=getattr(args, 'force', False),
-                strategy=strategy
-            )
+                # Choose strategy
+                strategy = AutoRollbackStrategy() if args.yes or args.force else InteractiveRollbackStrategy()
 
-            print("✓ Rollback complete")
+                env.checkout(args.ref, strategy=strategy, force=args.force)
 
-            if args.target:
-                print(f"\nEnvironment is now at version {args.target}")
-                print("• Run 'cg commit -m \"message\"' to save any new changes")
-                print("• Run 'cg log' to see version history")
-            else:
-                print("\nUncommitted changes have been discarded")
-                print("• Environment is now clean and matches the last commit")
-                print("• Run 'cg log' to see version history")
-
-        except ValueError as e:
-            print(f"✗ {e}", file=sys.stderr)
-            print("\nTip: Run 'cg log' to see available versions")
-            sys.exit(1)
-        except CDEnvironmentError as e:
-            print(f"✗ {e}", file=sys.stderr)
-            sys.exit(1)
+                # Check if detached HEAD
+                current_branch = env.get_current_branch()
+                if current_branch is None:
+                    print(f"✓ HEAD is now at {args.ref} (detached)")
+                    print("  You are in 'detached HEAD' state. To keep changes:")
+                    print(f"    cg checkout -b <new-branch-name>")
+                else:
+                    print(f"✓ Switched to branch '{current_branch}'")
         except Exception as e:
             if logger:
-                logger.error(f"Rollback failed for environment '{env.name}': {e}", exc_info=True)
-            print(f"✗ Rollback failed: {e}", file=sys.stderr)
+                logger.error(f"Checkout failed: {e}", exc_info=True)
+            print(f"✗ Checkout failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @with_env_logging("env branch")
+    def branch(self, args: argparse.Namespace, logger=None) -> None:
+        """Manage branches."""
+        env = self._get_env(args)
+
+        try:
+            if args.name is None:
+                # List branches
+                branches = env.list_branches()
+                if not branches:
+                    print("No branches found")
+                    return
+
+                print("Branches:")
+                is_detached = False
+                for name, is_current in branches:
+                    marker = "* " if is_current else "  "
+                    print(f"{marker}{name}")
+                    if is_current and 'detached' in name.lower():
+                        is_detached = True
+
+                # Show help if in detached HEAD
+                if is_detached:
+                    print()
+                    print("⚠️  You are in detached HEAD state")
+                    print("   To save your work, create a branch:")
+                    print("   cg checkout -b <branch-name>")
+            elif args.delete or args.force_delete:
+                # Delete branch
+                force = args.force_delete
+                print(f"Deleting branch '{args.name}'...")
+                env.delete_branch(args.name, force=force)
+                print(f"✓ Deleted branch '{args.name}'")
+            else:
+                # Create branch (don't switch)
+                print(f"Creating branch '{args.name}'...")
+                env.create_branch(args.name)
+                print(f"✓ Created branch '{args.name}'")
+        except Exception as e:
+            if logger:
+                logger.error(f"Branch operation failed: {e}", exc_info=True)
+            print(f"✗ Branch operation failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @with_env_logging("env switch")
+    def switch(self, args: argparse.Namespace, logger=None) -> None:
+        """Switch to branch."""
+        env = self._get_env(args)
+
+        try:
+            print(f"Switching to branch '{args.branch}'...")
+            env.switch_branch(args.branch, create=args.create)
+            print(f"✓ Switched to branch '{args.branch}'")
+        except Exception as e:
+            if logger:
+                logger.error(f"Switch failed: {e}", exc_info=True)
+            print(f"✗ Switch failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @with_env_logging("env reset")
+    def reset_git(self, args: argparse.Namespace, logger=None) -> None:
+        """Reset HEAD to ref (git-native reset)."""
+        from .strategies.rollback import InteractiveRollbackStrategy
+
+        env = self._get_env(args)
+
+        # Determine mode
+        if args.hard:
+            mode = "hard"
+        elif args.soft:
+            mode = "soft"
+        else:
+            mode = "mixed"  # default
+
+        try:
+            # Choose strategy for hard mode
+            strategy = None
+            if mode == "hard" and not args.yes:
+                strategy = InteractiveRollbackStrategy()
+
+            print(f"Resetting to '{args.ref}' (mode: {mode})...")
+            env.reset(args.ref, mode=mode, strategy=strategy, force=args.yes)
+            print(f"✓ Reset to '{args.ref}'")
+        except Exception as e:
+            if logger:
+                logger.error(f"Reset failed: {e}", exc_info=True)
+            print(f"✗ Reset failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @with_env_logging("env merge")
+    def merge(self, args: argparse.Namespace, logger=None) -> None:
+        """Merge branch into current."""
+        env = self._get_env(args)
+
+        try:
+            current = env.get_current_branch()
+            if current is None:
+                print("✗ Cannot merge while in detached HEAD state")
+                sys.exit(1)
+
+            print(f"Merging '{args.branch}' into '{current}'...")
+            env.merge_branch(args.branch, message=args.message)
+            print(f"✓ Merged '{args.branch}' into '{current}'")
+        except Exception as e:
+            if logger:
+                logger.error(f"Merge failed: {e}", exc_info=True)
+            print(f"✗ Merge failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    @with_env_logging("env revert")
+    def revert(self, args: argparse.Namespace, logger=None) -> None:
+        """Revert a commit."""
+        env = self._get_env(args)
+
+        try:
+            print(f"Reverting commit '{args.commit}'...")
+            env.revert_commit(args.commit)
+            print(f"✓ Reverted commit '{args.commit}'")
+        except Exception as e:
+            if logger:
+                logger.error(f"Revert failed: {e}", exc_info=True)
+            print(f"✗ Revert failed: {e}", file=sys.stderr)
             sys.exit(1)
 
     @with_env_logging("env commit")
     def commit(self, args: argparse.Namespace, logger=None) -> None:
         """Commit workflows with optional issue resolution."""
         env = self._get_env(args)
+
+        # Warn if in detached HEAD before allowing commit
+        current_branch = env.get_current_branch()
+        if current_branch is None and not args.yes:
+            print("⚠️  Warning: You are in detached HEAD state!")
+            print("   Commits made here will not be saved to any branch.")
+            print()
+            print("Options:")
+            print("  • Create a branch first: cg checkout -b <branch-name>")
+            print("  • Commit anyway (not recommended): use --yes flag")
+            print()
+            response = input("Continue with commit in detached HEAD? (y/N): ")
+            if response.lower() != 'y':
+                print("Commit cancelled. Create a branch first.")
+                sys.exit(0)
+            print()  # Extra spacing before commit output
 
         print("📋 Analyzing workflows...")
 
@@ -1546,23 +1730,6 @@ class EnvironmentCommands:
         if deleted_count > 0:
             print(f"  • Deleted {deleted_count} workflow(s)")
 
-    @with_env_logging("env reset")
-    def reset(self, args: argparse.Namespace) -> None:
-        """Reset uncommitted changes in pyproject.toml."""
-        env = self._get_env(args)
-
-        print(f"🔄 Resetting changes for: {env.name}")
-
-        # Git checkout to reset changes
-        import subprocess
-        cmd = ["git", "checkout", "HEAD", "--", "pyproject.toml"]
-        result = subprocess.run(cmd, cwd=env.cec_path, capture_output=True)
-
-        if result.returncode == 0:
-            print("✓ Changes reset")
-        else:
-            print("✗ Reset failed", file=sys.stderr)
-            sys.exit(1)
 
     # === Git remote operations ===
 
@@ -1577,7 +1744,7 @@ class EnvironmentCommands:
             print()
             print("💡 Options:")
             print("  • Commit: cg commit -m 'message'")
-            print("  • Discard: cg rollback")
+            print("  • Discard: cg reset --hard")
             print("  • Force: cg pull origin --force")
             sys.exit(1)
 

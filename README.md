@@ -74,11 +74,15 @@ cg commit -m "Initial setup with Impact Pack"
 cg node add https://github.com/cubiq/ComfyUI_IPAdapter_plus
 cg commit -m "Added IPAdapter"
 
-# Oops, something broke
-cg rollback v1  # Back to the first commit
+# Oops, something broke - undo the last commit (safe)
+cg revert HEAD  # Creates new commit that undoes changes
 
-# Or discard uncommitted changes
-cg rollback
+# Or explore an old commit
+cg log  # Find the commit hash you want
+cg checkout a28f333  # Detached HEAD - safe exploration
+
+# Discard uncommitted changes
+cg reset --hard  # Reset working directory to current HEAD
 ```
 
 ### Scenario 3: Sharing Workflows (Export/Import)
