@@ -1488,6 +1488,16 @@ class Environment:
                 backend = extract_backend_from_version(first_version)
                 logger.info(f"Detected PyTorch backend from installed version: {backend}")
 
+                # Store resolved backend (never "auto")
+                config = self.pyproject.load()
+                if "tool" not in config:
+                    config["tool"] = {}
+                if "comfygit" not in config["tool"]:
+                    config["tool"]["comfygit"] = {}
+                config["tool"]["comfygit"]["torch_backend"] = backend if backend else "cpu"
+                self.pyproject.save(config)
+                logger.info(f"Stored resolved torch_backend: {backend if backend else 'cpu'}")
+
                 if backend:
                     # Add new index for detected backend
                     index_name = f"pytorch-{backend}"

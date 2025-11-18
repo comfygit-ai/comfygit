@@ -1,4 +1,8 @@
 """PyTorch-specific utilities for backend detection and index URL generation."""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
 
 from ..constants import PYTORCH_INDEX_BASE_URL
 
@@ -69,3 +73,40 @@ def extract_pip_show_package_version(pip_show_output: str) -> str | None:
     if match:
         return match.group(1).strip()
     return None
+
+
+def get_installed_pytorch_info(uv_manager: Any, python_executable: Path) -> dict:
+    """Get installed PyTorch version and backend from venv.
+
+    Args:
+        uv_manager: UVProjectManager instance for pip commands
+        python_executable: Path to Python executable in venv
+
+    Returns:
+        {
+            "torch": "2.9.1+cu128",
+            "torchvision": "0.18.1+cu128",
+            "torchaudio": "2.9.1+cu128",
+            "backend": "cu128"  # or "cpu" if no backend suffix
+        }
+    """
+    from ..constants import PYTORCH_CORE_PACKAGES
+
+    result = {"backend": "cpu"}
+
+    for pkg in PYTORCH_CORE_PACKAGES:
+        try:
+            output = uv_manager.show_package(pkg, python_executable)
+            version = extract_pip_show_package_version(output)
+            if version:
+                result[pkg] = version
+                # Extract backend from first package with version suffix
+                if result["backend"] == "cpu":
+                    backend = extract_backend_from_version(version)
+                    if backend:
+                        result["backend"] = backend
+        except Exception:
+            # Package not installed
+            pass
+
+    return result
