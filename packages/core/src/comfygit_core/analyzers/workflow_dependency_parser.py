@@ -23,10 +23,12 @@ class WorkflowDependencyParser:
     def __init__(
         self,
         workflow_path: Path,
-        model_config: ModelConfig | None = None
+        model_config: ModelConfig | None = None,
+        cec_path: Path | None = None
     ):
 
         self.model_config = model_config or ModelConfig.load()
+        self.cec_path = cec_path
 
         # Load workflow
         self.workflow = WorkflowRepository.load(workflow_path)
@@ -48,10 +50,13 @@ class WorkflowDependencyParser:
             builtin_nodes: list[WorkflowNode] = []
             missing_nodes: list[WorkflowNode] = []
 
+            # Create classifier with environment-specific builtins
+            classifier = NodeClassifier(self.cec_path)
+
             # Analyze and resolve models and nodes
             # Iterate over items() to preserve scoped IDs for subgraph nodes
             for node_id, node_info in nodes_data.items():
-                node_classification = NodeClassifier.classify_single_node(node_info)
+                node_classification = classifier.classify_single_node(node_info)
                 model_refs = self._extract_model_node_refs(node_id, node_info)
                 
                 found_models.extend(model_refs)

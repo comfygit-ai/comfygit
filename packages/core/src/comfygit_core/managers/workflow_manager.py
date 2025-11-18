@@ -745,7 +745,7 @@ class WorkflowManager:
         logger.debug(f"Cache MISS for workflow '{name}' - running full analysis")
 
         # Cache miss - run full analysis
-        parser = WorkflowDependencyParser(workflow_path)
+        parser = WorkflowDependencyParser(workflow_path, cec_path=self.cec_path)
         deps = parser.analyze_dependencies()
 
         # Store in cache (no resolution yet)
@@ -796,7 +796,7 @@ class WorkflowManager:
         else:
             # Full miss - analyze workflow
             logger.debug(f"Cache MISS for workflow '{name}' - full analysis + resolution")
-            parser = WorkflowDependencyParser(workflow_path)
+            parser = WorkflowDependencyParser(workflow_path, cec_path=self.cec_path)
             dependencies = parser.analyze_dependencies()
 
         # Resolve (either from cache miss or stale resolution)

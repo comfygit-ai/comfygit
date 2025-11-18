@@ -1414,6 +1414,25 @@ class Environment:
             else:
                 logger.warning(f"Could not determine commit SHA for ComfyUI {spec.version}")
 
+        # Extract builtin nodes for imported environment
+        from ..utils.builtin_extractor import extract_comfyui_builtins
+
+        try:
+            if callbacks:
+                callbacks.on_phase("extract_builtins", "Extracting builtin nodes...")
+
+            builtins_path = self.cec_path / "comfyui_builtins.json"
+
+            # Check if already exists (from exported bundle)
+            if builtins_path.exists():
+                logger.debug("Builtin config already exists from export, skipping extraction")
+            else:
+                extract_comfyui_builtins(self.comfyui_path, builtins_path)
+                logger.info(f"Extracted builtin nodes to {builtins_path.name}")
+        except Exception as e:
+            logger.warning(f"Failed to extract builtin nodes: {e}")
+            logger.warning("Workflow resolution will fall back to global static config")
+
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = self.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
