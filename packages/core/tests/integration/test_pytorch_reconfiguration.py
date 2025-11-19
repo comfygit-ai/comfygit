@@ -66,6 +66,55 @@ class TestGetInstalledPytorchInfo:
 class TestOverridePytorchConfig:
     """Test PyTorch config override from installed packages."""
 
+    def test_override_skips_when_config_matches_installed(self, test_env):
+        """Should skip file modification when config already matches installed PyTorch.
+
+        This prevents spurious 'uncommitted changes' after git checkout when the
+        installed PyTorch backend matches what's in pyproject.toml.
+        """
+        # ARRANGE - Set up config with cu128 that matches what will be "installed"
+        config = test_env.pyproject.load()
+
+        if "uv" not in config["tool"]:
+            config["tool"]["uv"] = {}
+
+        config["tool"]["uv"]["index"] = [
+            {"name": "pytorch-cu128", "url": "https://download.pytorch.org/whl/cu128", "explicit": True}
+        ]
+        config["tool"]["uv"]["sources"] = {
+            "torch": {"index": "pytorch-cu128"},
+            "torchvision": {"index": "pytorch-cu128"},
+            "torchaudio": {"index": "pytorch-cu128"},
+        }
+        config["tool"]["uv"]["constraint-dependencies"] = [
+            "torch==2.9.0+cu128",
+            "torchvision==0.18.0+cu128",
+            "torchaudio==2.9.0+cu128",
+        ]
+        test_env.pyproject.save(config)
+
+        # Commit to establish clean state
+        test_env.git_manager.commit_all("setup with cu128")
+
+        # Verify no uncommitted changes before override
+        assert not test_env.git_manager.has_uncommitted_changes(), "Should start clean"
+
+        # ACT - Mock the installed PyTorch as cu128 (same as config)
+        with patch.object(test_env.uv_manager, 'show_package') as mock_show:
+            mock_show.side_effect = lambda pkg, python: {
+                "torch": "Name: torch\nVersion: 2.9.0+cu128\n",
+                "torchvision": "Name: torchvision\nVersion: 0.18.0+cu128\n",
+                "torchaudio": "Name: torchaudio\nVersion: 2.9.0+cu128\n",
+            }.get(pkg, "")
+
+            test_env.git_orchestrator._override_pytorch_config_from_installed()
+
+        # ASSERT - No changes should have been made
+        has_changes = test_env.git_manager.has_uncommitted_changes()
+        assert not has_changes, (
+            "Should not modify pyproject.toml when config already matches installed PyTorch"
+        )
+
     def test_override_strips_old_config_and_writes_new(self, test_env):
         """Should strip old PyTorch config and write config matching installed."""
         # ARRANGE - Set up config with cu121 (will be overridden)

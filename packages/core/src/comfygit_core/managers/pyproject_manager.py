@@ -565,7 +565,10 @@ class UVConfigHandler(BaseHandler):
         return False
 
     def add_index(self, name: str, url: str, explicit: bool = True) -> None:
-        """Add an index to [[tool.uv.index]]."""
+        """Add an index to [[tool.uv.index]].
+
+        Always produces array-of-tables format to match uv's formatting.
+        """
         config = self.load()
         self.ensure_section(config, 'tool', 'uv')
         indexes = config['tool']['uv'].get('index', [])
@@ -573,17 +576,38 @@ class UVConfigHandler(BaseHandler):
         if not isinstance(indexes, list):
             indexes = [indexes] if indexes else []
 
+        # Create new table entry for the index
+        new_entry = tomlkit.table()
+        new_entry['name'] = name
+        new_entry['url'] = url
+        new_entry['explicit'] = explicit
+
         # Update existing or add new
+        updated = False
         for i, existing in enumerate(indexes):
             if existing.get('name') == name:
                 logger.info(f"Updating index '{name}'")
-                indexes[i] = {'name': name, 'url': url, 'explicit': explicit}
+                indexes[i] = new_entry
+                updated = True
                 break
-        else:
-            logger.info(f"Creating index '{name}'")
-            indexes.append({'name': name, 'url': url, 'explicit': explicit})
 
-        config['tool']['uv']['index'] = indexes
+        if not updated:
+            logger.info(f"Creating index '{name}'")
+            indexes.append(new_entry)
+
+        # Always use array-of-tables format for consistency with uv
+        aot = tomlkit.aot()
+        for idx in indexes:
+            if hasattr(idx, 'items'):  # Already a tomlkit table
+                aot.append(idx)
+            else:
+                # Convert plain dict to table
+                tbl = tomlkit.table()
+                for k, v in idx.items():
+                    tbl[k] = v
+                aot.append(tbl)
+
+        config['tool']['uv']['index'] = aot
         self.save(config)
 
     def add_source(self, package_name: str, source: dict) -> None:

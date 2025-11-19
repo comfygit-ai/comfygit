@@ -404,3 +404,176 @@ class TestPyprojectCaching:
         manager2.load()
         assert manager1.get_load_stats()['instance_loads'] == 1
         assert manager2.get_load_stats()['instance_loads'] == 1
+
+
+class TestUVConfigFormatting:
+    """Test that UV config operations produce consistent TOML formatting."""
+
+    def test_add_index_produces_array_of_tables_format(self, temp_pyproject):
+        """Test that add_index produces [[tool.uv.index]] format, not inline array.
+
+        This is critical for git consistency - uv normalizes to array-of-tables format,
+        so we should too to avoid spurious 'uncommitted changes' after checkout.
+        """
+        manager = PyprojectManager(temp_pyproject)
+
+        # Add an index
+        manager.uv_config.add_index(
+            name="pytorch-cu129",
+            url="https://download.pytorch.org/whl/cu129",
+            explicit=True
+        )
+
+        # Read raw TOML content
+        with open(temp_pyproject) as f:
+            content = f.read()
+
+        # Should use array-of-tables format [[tool.uv.index]]
+        # NOT inline format: index = [{name = "...", ...}]
+        assert "[[tool.uv.index]]" in content, (
+            f"Expected array-of-tables format [[tool.uv.index]], got:\n{content}"
+        )
+        assert 'index = [{' not in content, (
+            f"Should not use inline array format, got:\n{content}"
+        )
+
+        # Verify each field is on its own line
+        assert '\nname = "pytorch-cu129"' in content
+        assert '\nurl = "https://download.pytorch.org/whl/cu129"' in content
+        assert '\nexplicit = true' in content
+
+    def test_add_multiple_indexes_produces_multiple_array_of_tables(self, temp_pyproject):
+        """Test that adding multiple indexes produces multiple [[tool.uv.index]] sections."""
+        manager = PyprojectManager(temp_pyproject)
+
+        # Add two indexes
+        manager.uv_config.add_index("pytorch-cu129", "https://download.pytorch.org/whl/cu129", True)
+        manager.uv_config.add_index("pytorch-cpu", "https://download.pytorch.org/whl/cpu", True)
+
+        # Read raw TOML content
+        with open(temp_pyproject) as f:
+            content = f.read()
+
+        # Should have two array-of-tables sections
+        assert content.count("[[tool.uv.index]]") == 2, (
+            f"Expected two [[tool.uv.index]] sections, got:\n{content}"
+        )
+
+    def test_update_existing_index_preserves_array_of_tables_format(self, temp_pyproject):
+        """Test that updating an index preserves array-of-tables format."""
+        manager = PyprojectManager(temp_pyproject)
+
+        # Add index
+        manager.uv_config.add_index("pytorch-cu129", "https://old-url.com", True)
+
+        # Update it
+        manager.uv_config.add_index("pytorch-cu129", "https://new-url.com", True)
+
+        # Read raw TOML content
+        with open(temp_pyproject) as f:
+            content = f.read()
+
+        # Should still use array-of-tables format
+        assert "[[tool.uv.index]]" in content
+        assert content.count("[[tool.uv.index]]") == 1
+        assert "https://new-url.com" in content
+        assert "https://old-url.com" not in content
+
+    def test_index_format_roundtrip_preserves_style(self, temp_pyproject):
+        """Test that loading and saving preserves array-of-tables format.
+
+        This simulates what happens when git checkout restores a file and
+        we then modify it - the format should be preserved.
+        """
+        # First, manually write array-of-tables format (like uv would)
+        aot_content = '''[project]
+name = "test-project"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.comfygit]
+comfyui_version = "v0.3.60"
+python_version = "3.11"
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+'''
+        with open(temp_pyproject, 'w') as f:
+            f.write(aot_content)
+
+        manager = PyprojectManager(temp_pyproject)
+
+        # Load, modify something else, save
+        config = manager.load()
+        config['tool']['comfygit']['python_version'] = "3.12"
+        manager.save(config)
+
+        # Read raw content
+        with open(temp_pyproject) as f:
+            content = f.read()
+
+        # Array-of-tables format should be preserved
+        assert "[[tool.uv.index]]" in content, (
+            f"Array-of-tables format should be preserved after roundtrip, got:\n{content}"
+        )
+
+    def test_strip_and_readd_index_produces_array_of_tables(self, temp_pyproject):
+        """Test that stripping indexes with list comprehension and re-adding preserves format.
+
+        This is the critical bug scenario: after checkout, _override_pytorch_config_from_installed
+        strips PyTorch indexes with a list comprehension, which creates a plain Python list.
+        Then add_index appends to it, producing inline format instead of array-of-tables.
+        """
+        # Start with uv-formatted content (array-of-tables)
+        uv_format = '''[project]
+name = "test-project"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.comfygit]
+comfyui_version = "v0.3.60"
+python_version = "3.11"
+
+[tool.uv]
+constraint-dependencies = ["torch==2.9.1+cu129"]
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.uv.sources.torch]
+index = "pytorch-cu129"
+'''
+        with open(temp_pyproject, 'w') as f:
+            f.write(uv_format)
+
+        manager = PyprojectManager(temp_pyproject)
+
+        # Simulate _override_pytorch_config_from_installed stripping with list comprehension
+        config = manager.load()
+        indexes = config['tool']['uv'].get('index', [])
+        config['tool']['uv']['index'] = [
+            idx for idx in indexes
+            if 'pytorch-' not in idx.get('name', '').lower()
+        ]
+        manager.save(config)
+
+        # Now add the index back
+        manager.uv_config.add_index("pytorch-cu129", "https://download.pytorch.org/whl/cu129", True)
+
+        # Read raw content
+        with open(temp_pyproject) as f:
+            content = f.read()
+
+        # Should use array-of-tables format, not inline
+        assert "[[tool.uv.index]]" in content, (
+            f"Expected array-of-tables format after strip-and-readd, got:\n{content}"
+        )
+        assert 'index = [{' not in content, (
+            f"Should not use inline array format after strip-and-readd, got:\n{content}"
+        )
