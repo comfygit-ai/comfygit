@@ -1,8 +1,8 @@
 # ComfyGit
 
 [![Documentation](https://img.shields.io/badge/docs-comfyhub.org-blue)](https://docs.comfyhub.org/comfygit/)
-[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?logo=discord&logoColor=white)](https://discord.gg/2h5rSTeh6Y)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE.txt)
+[![Discord](https://img.shields.io/badge/Discord-%235865F2.svg?logo=discord&logoColor=white)](https://discord.gg/2h5rSTeh6Y)
 
 Git for your ComfyUI environments — version control, package management, and reproducible sharing.
 
@@ -50,15 +50,15 @@ $ cg run
 Starting ComfyUI at http://localhost:8188
 ```
 
-See the [documentation](https://docs.comfyhub.org/comfygit/) for more examples including version control workflows, sharing environments, and team collaboration.
+See the [documentation](https://docs.comfyhub.org/comfygit/getting-started/quickstart/) for more examples including version control workflows, sharing environments, and team collaboration.
 
 ## Documentation
 
 Full documentation at **[docs.comfyhub.org/comfygit](https://docs.comfyhub.org/comfygit)** including:
 
-- [How It Works](https://docs.comfyhub.org/comfygit/concepts/) — architecture and design
-- [Model Management](https://docs.comfyhub.org/comfygit/models/) — content-addressable indexing
-- [Sharing Environments](https://docs.comfyhub.org/comfygit/sharing/) — export/import and git remotes
+- [How It Works](https://docs.comfyhub.org/comfygit/getting-started/concepts/) — architecture and design
+- [Model Management](https://docs.comfyhub.org/comfygit/user-guide/models/model-index/) — content-addressable indexing
+- [Sharing Environments](https://docs.comfyhub.org/comfygit/user-guide/collaboration/export-import/) — export/import and git remotes
 
 ## Features
 
