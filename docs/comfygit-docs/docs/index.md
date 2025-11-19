@@ -1,137 +1,162 @@
 # ComfyGit
 
-> A package and environment manager for ComfyUI that brings reproducibility and version control to AI image generation workflows.
+Git for your ComfyUI environments — version control, package management, and reproducible sharing.
 
-## Get started in 5 minutes
+## Highlights
 
-Prerequisites:
+- 🔄 **Isolated environments** — test new nodes without breaking production
+- 📦 **Git-based versioning** — commit changes, rollback when things break
+- 🚀 **One-command sharing** — export/import complete working environments
+- 💾 **Smart model management** — content-addressable index, no duplicate storage
+- 🔧 **Standard tooling** — built on UV and pyproject.toml, works with Python ecosystem
+- 🖥️ **Cross-platform** — Windows, Linux, macOS
 
-* Python 3.10 or newer
-* Windows, Linux, or macOS
-
-**Install UV (package manager):**
+## Installation
 
 === "macOS/Linux"
-    ```bash
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    ```console
+    $ curl -LsSf https://astral.sh/uv/install.sh | sh
+    $ uv tool install comfygit
     ```
 
-=== "Windows PowerShell"
-    ```powershell
-    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+=== "Windows"
+    ```pwsh-session
+    PS> powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+    PS> uv tool install comfygit
     ```
 
-**Install ComfyGit:**
-
-```bash
-uv tool install comfygit
-```
-
-**Start using ComfyGit:**
-
-```bash
-# Initialize workspace
-cg init
-
-# Create your first environment
-cg create my-project --use
-
-# Run ComfyUI
-cg run
-```
-
-Your ComfyUI opens at `http://localhost:8188` with an isolated, reproducible environment. [Continue with Quickstart (5 mins) →](getting-started/quickstart.md)
+Then, check out the [quickstart](./getting-started/quickstart.md) or read on for a brief overview.
 
 !!! tip
-    See [installation guide](getting-started/installation.md) for alternative install methods or [troubleshooting](troubleshooting/common-issues.md) if you hit issues.
 
-!!! note "Migrating from old ComfyGit (v0.x)?"
-    The Docker-based ComfyGit is being deprecated. This is v1.0+, a complete rewrite with a new approach. See [migration guide](getting-started/migrating-from-v0.md) if you were using the old version.
+    ComfyGit can also be installed with pip. See all methods on the
+    [installation page](./getting-started/installation.md).
 
-## What ComfyGit does for you
+## Environments
 
-* **Multiple isolated environments** — Test new nodes without breaking your production setup
-* **Git-based version control** — Commit changes, rollback when things break, collaborate via GitHub/GitLab
-* **One-command sharing** — Export/import complete working environments with all dependencies
-* **Smart model management** — Content-addressable index prevents duplicate storage, resolves models by hash instead of path
-* **Standard tooling** — Built on UV and pyproject.toml, works seamlessly with Python ecosystem
+ComfyGit manages isolated ComfyUI environments with version control:
 
-## Why use ComfyGit?
+```console
+$ cg init
+Initialized ComfyGit workspace at ~/comfygit
 
-If you've worked with ComfyUI, you've probably hit these problems:
+$ cg create my-project --use
+Created environment 'my-project'
+Downloading ComfyUI v0.3.10...
+Installing Python dependencies...
+Active environment: my-project
 
-* **Dependency hell** — Installing a new custom node breaks your existing workflows
-* **No reproducibility** — "It worked last month" but you can't remember what changed
-* **Sharing is painful** — Sending someone your workflow means a wall of text about which models and nodes to install
-* **Environment sprawl** — Testing new nodes means risking your stable setup
+$ cg node add comfyui-impact-pack
+Resolving comfyui-impact-pack...
+Installing ComfyUI-Impact-Pack from registry
+ + comfyui-impact-pack@1.2.3
+Syncing Python dependencies...
+Resolved 45 packages in 1.2s
 
-ComfyGit solves these by treating your ComfyUI environments like code projects—isolated, versioned, and shareable.
-
-**Works in your terminal:**
-
-```bash
-# Install a custom node
-cg node add comfyui-depthflow-nodes
-
-# Commit your changes
-cg commit -m "Added depthflow nodes"
-
-# Share with your team
-cg export my-workflow.tar.gz
+$ cg run
+Starting ComfyUI at http://localhost:8188
 ```
 
-**Or via Git remotes:**
+See the [quickstart guide](./getting-started/quickstart.md) to get started.
 
-```bash
-# Push to GitHub
-cg remote add origin https://github.com/you/your-env.git
-cg push
+## Version Control
 
-# Pull on another machine
-cg import https://github.com/you/your-env.git --name team-env
+ComfyGit tracks your environment state with Git, so you can commit changes and rollback when things break:
+
+```console
+$ cg commit -m "Added Impact Pack"
+[main a28f333] Added Impact Pack
+ 1 file changed, 15 insertions(+)
+
+$ cg node add comfyui-ipadapter-plus
+Installing ComfyUI-IPAdapter-Plus from registry
+ + comfyui-ipadapter-plus@2.1.0
+
+$ cg commit -m "Added IPAdapter"
+[main b39g444] Added IPAdapter
+ 1 file changed, 8 insertions(+)
+
+$ cg log
+b39g444 Added IPAdapter
+a28f333 Added Impact Pack
+9c1e222 Initial environment
+
+$ cg revert HEAD
+Reverting commit b39g444...
+Removing comfyui-ipadapter-plus...
+[main c40h555] Revert "Added IPAdapter"
 ```
 
-## How it works
+See the [version control guide](./user-guide/environments/version-control.md) to learn more.
 
-ComfyGit uses a **two-tier reproducibility model**:
+## Sharing
 
-### Local tier: Git-based versioning
+Export your complete environment for sharing, or sync with Git remotes for team collaboration:
 
-Each environment has a `.cec/` directory (a git repository) tracking:
+```console
+$ cg export my-workflow.tar.gz
+Exporting environment 'my-project'...
+Bundling node metadata...
+Bundling model sources...
+Bundling Python lockfile...
+Created my-workflow.tar.gz (2.3 MB)
 
-- `pyproject.toml` — custom nodes, model references, Python dependencies
-- `uv.lock` — locked Python dependency versions
-- `workflows/` — tracked workflow files
+$ cg import my-workflow.tar.gz --name imported-env
+Importing environment...
+Installing 12 custom nodes...
+Downloading 3 models from CivitAI...
+Syncing Python dependencies...
+Created environment 'imported-env'
+```
 
-When you run `cg commit`, it snapshots this state. Rollback restores any previous commit.
+Or use Git remotes:
 
-### Global tier: Export/import packages
+```console
+$ cg remote add origin https://github.com/you/my-env.git
+$ cg push
+Pushing to origin...
+Branch 'main' pushed to origin
 
-Export bundles everything needed to recreate the environment:
+$ cg import https://github.com/team/shared-env.git --name team-env
+Cloning repository...
+Installing dependencies...
+Created environment 'team-env'
+```
 
-- Node metadata (registry IDs, git URLs + commits)
-- Model download sources (CivitAI URLs, HuggingFace, etc)
-- Python dependency lockfile
-- Development node source code
+See the [export & import guide](./user-guide/collaboration/export-import.md) to get started.
 
-Import recreates the environment on any machine with compatible hardware.
+## Model Management
 
-### Under the hood
+ComfyGit indexes models by content hash, preventing duplicates and enabling path-independent resolution:
 
-- **UV for Python** — Fast dependency resolution and virtual environments
-- **Standard pyproject.toml** — Each custom node gets its own dependency group to avoid conflicts
-- **Content-addressable models** — Models identified by hash, allowing path-independent resolution
-- **Registry integration** — Uses ComfyUI's official registry for node lookup
+```console
+$ cg model index sync
+Scanning models directory...
+Indexed 47 models (156.3 GB)
 
-## Next steps
+$ cg model download https://civitai.com/models/133005
+Downloading juggernautXL_v9.safetensors...
+Downloaded to checkpoints/juggernautXL_v9.safetensors
+Added to model index
+
+$ cg model index find "juggernaut"
+checkpoints/juggernautXL_v9.safetensors
+  Hash: 7f3a8b2c...
+  Size: 6.46 GB
+  Source: civitai.com/models/133005
+```
+
+See the [model management guide](./user-guide/models/model-index.md) to learn more.
+
+## Learn more
 
 <div class="grid cards" markdown>
 
--   :rocket: **[Quickstart](getting-started/quickstart.md)**
+-   :rocket: **[Features](getting-started/features.md)**
 
     ---
 
-    See ComfyGit in action with practical examples
+    Complete overview of all capabilities
 
 -   :material-book-open-variant: **[Core Concepts](getting-started/concepts.md)**
 
@@ -153,38 +178,8 @@ Import recreates the environment on any machine with compatible hardware.
 
 </div>
 
-## Key features
+## Community & Support
 
-<div class="grid cards" markdown>
-
--   :material-cube-outline: **[Custom Nodes](user-guide/custom-nodes/adding-nodes.md)**
-
-    ---
-
-    Add nodes from registry, GitHub, or local development
-
--   :material-file-image: **[Model Management](user-guide/models/model-index.md)**
-
-    ---
-
-    Content-addressable model index with CivitAI integration
-
--   :material-workflow: **[Workflow Resolution](user-guide/workflows/workflow-resolution.md)**
-
-    ---
-
-    Automatically detect and install workflow dependencies
-
--   :material-git: **[Version Control](user-guide/environments/version-control.md)**
-
-    ---
-
-    Commit, rollback, and collaborate via Git
-
-</div>
-
-## Community & support
-
-* **Documentation**: You're here! Browse the guides
-* **Issues**: Report bugs on [GitHub Issues](https://github.com/comfyhub-org/comfygit/issues)
-* **Discussions**: Ask questions on [GitHub Discussions](https://github.com/comfyhub-org/comfygit/discussions)
+- **Discord**: [Join our community](https://discord.gg/2h5rSTeh6Y)
+- **Issues**: [GitHub Issues](https://github.com/comfyhub-org/comfygit/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/comfyhub-org/comfygit/discussions)
