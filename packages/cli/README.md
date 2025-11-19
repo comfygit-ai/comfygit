@@ -1,10 +1,10 @@
-# ComfyDock CLI
+# ComfyGit CLI
 
-Command-line interface for ComfyDock workspace and environment management.
+Command-line interface for ComfyGit workspace and environment management.
 
 ## Overview
 
-The CLI (`cfd` command) provides interactive, user-friendly access to ComfyDock's environment management system. It wraps the `comfydock-core` library with:
+The CLI (`cfd` command) provides interactive, user-friendly access to ComfyGit's environment management system. It wraps the `comfygit-core` library with:
 
 - **Smart tab completion** - Context-aware shell completion for bash/zsh
 - **Interactive resolution** - User-guided dependency resolution for ambiguous cases

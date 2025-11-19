@@ -1,4 +1,4 @@
-"""Environment-specific logging for ComfyDock."""
+"""Environment-specific logging for ComfyGit."""
 
 import logging
 import os
@@ -35,7 +35,7 @@ class EnvironmentLogger:
         """Set the workspace path for all environment loggers.
         
         Args:
-            workspace_path: Path to ComfyDock workspace
+            workspace_path: Path to ComfyGit workspace
         """
         cls._workspace_path = workspace_path
 
@@ -244,7 +244,7 @@ class WorkspaceLogger:
         """Set the workspace path for workspace logging.
         
         Args:
-            workspace_path: Path to ComfyDock workspace
+            workspace_path: Path to ComfyGit workspace
         """
         cls._workspace_path = workspace_path
 

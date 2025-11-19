@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-ComfyDock is currently in active development (v1.x). Security updates are provided for the latest released version.
+ComfyGit is currently in active development (v1.x). Security updates are provided for the latest released version.
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -17,7 +17,7 @@ Instead, please report them via one of the following methods:
 
 ### Preferred: GitHub Security Advisories
 
-1. Go to the [Security tab](https://github.com/ComfyDock/ComfyDock/security/advisories/new)
+1. Go to the [Security tab](https://github.com/comfyhub-org/comfygit/security/advisories/new)
 2. Click "Report a vulnerability"
 3. Provide details about the vulnerability
 
@@ -69,9 +69,9 @@ Please include as much of the following information as possible:
 
 ## Security Considerations
 
-### ComfyDock's Security Model
+### ComfyGit's Security Model
 
-ComfyDock is a **local development tool** that:
+ComfyGit is a **local development tool** that:
 - Executes code from ComfyUI custom nodes (third-party Python packages)
 - Downloads models from user-specified URLs
 - Runs with the user's local permissions
@@ -80,28 +80,28 @@ ComfyDock is a **local development tool** that:
 **This means:**
 - Users should trust the custom nodes they install
 - Model downloads should be from trusted sources
-- ComfyDock operates within your user's permission scope
+- ComfyGit operates within your user's permission scope
 
 ### Not Security Vulnerabilities
 
 The following are **expected behavior** and not security issues:
 
-1. **Custom nodes executing arbitrary code** - This is intentional. ComfyDock installs Python packages that run with your permissions. Review nodes before installing.
+1. **Custom nodes executing arbitrary code** - This is intentional. ComfyGit installs Python packages that run with your permissions. Review nodes before installing.
 
 2. **Model downloads from untrusted URLs** - Users explicitly provide URLs. We validate file integrity but cannot verify model safety.
 
 3. **Git repository cloning** - When importing environments from git, you're trusting that repository. Review before importing.
 
-4. **Local file system access** - ComfyDock needs to read/write files in its workspace. This is required functionality.
+4. **Local file system access** - ComfyGit needs to read/write files in its workspace. This is required functionality.
 
 ### Actual Security Concerns
 
 Please **do report**:
 
 1. **Command injection** - If user input can execute unintended shell commands
-2. **Path traversal** - If ComfyDock can be tricked into accessing files outside its workspace
+2. **Path traversal** - If ComfyGit can be tricked into accessing files outside its workspace
 3. **Credential exposure** - If API keys or tokens are logged/leaked
-4. **Malicious package installation** - If ComfyDock can be tricked into installing different packages than intended
+4. **Malicious package installation** - If ComfyGit can be tricked into installing different packages than intended
 5. **MITM vulnerabilities** - If downloads don't verify integrity properly
 
 ## Best Practices for Users
@@ -142,7 +142,7 @@ Please **do report**:
 
 ### Secure Development
 
-If you're building on ComfyDock Core:
+If you're building on ComfyGit Core:
 
 1. **Validate user input** - Don't pass unsanitized input to shell commands
 2. **Use the API properly** - Follow callback patterns, don't bypass safety checks
@@ -170,7 +170,7 @@ If you're building on ComfyDock Core:
 ## Security Updates
 
 Security updates are announced via:
-- [GitHub Security Advisories](https://github.com/ComfyDock/ComfyDock/security/advisories)
+- [GitHub Security Advisories](https://github.com/comfyhub-org/comfygit/security/advisories)
 - Release notes in GitHub Releases
 - Updates to this SECURITY.md file
 
@@ -180,8 +180,8 @@ Subscribe to the repository to receive notifications.
 
 ### In Scope
 
-- ComfyDock Core library (`comfydock_core`)
-- ComfyDock CLI (`comfydock_cli`)
+- ComfyGit Core library (`comfygit_core`)
+- ComfyGit CLI (`comfygit_cli`)
 - Build and publishing infrastructure
 - Documentation (if it could lead to insecure usage)
 
@@ -198,4 +198,4 @@ For security concerns that don't rise to the level of a vulnerability report, yo
 - Open a regular GitHub issue (for non-sensitive topics)
 - Start a discussion in GitHub Discussions
 
-Thank you for helping keep ComfyDock and its users safe!
+Thank you for helping keep ComfyGit and its users safe!

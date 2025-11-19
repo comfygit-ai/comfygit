@@ -1,4 +1,4 @@
-"""Environment-specific commands for ComfyDock CLI - Simplified."""
+"""Environment-specific commands for ComfyGit CLI."""
 from __future__ import annotations
 
 import argparse

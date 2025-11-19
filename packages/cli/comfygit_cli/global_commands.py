@@ -1,4 +1,4 @@
-"""Global workspace-level commands for ComfyDock CLI - Simplified."""
+"""Global workspace-level commands for ComfyGit CLI."""
 
 import argparse
 import sys
@@ -76,7 +76,7 @@ class GlobalCommands:
             return workspace
 
     def init(self, args: argparse.Namespace) -> None:
-        """Initialize a new ComfyDock workspace.
+        """Initialize a new ComfyGit workspace.
 
         Creates:
         - ~/comfygit/ (or custom path)
@@ -102,7 +102,7 @@ class GlobalCommands:
 
         workspace_paths = WorkspaceFactory.get_paths(path)
 
-        print(f"\n🎯 Initializing ComfyDock workspace at: {workspace_paths.root}")
+        print(f"\n🎯 Initializing ComfyGit workspace at: {workspace_paths.root}")
 
         try:
             # Create workspace
@@ -203,13 +203,13 @@ class GlobalCommands:
 
         # Interactive mode
         print("\n📦 Model Directory Setup")
-        print("\nComfyDock needs a directory to index your models.")
+        print("\nComfyGit needs a directory to index your models.")
         print("\nOptions:")
         print("  1. Point to an existing ComfyUI models directory (recommended)")
         print("     → Access all your existing models immediately")
         print(f"     → Example: ~/ComfyUI/models")
         print("\n  2. Use the default empty directory")
-        print(f"     → ComfyDock created: {workspace.paths.models}")
+        print(f"     → ComfyGit created: {workspace.paths.models}")
         print("     → Download models as needed later")
 
         has_existing = input("\nDo you have an existing ComfyUI models directory? (y/N): ").strip().lower()
@@ -443,7 +443,7 @@ class GlobalCommands:
 
     @with_workspace_logging("import")
     def import_env(self, args: argparse.Namespace) -> None:
-        """Import a ComfyDock environment from a tarball or git repository."""
+        """Import a ComfyGit environment from a tarball or git repository."""
         from pathlib import Path
 
         from comfygit_core.utils.git import is_git_url
@@ -656,7 +656,7 @@ class GlobalCommands:
 
     @with_workspace_logging("export")
     def export_env(self, args: argparse.Namespace) -> None:
-        """Export a ComfyDock environment to a package."""
+        """Export a ComfyGit environment to a package."""
         from datetime import datetime
         from pathlib import Path
 
@@ -1345,7 +1345,7 @@ class GlobalCommands:
 
     @with_workspace_logging("config")
     def config(self, args: argparse.Namespace) -> None:
-        """Manage ComfyDock configuration settings."""
+        """Manage ComfyGit configuration settings."""
         # Flag mode - direct operations
         if hasattr(args, 'civitai_key') and args.civitai_key is not None:
             self._set_civitai_key(args.civitai_key)
@@ -1369,7 +1369,7 @@ class GlobalCommands:
 
     def _show_config(self):
         """Display current configuration."""
-        print("ComfyDock Configuration:\n")
+        print("ComfyGit Configuration:\n")
 
         # Workspace path
         print(f"  Workspace Path:  {self.workspace.paths.root}")
@@ -1395,7 +1395,7 @@ class GlobalCommands:
             prefer_cache = self.workspace.workspace_config_manager.get_prefer_registry_cache()
 
             # Display menu
-            print("\nComfyDock Configuration\n")
+            print("\nComfyGit Configuration\n")
 
             # Civitai key status
             if civitai_token:

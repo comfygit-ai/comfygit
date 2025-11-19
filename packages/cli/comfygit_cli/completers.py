@@ -1,4 +1,4 @@
-"""Custom argcomplete completers for ComfyDock CLI."""
+"""Custom argcomplete completers for ComfyGit CLI."""
 import argparse
 from typing import Any
 

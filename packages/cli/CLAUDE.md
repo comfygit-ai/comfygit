@@ -1,7 +1,7 @@
-# ComfyDock CLI Package
+# ComfyGit CLI Package
 
 ## Overview
-CLI interface for ComfyDock, providing command-line tools for workspace and environment management.
+CLI interface for ComfyGit, providing command-line tools for workspace and environment management.
 
 ## Key Documents
 - @docs/codebase-map.md - Architecture and structure
@@ -16,13 +16,13 @@ CLI interface for ComfyDock, providing command-line tools for workspace and envi
 
 ```bash
 # Run mypy (stricter, CI/CD-style checking)
-uv run mypy packages/cli/comfydock_cli/
+uv run mypy packages/cli/comfygit_cli/
 
 # Run pyright (Pylance/IDE-style checking - catches "possibly unbound" etc.)
-uv run pyright packages/cli/comfydock_cli/
+uv run pyright packages/cli/comfygit_cli/
 
 # Run both together
-uv run mypy packages/cli/comfydock_cli/ && uv run pyright packages/cli/comfydock_cli/
+uv run mypy packages/cli/comfygit_cli/ && uv run pyright packages/cli/comfygit_cli/
 ```
 
 **Why both?**
@@ -79,7 +79,7 @@ uv run pytest packages/cli/tests/ -v
 uv run pytest packages/cli/tests/test_status_displays_uninstalled_nodes.py -v
 
 # Test with coverage
-uv run pytest packages/cli/tests/ --cov=comfydock_cli
+uv run pytest packages/cli/tests/ --cov=comfygit_cli
 ```
 
 ## Code Style
@@ -128,8 +128,8 @@ except Exception as e:
 
 Before committing CLI changes:
 
-1. ✅ Run `uv run mypy packages/cli/comfydock_cli/`
-2. ✅ Run `uv run pyright packages/cli/comfydock_cli/`
+1. ✅ Run `uv run mypy packages/cli/comfygit_cli/`
+2. ✅ Run `uv run pyright packages/cli/comfygit_cli/`
 3. ✅ Run `uv run pytest packages/cli/tests/`
 4. ✅ Test manually with `uv run cfd <command>`
 5. ✅ Check no red squiggles in IDE
@@ -155,7 +155,7 @@ uv run ruff check --fix packages/cli/
 
 ## Dependencies
 
-- **comfydock-core**: Core library (DO NOT couple with CLI specifics)
+- **comfygit-core**: Core library (DO NOT couple with CLI specifics)
 - **argparse**: Command-line parsing
 - **argcomplete**: Shell tab completion
 - **aiohttp**: Async HTTP for registry operations
@@ -163,7 +163,7 @@ uv run ruff check --fix packages/cli/
 ## Architecture
 
 ```
-comfydock_cli/
+comfygit_cli/
 ├── cli.py                    # Main entry point, argument parsing
 ├── env_commands.py           # Environment-scoped commands
 ├── global_commands.py        # Workspace-scoped commands

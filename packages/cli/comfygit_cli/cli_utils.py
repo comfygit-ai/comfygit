@@ -1,4 +1,4 @@
-"""Utility functions for ComfyDock CLI."""
+"""Utility functions for ComfyGit CLI."""
 
 import sys
 from typing import TYPE_CHECKING

@@ -1,13 +1,13 @@
-# ComfyDock CLI - Codebase Map
+# ComfyGit CLI - Codebase Map
 
 ## Overview
-The CLI package provides command-line interface for ComfyDock, enabling environment and workspace management for ComfyUI. It handles user interactions through environment and global commands, with support for interactive node/model resolution, error handling, and structured logging.
+The CLI package provides command-line interface for ComfyGit, enabling environment and workspace management for ComfyUI. It handles user interactions through environment and global commands, with support for interactive node/model resolution, error handling, and structured logging.
 
-## Core CLI (`comfydock_cli/`)
+## Core CLI (`comfygit_cli/`)
 
 ### Entry Points
 - **__init__.py** - Package initialization exposing the main CLI entry point function for external imports
-- **__main__.py** - Package entry point allowing CLI to run as `python -m comfydock_cli`
+- **__main__.py** - Package entry point allowing CLI to run as `python -m comfygit_cli`
 - **cli.py** - Main CLI parser and command router using argparse with argcomplete support; creates argument parser and dispatches to environment, global, or completion commands
 
 ### Command Handlers
@@ -20,7 +20,7 @@ The CLI package provides command-line interface for ComfyDock, enabling environm
 - **resolution_strategies.py** - Model resolution strategies for CLI interaction with interactive model resolution support
 - **completers.py** - Custom argcomplete completers providing environment names, installed nodes, and workflow names for shell tab completion
 
-## Logging (`comfydock_cli/logging/`)
+## Logging (`comfygit_cli/logging/`)
 Structured logging system with environment-specific handlers, compression, and rotation support.
 
 - **logging_config.py** - Core logging setup with rotating file handlers, configurable levels, and format customization for console and file output
@@ -28,25 +28,25 @@ Structured logging system with environment-specific handlers, compression, and r
 - **log_compressor.py** - Real-time log compression engine that reduces token count while preserving semantic content using timestamp deltas and module abbreviations
 - **compressed_handler.py** - Dual rotating file handler that writes both full verbose logs and compressed versions simultaneously for debugging
 
-## Strategies (`comfydock_cli/strategies/`)
+## Strategies (`comfygit_cli/strategies/`)
 Interactive and automatic resolution strategies for user-guided dependency handling.
 
 - **interactive.py** - Interactive node and model resolution strategies with unified search UI, selection interfaces, and optional node handling
 - **rollback.py** - Rollback confirmation logic with user prompts for destructive operations and automatic approval for --yes flag
 
-## Formatters (`comfydock_cli/formatters/`)
+## Formatters (`comfygit_cli/formatters/`)
 Error and output formatting utilities.
 
 - **error_formatter.py** - Converts core library errors to CLI-friendly command suggestions for user guidance and resolution recommendations
 
-## Utilities (`comfydock_cli/utils/`)
+## Utilities (`comfygit_cli/utils/`)
 General-purpose utilities for CLI operations.
 
 - **progress.py** - Download progress callbacks and statistics display showing download speed, total size, and completion percentage
 - **pagination.py** - Terminal pagination for displaying large lists with page navigation and user interaction
 - **civitai_errors.py** - CivitAI authentication error messages and setup guidance for API key configuration
 
-## Interactive (`comfydock_cli/interactive/`)
+## Interactive (`comfygit_cli/interactive/`)
 Placeholder module for future interactive components.
 
 - **__init__.py** - Empty module initializer for potential future interactive utilities
@@ -88,12 +88,12 @@ Utilities for building node registries and managing ComfyUI integrations (run du
 - **test_concurrent_api.py** - Tests concurrent API performance against ComfyUI registry with request timing and success tracking
 
 ## Configuration
-- **pyproject.toml** - Package metadata, dependencies (comfydock-core, aiohttp, argcomplete), and CLI entry points (comfydock, cfd commands)
+- **pyproject.toml** - Package metadata, dependencies (comfygit-core, aiohttp, argcomplete), and CLI entry points (comfydock, cfd commands)
 
 ## Key Entry Points
 
 ### Command-Line Interface
-- **comfydock / cfd** - Main CLI invocation points defined in pyproject.toml, routes to environment or global commands
+- **comfygit / cfd** - Main CLI invocation points defined in pyproject.toml, routes to environment or global commands
 
 ### Handler Classes
 - **EnvironmentCommands** - Primary handler for environment-scoped operations (nodes, models, workflows, Python packages)
@@ -107,13 +107,13 @@ Utilities for building node registries and managing ComfyUI integrations (run du
 ## Architecture Overview
 
 ### Structure
-- **Library-first design**: Delegates to comfydock-core for all domain logic
+- **Library-first design**: Delegates to comfygit-core for all domain logic
 - **Command routing**: CLI routes to appropriate handler based on command structure
 - **Logging integration**: Environment-specific logging via decorator pattern across handlers
 - **Completion support**: Full shell tab completion for commands, environments, nodes, and workflows
 
 ### Dependencies
-- **comfydock_core**: Core domain logic and environment management
+- **comfygit_core**: Core domain logic and environment management
 - **aiohttp**: Async HTTP for registry API interactions
 - **argcomplete**: Shell completion support
 - **Standard library**: argparse, logging, pathlib, subprocess
@@ -126,6 +126,6 @@ Utilities for building node registries and managing ComfyUI integrations (run du
 
 ### Testing Strategy
 - MVP-focused with main happy path tested
-- Core fixtures re-exported from comfydock-core tests
+- Core fixtures re-exported from comfygit-core tests
 - Regression tests for real bug scenarios
 - Command handler tests with mocking for core library
