@@ -30,9 +30,9 @@
 - `uv run pytest tests/ -v` - Run all tests (full info)
 - `uv run pytest <filename>` - Run specific test file
 
-#### Testing comfydock cli
+#### Testing comfygit cli
 - Use the existing testing workspace by prepending the env variable to cli commands:
-COMFYDOCK_HOME=/home/akatzfey/projects/comfydock/comfydock/packages/core/.comfydock_workspace
+COMFYGIT_HOME=/home/akatzfey/projects/comfyhub/comfygit/packages/core/.comfygit_workspace
 
 ## General
 Don't make any implementation overly complex. This is a one-person dev MVP project.

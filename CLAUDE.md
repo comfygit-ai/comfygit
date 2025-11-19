@@ -1,6 +1,6 @@
 ## Project Overview
 
-ComfyDock is a monorepo workspace using uv for Python package management. It provides unified environment management for ComfyUI through multiple coordinated packages.
+ComfyGit is a monorepo workspace using uv for Python package management. It provides unified environment management for ComfyUI through multiple coordinated packages.
 
 ### Codebase Maps
 - @docs/codebase-map.md
@@ -11,10 +11,8 @@ ComfyDock is a monorepo workspace using uv for Python package management. It pro
 
 ### Example Current Version Status
 - **Workspace Root**: 0.5.0
-- **comfydock-core**: 0.2.2
-- **comfydock-server**: 0.3.2  
-- **comfydock-cli**: 0.3.3
-- **comfydock-cec**: 0.1.0
+- **comfygit-core**: 0.2.2
+- **comfygit-cli**: 0.3.3
 
 ### Version Policy
 - **Major version (X.0.0)**: All packages move together for breaking changes
@@ -40,8 +38,7 @@ make bump-package PACKAGE=core VERSION=0.2.3
 
 ### Dependency Upper Bounds
 Packages use upper bounds to prevent major version incompatibilities:
-- `packages/server/pyproject.toml`: `comfydock-core>=0.2.2,<1.0.0`
-- `packages/cli/pyproject.toml`: `comfydock-server>=0.3.2,<1.0.0`
+- `packages/cli/pyproject.toml`: `comfygit-core>=0.2.2,<1.0.0`
 
 ### Version Compatibility Check
 The `scripts/check-versions.py` script validates that all packages share the same major version. Run via `make check-versions` before releases.

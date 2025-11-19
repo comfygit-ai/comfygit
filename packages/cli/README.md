@@ -1,10 +1,10 @@
-# ComfyDock CLI
+# ComfyGit CLI
 
-Command-line interface for ComfyDock workspace and environment management.
+Command-line interface for ComfyGit workspace and environment management.
 
 ## Overview
 
-The CLI (`cfd` command) provides interactive, user-friendly access to ComfyDock's environment management system. It wraps the `comfydock-core` library with:
+The CLI (`cfd` command) provides interactive, user-friendly access to ComfyGit's environment management system. It wraps the `comfygit-core` library with:
 
 - **Smart tab completion** - Context-aware shell completion for bash/zsh
 - **Interactive resolution** - User-guided dependency resolution for ambiguous cases
@@ -546,8 +546,8 @@ Logs rotate automatically at 10MB with 5 backups kept.
 # Make sure you've initialized
 cfd init
 
-# Or set COMFYDOCK_HOME to point to existing workspace
-export COMFYDOCK_HOME=/path/to/workspace
+# Or set COMFYGIT_HOME to point to existing workspace
+export COMFYGIT_HOME=/path/to/workspace
 ```
 
 **"No active environment"**
@@ -589,13 +589,13 @@ source ~/.bashrc  # or ~/.zshrc
 
 ## Environment Variables
 
-- `COMFYDOCK_HOME` - Override default workspace location (`~/comfydock`)
-- `COMFYDOCK_DEV_COMPRESS_LOGS` - Enable compressed logging (dev feature: `true`/`1`/`yes`)
+- `COMFYGIT_HOME` - Override default workspace location (`~/comfygit`)
+- `COMFYGIT_DEV_COMPRESS_LOGS` - Enable compressed logging (dev feature: `true`/`1`/`yes`)
 - `CIVITAI_API_KEY` - CivitAI API key (or use `cfd config --civitai-key`)
 
 Example:
 ```bash
-export COMFYDOCK_HOME=/mnt/storage/comfydock
+export COMFYGIT_HOME=/mnt/storage/comfygit
 cfd init
 ```
 

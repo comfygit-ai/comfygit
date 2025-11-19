@@ -32,6 +32,7 @@ class TestBatchNodeRemove:
         args = Namespace(
             node_names=["test-node"],  # Single node
             dev=False,
+            untrack=False,
             target_env=None
         )
 
@@ -39,8 +40,8 @@ class TestBatchNodeRemove:
         with patch('builtins.print') as mock_print:
             cmd.node_remove(args)
 
-        # Verify single node flow was used
-        mock_env.remove_node.assert_called_once_with("test-node")
+        # Verify single node flow was used with default untrack_only=False
+        mock_env.remove_node.assert_called_once_with("test-node", untrack_only=False)
 
         # Verify remove_nodes_with_progress was NOT called
         mock_env.remove_nodes_with_progress.assert_not_called()
@@ -158,3 +159,69 @@ class TestBatchNodeRemove:
         call_args = mock_env.remove_nodes_with_progress.call_args
         assert len(call_args[0][0]) == 5
         assert call_args[0][0] == args.node_names
+
+    @patch('comfygit_cli.env_commands.get_workspace_or_exit')
+    def test_untrack_flag_passes_to_remove_node(self, mock_workspace):
+        """Test that --untrack flag is passed to remove_node."""
+        # Setup mocks
+        mock_env = MagicMock()
+        mock_workspace.return_value.get_active_environment.return_value = mock_env
+        mock_workspace.return_value.get_environment.return_value = mock_env
+
+        mock_result = MagicMock()
+        mock_result.name = "test-node"
+        mock_result.source = "development"
+        mock_result.filesystem_action = "none"  # Untrack doesn't touch filesystem
+        mock_env.remove_node.return_value = mock_result
+        mock_env.name = "test-env"
+
+        # Create command handler
+        cmd = EnvironmentCommands()
+
+        # Create args with untrack flag
+        args = Namespace(
+            node_names=["test-node"],
+            dev=False,
+            untrack=True,  # The new flag
+            target_env=None
+        )
+
+        # Execute
+        with patch('builtins.print'):
+            cmd.node_remove(args)
+
+        # Verify remove_node was called with untrack_only=True
+        mock_env.remove_node.assert_called_once_with("test-node", untrack_only=True)
+
+    @patch('comfygit_cli.env_commands.get_workspace_or_exit')
+    def test_untrack_flag_defaults_to_false(self, mock_workspace):
+        """Test that untrack defaults to False for normal removal."""
+        # Setup mocks
+        mock_env = MagicMock()
+        mock_workspace.return_value.get_active_environment.return_value = mock_env
+        mock_workspace.return_value.get_environment.return_value = mock_env
+
+        mock_result = MagicMock()
+        mock_result.name = "test-node"
+        mock_result.source = "registry"
+        mock_result.filesystem_action = "deleted"
+        mock_env.remove_node.return_value = mock_result
+        mock_env.name = "test-env"
+
+        # Create command handler
+        cmd = EnvironmentCommands()
+
+        # Create args without untrack flag
+        args = Namespace(
+            node_names=["test-node"],
+            dev=False,
+            untrack=False,
+            target_env=None
+        )
+
+        # Execute
+        with patch('builtins.print'):
+            cmd.node_remove(args)
+
+        # Verify remove_node was called with untrack_only=False
+        mock_env.remove_node.assert_called_once_with("test-node", untrack_only=False)

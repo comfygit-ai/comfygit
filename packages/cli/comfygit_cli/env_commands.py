@@ -1,4 +1,4 @@
-"""Environment-specific commands for ComfyDock CLI - Simplified."""
+"""Environment-specific commands for ComfyGit CLI."""
 from __future__ import annotations
 
 import argparse
@@ -364,7 +364,11 @@ class EnvironmentCommands:
                 print(f"  • {len(status.comparison.missing_nodes)} nodes in pyproject.toml not installed")
 
             if status.comparison.extra_nodes:
-                print(f"  • {len(status.comparison.extra_nodes)} extra nodes on filesystem")
+                print(f"  • {len(status.comparison.extra_nodes)} untracked nodes on filesystem:")
+                for node_name in status.comparison.extra_nodes[:5]:
+                    print(f"    - {node_name}")
+                if len(status.comparison.extra_nodes) > 5:
+                    print(f"    ... and {len(status.comparison.extra_nodes) - 5} more")
 
             if status.comparison.version_mismatches:
                 print(f"  • {len(status.comparison.version_mismatches)} version mismatches")
@@ -518,7 +522,20 @@ class EnvironmentCommands:
 
         # Environment drift only (no workflow issues)
         if not status.comparison.is_synced:
-            suggestions.append("Run: cg repair")
+            # If only extra nodes, suggest tracking them as dev nodes
+            if status.comparison.extra_nodes and not status.comparison.missing_nodes and not status.comparison.version_mismatches and status.comparison.packages_in_sync:
+                if len(status.comparison.extra_nodes) == 1:
+                    node_name = status.comparison.extra_nodes[0]
+                    suggestions.append(f"Track as dev node: cg node add {node_name} --dev")
+                else:
+                    suggestions.append("Track as dev nodes:")
+                    for node_name in status.comparison.extra_nodes[:3]:
+                        suggestions.append(f"  cg node add {node_name} --dev")
+                    if len(status.comparison.extra_nodes) > 3:
+                        suggestions.append(f"  ... and {len(status.comparison.extra_nodes) - 3} more")
+                suggestions.append("Or remove untracked: cg repair")
+            else:
+                suggestions.append("Run: cg repair")
             print("\n💡 Next:")
             for s in suggestions:
                 print(f"  {s}")
@@ -849,12 +866,16 @@ class EnvironmentCommands:
 
         # Single node mode (original behavior)
         node_name = args.node_names[0]
+        untrack_only = getattr(args, 'untrack', False)
 
-        print(f"🗑 Removing node: {node_name}")
+        if untrack_only:
+            print(f"🔓 Untracking node: {node_name}")
+        else:
+            print(f"🗑 Removing node: {node_name}")
 
         # Remove the node (handles filesystem imperatively)
         try:
-            result = env.remove_node(node_name)
+            result = env.remove_node(node_name, untrack_only=untrack_only)
         except Exception as e:
             if logger:
                 logger.error(f"Node remove failed for '{node_name}': {e}", exc_info=True)
@@ -863,7 +884,11 @@ class EnvironmentCommands:
             sys.exit(1)
 
         # Render result based on node type and action
-        if result.source == "development":
+        if result.filesystem_action == "none":
+            # Untrack mode - no filesystem changes
+            print(f"✓ Node '{result.name}' removed from tracking")
+            print("   (filesystem unchanged)")
+        elif result.source == "development":
             if result.filesystem_action == "disabled":
                 print(f"ℹ️  Development node '{result.name}' removed from tracking")
                 print(f"   Files preserved at: custom_nodes/{result.name}.disabled/")

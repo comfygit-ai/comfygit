@@ -1,4 +1,4 @@
-"""Environment-specific logging for ComfyDock."""
+"""Environment-specific logging for ComfyGit."""
 
 import logging
 import os
@@ -35,7 +35,7 @@ class EnvironmentLogger:
         """Set the workspace path for all environment loggers.
         
         Args:
-            workspace_path: Path to ComfyDock workspace
+            workspace_path: Path to ComfyGit workspace
         """
         cls._workspace_path = workspace_path
 
@@ -65,7 +65,7 @@ class EnvironmentLogger:
         log_dir.mkdir(parents=True, exist_ok=True)
 
         # Check if compressed logging is enabled via env var
-        enable_compressed = os.environ.get('COMFYDOCK_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
+        enable_compressed = os.environ.get('COMFYGIT_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
 
         if enable_compressed:
             # Dual-output handler (full.log + compressed.log)
@@ -244,7 +244,7 @@ class WorkspaceLogger:
         """Set the workspace path for workspace logging.
         
         Args:
-            workspace_path: Path to ComfyDock workspace
+            workspace_path: Path to ComfyGit workspace
         """
         cls._workspace_path = workspace_path
 
@@ -271,7 +271,7 @@ class WorkspaceLogger:
         log_dir.mkdir(parents=True, exist_ok=True)
 
         # Check if compressed logging is enabled via env var
-        enable_compressed = os.environ.get('COMFYDOCK_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
+        enable_compressed = os.environ.get('COMFYGIT_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
 
         if enable_compressed:
             # Dual-output handler (full.log + compressed.log)

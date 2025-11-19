@@ -1,6 +1,6 @@
-# ComfyDock Monorepo - Codebase Map
+# ComfyGit Monorepo - Codebase Map
 
-ComfyDock is a Python monorepo using uv workspaces for unified environment management for ComfyUI. This map describes the root-level structure; see individual package maps for internal architecture.
+ComfyGit is a Python monorepo using uv workspaces for unified environment management for ComfyUI. This map describes the root-level structure; see individual package maps for internal architecture.
 
 ## Root Configuration & Tooling
 
@@ -15,14 +15,14 @@ ComfyDock is a Python monorepo using uv workspaces for unified environment manag
 Coordinated Python packages built and tested together:
 
 ### Core Package (`packages/core/`)
-ComfyDock Core library providing environment, node, model, and workflow management APIs. Designed as a reusable library without UI coupling. Depends on: aiohttp, requests, pyyaml, tomlkit, uv, blake3, psutil. See `packages/core/docs/codebase-map.md` for internal structure.
+ComfyGit Core library providing environment, node, model, and workflow management APIs. Designed as a reusable library without UI coupling. Depends on: aiohttp, requests, pyyaml, tomlkit, uv, blake3, psutil. See `packages/core/docs/codebase-map.md` for internal structure.
 
 ### CLI Package (`packages/cli/`)
-Command-line interface for ComfyDock users. Provides `comfydock` and `cfd` entry points for interactive environment and node management. Depends on comfydock-core. See package directory for internal implementation details.
+Command-line interface for ComfyGit users. Provides `comfygit` and `cfd` entry points for interactive environment and node management. Depends on comfygit-core. See package directory for internal implementation details.
 
 ## Documentation (`docs/`)
 
-- **comfydock-docs/** - User-facing documentation site built with MkDocs. Contains installation guides, usage documentation, troubleshooting, and best practices for end users.
+- **comfygit-docs/** - User-facing documentation site built with MkDocs. Contains installation guides, usage documentation, troubleshooting, and best practices for end users.
 
 ## Development Environment (`dev/`)
 
@@ -60,12 +60,12 @@ Current workspace version: 1.0.0 (all packages aligned to major version 1.x.x)
 ## Repository Structure Summary
 
 ```
-comfydock/
+comfygit/
 ├── packages/                      # Coordinated Python packages
 │   ├── core/                      # Core library (reusable, no UI)
 │   └── cli/                       # CLI interface
 ├── docs/
-│   └── comfydock-docs/           # User documentation site
+│   └── comfygit-docs/            # User documentation site
 ├── dev/
 │   └── docker-compose.yml        # Dev environment setup
 ├── pyproject.toml                # Workspace root config
@@ -77,8 +77,8 @@ comfydock/
 
 ## Key Entry Points
 
-- **CLI**: Run `comfydock` or `cfd` command after installation
-- **Core Library**: Import from `comfydock_core` for programmatic access
+- **CLI**: Run `comfygit` or `cfd` command after installation
+- **Core Library**: Import from `comfygit_core` for programmatic access
 - **Development**: See CLAUDE.md for detailed instructions
 
 ## Architecture Notes

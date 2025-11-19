@@ -759,8 +759,12 @@ class Environment:
 
         return success_count, failed
 
-    def remove_node(self, identifier: str) -> NodeRemovalResult:
+    def remove_node(self, identifier: str, untrack_only: bool = False) -> NodeRemovalResult:
         """Remove a custom node.
+
+        Args:
+            identifier: Node identifier or name
+            untrack_only: If True, only remove from pyproject.toml without touching filesystem
 
         Returns:
             NodeRemovalResult: Details about the removal
@@ -768,7 +772,7 @@ class Environment:
         Raises:
             CDNodeNotFoundError: If node not found
         """
-        return self.node_manager.remove_node(identifier)
+        return self.node_manager.remove_node(identifier, untrack_only=untrack_only)
 
     def remove_nodes_with_progress(
         self,
@@ -1414,6 +1418,25 @@ class Environment:
             else:
                 logger.warning(f"Could not determine commit SHA for ComfyUI {spec.version}")
 
+        # Extract builtin nodes for imported environment
+        from ..utils.builtin_extractor import extract_comfyui_builtins
+
+        try:
+            if callbacks:
+                callbacks.on_phase("extract_builtins", "Extracting builtin nodes...")
+
+            builtins_path = self.cec_path / "comfyui_builtins.json"
+
+            # Check if already exists (from exported bundle)
+            if builtins_path.exists():
+                logger.debug("Builtin config already exists from export, skipping extraction")
+            else:
+                extract_comfyui_builtins(self.comfyui_path, builtins_path)
+                logger.info(f"Extracted builtin nodes to {builtins_path.name}")
+        except Exception as e:
+            logger.warning(f"Failed to extract builtin nodes: {e}")
+            logger.warning("Workflow resolution will fall back to global static config")
+
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = self.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
@@ -1487,6 +1510,16 @@ class Environment:
             if first_version:
                 backend = extract_backend_from_version(first_version)
                 logger.info(f"Detected PyTorch backend from installed version: {backend}")
+
+                # Store resolved backend (never "auto")
+                config = self.pyproject.load()
+                if "tool" not in config:
+                    config["tool"] = {}
+                if "comfygit" not in config["tool"]:
+                    config["tool"]["comfygit"] = {}
+                config["tool"]["comfygit"]["torch_backend"] = backend if backend else "cpu"
+                self.pyproject.save(config)
+                logger.info(f"Stored resolved torch_backend: {backend if backend else 'cpu'}")
 
                 if backend:
                     # Add new index for detected backend

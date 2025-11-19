@@ -46,7 +46,7 @@ class TestEnvironmentLogStructure:
         from comfygit_cli.logging.environment_logger import EnvironmentLogger
 
         # Ensure compression is disabled
-        os.environ.pop('COMFYDOCK_DEV_COMPRESS_LOGS', None)
+        os.environ.pop('COMFYGIT_DEV_COMPRESS_LOGS', None)
 
         EnvironmentLogger.set_workspace_path(mock_workspace)
 
@@ -66,7 +66,7 @@ class TestEnvironmentLogStructure:
         from comfygit_cli.logging.environment_logger import EnvironmentLogger
 
         # Enable compression
-        os.environ['COMFYDOCK_DEV_COMPRESS_LOGS'] = 'true'
+        os.environ['COMFYGIT_DEV_COMPRESS_LOGS'] = 'true'
 
         try:
             EnvironmentLogger.set_workspace_path(mock_workspace)
@@ -82,7 +82,7 @@ class TestEnvironmentLogStructure:
             assert full_log.exists()
             assert compressed_log.exists(), "compressed.log should exist with env var"
         finally:
-            os.environ.pop('COMFYDOCK_DEV_COMPRESS_LOGS', None)
+            os.environ.pop('COMFYGIT_DEV_COMPRESS_LOGS', None)
 
 
 class TestWorkspaceLogStructure:
@@ -109,7 +109,7 @@ class TestWorkspaceLogStructure:
         """Without env var, workspace should create only full.log."""
         from comfygit_cli.logging.environment_logger import WorkspaceLogger
 
-        os.environ.pop('COMFYDOCK_DEV_COMPRESS_LOGS', None)
+        os.environ.pop('COMFYGIT_DEV_COMPRESS_LOGS', None)
 
         WorkspaceLogger.set_workspace_path(mock_workspace)
 
@@ -128,7 +128,7 @@ class TestWorkspaceLogStructure:
         """With env var, workspace should create both full.log and compressed.log."""
         from comfygit_cli.logging.environment_logger import WorkspaceLogger
 
-        os.environ['COMFYDOCK_DEV_COMPRESS_LOGS'] = 'true'
+        os.environ['COMFYGIT_DEV_COMPRESS_LOGS'] = 'true'
 
         try:
             WorkspaceLogger.set_workspace_path(mock_workspace)
@@ -144,7 +144,7 @@ class TestWorkspaceLogStructure:
             assert full_log.exists()
             assert compressed_log.exists(), "compressed.log should exist with env var"
         finally:
-            os.environ.pop('COMFYDOCK_DEV_COMPRESS_LOGS', None)
+            os.environ.pop('COMFYGIT_DEV_COMPRESS_LOGS', None)
 
 
 class TestCompressedLogRotation:
@@ -155,7 +155,7 @@ class TestCompressedLogRotation:
         import logging
         from comfygit_cli.logging.compressed_handler import CompressedDualHandler
 
-        os.environ['COMFYDOCK_DEV_COMPRESS_LOGS'] = 'true'
+        os.environ['COMFYGIT_DEV_COMPRESS_LOGS'] = 'true'
 
         try:
             log_dir = mock_workspace / "logs" / "test-rotation"
@@ -196,4 +196,4 @@ class TestCompressedLogRotation:
             assert compressed_log_backup.exists(), "compressed.log.1 should exist after rotation"
 
         finally:
-            os.environ.pop('COMFYDOCK_DEV_COMPRESS_LOGS', None)
+            os.environ.pop('COMFYGIT_DEV_COMPRESS_LOGS', None)

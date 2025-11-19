@@ -105,12 +105,12 @@ git push origin main
 
 ### Environment Variables
 
-- `COMFYDOCK_HOME` - ComfyDock workspace location (default: `~/.comfydock`)
+- `COMFYGIT_HOME` - ComfyDock workspace location (default: `~/.comfydock`)
 
 ### How It Works
 
-1. Reads `$COMFYDOCK_HOME/.metadata/workspace.json` to get active environment
-2. Validates environment exists at `$COMFYDOCK_HOME/environments/<env>/.cec`
+1. Reads `$COMFYGIT_HOME/.metadata/workspace.json` to get active environment
+2. Validates environment exists at `$COMFYGIT_HOME/environments/<env>/.cec`
 3. Checks for uncommitted changes in `.cec/` (warns but continues if user confirms)
 4. Creates target directory `<examples-repo>/<env-name>` if needed
 5. Syncs only whitelisted files/directories from `.cec/`
@@ -153,9 +153,9 @@ comfydock activate <environment-name>
 
 **"No workspace.json found"**
 ```bash
-# Check COMFYDOCK_HOME is correct
-echo $COMFYDOCK_HOME
-ls $COMFYDOCK_HOME/.metadata/workspace.json
+# Check COMFYGIT_HOME is correct
+echo $COMFYGIT_HOME
+ls $COMFYGIT_HOME/.metadata/workspace.json
 ```
 
 **"jq not found" (not an error, just FYI)**

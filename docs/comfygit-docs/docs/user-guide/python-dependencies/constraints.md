@@ -278,10 +278,7 @@ Two nodes require incompatible package versions:
 # Check what's conflicting
 cg node add node-b
 
-# Output:
-# ✗ Dependency conflict:
-#   torch==2.0.0 (required by node-a)
-#   conflicts with torch>=2.1.0 (required by node-b)
+# uv shows the conflict in its native output format
 
 # Add constraint to force compatible version
 cg constraint add "torch==2.1.0"

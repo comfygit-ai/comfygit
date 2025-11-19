@@ -444,12 +444,16 @@ class NodeManager:
         logger.info(f"Successfully added node '{node_package.name}'")
         return node_package.node_info
 
-    def remove_node(self, identifier: str):
+    def remove_node(self, identifier: str, untrack_only: bool = False):
         """Remove a custom node by identifier or name (case-insensitive).
 
         Handles filesystem changes imperatively based on node type:
         - Development nodes: Renamed to .disabled suffix (preserved)
         - Registry/Git nodes: Deleted from filesystem (cached globally)
+
+        Args:
+            identifier: Node identifier or name
+            untrack_only: If True, only remove from pyproject.toml without touching filesystem
 
         Returns:
             NodeRemovalResult: Details about the removal
@@ -486,9 +490,9 @@ class NodeManager:
         is_development = removed_node.source == 'development'
         node_path = self.custom_nodes_path / removed_node.name
 
-        # Handle filesystem imperatively
+        # Handle filesystem imperatively (unless untrack_only)
         filesystem_action = "none"
-        if node_path.exists():
+        if not untrack_only and node_path.exists():
             if is_development:
                 # Preserve development node with .disabled suffix
                 disabled_path = self.custom_nodes_path / f"{removed_node.name}.disabled"

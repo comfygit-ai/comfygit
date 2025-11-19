@@ -115,6 +115,17 @@ class EnvironmentFactory:
             else:
                 logger.warning(f"Could not determine commit SHA for ComfyUI {version_type} {version_to_clone}")
 
+        # Extract builtin nodes from ComfyUI installation
+        from ..utils.builtin_extractor import extract_comfyui_builtins
+
+        try:
+            builtins_path = env.cec_path / "comfyui_builtins.json"
+            extract_comfyui_builtins(env.comfyui_path, builtins_path)
+            logger.info(f"Extracted builtin nodes to {builtins_path.name}")
+        except Exception as e:
+            logger.warning(f"Failed to extract builtin nodes: {e}")
+            logger.warning("Workflow resolution will fall back to global static config")
+
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = env.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
