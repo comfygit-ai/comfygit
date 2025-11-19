@@ -65,7 +65,7 @@ class EnvironmentLogger:
         log_dir.mkdir(parents=True, exist_ok=True)
 
         # Check if compressed logging is enabled via env var
-        enable_compressed = os.environ.get('COMFYDOCK_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
+        enable_compressed = os.environ.get('COMFYGIT_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
 
         if enable_compressed:
             # Dual-output handler (full.log + compressed.log)
@@ -271,7 +271,7 @@ class WorkspaceLogger:
         log_dir.mkdir(parents=True, exist_ok=True)
 
         # Check if compressed logging is enabled via env var
-        enable_compressed = os.environ.get('COMFYDOCK_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
+        enable_compressed = os.environ.get('COMFYGIT_DEV_COMPRESS_LOGS', '').lower() in ('true', '1', 'yes')
 
         if enable_compressed:
             # Dual-output handler (full.log + compressed.log)

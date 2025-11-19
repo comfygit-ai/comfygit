@@ -52,12 +52,12 @@ if [ -z "$EXAMPLES_REPO" ]; then
     exit 1
 fi
 
-# Detect COMFYDOCK_HOME
-COMFYDOCK_HOME="${COMFYDOCK_HOME:-$HOME/comfydock}"
-echo "📂 ComfyDock workspace: $COMFYDOCK_HOME"
+# Detect COMFYGIT_HOME
+COMFYGIT_HOME="${COMFYGIT_HOME:-$HOME/comfydock}"
+echo "📂 ComfyDock workspace: $COMFYGIT_HOME"
 
 # Read workspace.json to get active environment
-WORKSPACE_FILE="$COMFYDOCK_HOME/.metadata/workspace.json"
+WORKSPACE_FILE="$COMFYGIT_HOME/.metadata/workspace.json"
 if [ ! -f "$WORKSPACE_FILE" ]; then
     echo "❌ No workspace.json found at $WORKSPACE_FILE"
     echo "   Is this a valid ComfyDock workspace?"
@@ -81,7 +81,7 @@ fi
 echo "✓ Active environment: $ACTIVE_ENV"
 
 # Validate environment exists
-ENV_PATH="$COMFYDOCK_HOME/environments/$ACTIVE_ENV"
+ENV_PATH="$COMFYGIT_HOME/environments/$ACTIVE_ENV"
 if [ ! -d "$ENV_PATH" ]; then
     echo "❌ Environment directory not found: $ENV_PATH"
     exit 1

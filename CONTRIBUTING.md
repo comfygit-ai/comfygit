@@ -177,21 +177,20 @@ Use conventional commits style:
 For CLI testing, use a dedicated test workspace:
 
 ```bash
-export COMFYDOCK_HOME=/path/to/test/workspace
+export COMFYGIT_HOME=/path/to/test/workspace
 cfd init
 # ... test commands ...
 ```
 
 Or use the existing one in core:
 ```bash
-export COMFYDOCK_HOME=/home/user/ComfyDock/packages/core/.comfydock_workspace
+export COMFYGIT_HOME=/home/user/ComfyGit/packages/core/.comfygit_workspace
 ```
 
 ### Debugging
 
 - Use `--verbose` flag: `cfd --verbose node add ...`
 - Check logs: `cfd logs --level ERROR`
-- Enable debug logging: Set `COMFYDOCK_LOG_LEVEL=DEBUG`
 
 ### Common Tasks
 
