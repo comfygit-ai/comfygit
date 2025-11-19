@@ -39,43 +39,25 @@ By default, ComfyGit **prevents** installing nodes that would break your environ
 
 ## Reading conflict error messages
 
-### Basic conflict error
+When a dependency conflict occurs, ComfyGit displays uv's native resolution output. This shows exactly which packages conflict and why, with the full dependency chain.
+
+Example output:
 
 ```
-✗ Cannot add node 'problematic-node'
-  Dependency conflict detected
+✗ Dependency conflict detected
 
-  torch==2.0.0 (required by problematic-node)
-  conflicts with torch>=2.1.0 (required by existing-node)
+  × No solution found when resolving dependencies:
+  ╰─▶ Because node-a depends on torch==2.0.0 and node-b depends on torch>=2.1.0,
+      we can conclude that node-a and node-b are incompatible.
+      And because you require node-a and node-b, we can conclude that
+      your requirements are unsatisfiable.
 ```
 
-This tells you:
+The uv resolver provides detailed information about:
 
-- **What conflicts**: `torch` versions
-- **Who needs what**: Each node's requirement
-- **Where it comes from**: Which nodes require which versions
-
-### Detailed conflict error
-
-More complex conflicts show:
-
-```
-✗ Cannot add node 'complex-node'
-  opencv-python conflicts with opencv-python-headless
-  pillow>=9.0 conflicts with pillow<9.0
-
-Suggested actions:
-  1. Update existing node to compatible version
-     → cg node update existing-node
-
-  2. Remove conflicting node
-     → cg node remove existing-node
-
-  3. Add with conflict override (advanced)
-     → cg node add complex-node --no-test
-```
-
-ComfyGit suggests actionable steps based on the conflict type.
+- Which packages have conflicting requirements
+- The full dependency chain showing why each version is required
+- Which combination of packages cannot be satisfied together
 
 ## Common conflict types
 
