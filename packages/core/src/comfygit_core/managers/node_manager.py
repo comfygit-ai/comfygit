@@ -588,10 +588,12 @@ class NodeManager:
                 logger.warning(f"Untracked node found: {node_name}")
                 logger.warning(f"  Run 'comfygit node add {node_name} --dev' to track it")
 
-        # Install missing registry/git nodes
+        # Install missing registry/git nodes (skip if .disabled version exists)
         nodes_to_install = [
             node_info for node_info in expected_nodes.values()
-            if node_info.source != 'development' and not (self.custom_nodes_path / node_info.name).exists()
+            if node_info.source != 'development'
+            and not (self.custom_nodes_path / node_info.name).exists()
+            and not (self.custom_nodes_path / f"{node_info.name}.disabled").exists()
         ]
 
         if callbacks and callbacks.on_batch_start and nodes_to_install:
