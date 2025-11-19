@@ -189,22 +189,31 @@ class EnvironmentCommands:
     @with_env_logging("env run")
     def run(self, args: argparse.Namespace) -> None:
         """Run ComfyUI in the specified environment."""
+        RESTART_EXIT_CODE = 42
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
+        no_sync = getattr(args, 'no_sync', False)
 
-        # Get branch info
         current_branch = env.get_current_branch()
         branch_display = f" (on {current_branch})" if current_branch else " (detached HEAD)"
 
-        print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
-        if comfyui_args:
-            print(f"   Arguments: {' '.join(comfyui_args)}")
+        while True:
+            # Sync before running (unless --no-sync)
+            if not no_sync:
+                print(f"🔄 Syncing environment: {env.name}")
+                env.sync()
 
-        # Run ComfyUI
-        result = env.run(comfyui_args)
+            print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
+            if comfyui_args:
+                print(f"   Arguments: {' '.join(comfyui_args)}")
 
-        # Exit with ComfyUI's exit code
-        sys.exit(result.returncode)
+            result = env.run(comfyui_args)
+
+            if result.returncode == RESTART_EXIT_CODE:
+                print("\n🔄 Restart requested, syncing dependencies...\n")
+                continue
+
+            sys.exit(result.returncode)
 
     def manifest(self, args: argparse.Namespace) -> None:
         """Show environment manifest (pyproject.toml configuration)."""
