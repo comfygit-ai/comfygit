@@ -508,6 +508,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     node_remove_parser = node_subparsers.add_parser("remove", help="Remove custom node(s)")
     node_remove_parser.add_argument("node_names", nargs="+", help="Node registry ID(s) or name(s)").completer = installed_node_completer  # type: ignore[attr-defined]
     node_remove_parser.add_argument("--dev", action="store_true", help="Remove development node specifically")
+    node_remove_parser.add_argument("--untrack", action="store_true", help="Only remove from tracking, leave filesystem unchanged")
     node_remove_parser.set_defaults(func=env_cmds.node_remove)
 
     # node prune

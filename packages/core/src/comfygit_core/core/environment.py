@@ -759,8 +759,12 @@ class Environment:
 
         return success_count, failed
 
-    def remove_node(self, identifier: str) -> NodeRemovalResult:
+    def remove_node(self, identifier: str, untrack_only: bool = False) -> NodeRemovalResult:
         """Remove a custom node.
+
+        Args:
+            identifier: Node identifier or name
+            untrack_only: If True, only remove from pyproject.toml without touching filesystem
 
         Returns:
             NodeRemovalResult: Details about the removal
@@ -768,7 +772,7 @@ class Environment:
         Raises:
             CDNodeNotFoundError: If node not found
         """
-        return self.node_manager.remove_node(identifier)
+        return self.node_manager.remove_node(identifier, untrack_only=untrack_only)
 
     def remove_nodes_with_progress(
         self,
