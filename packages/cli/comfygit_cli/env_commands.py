@@ -374,10 +374,12 @@ class EnvironmentCommands:
 
             if status.comparison.extra_nodes:
                 print(f"  • {len(status.comparison.extra_nodes)} untracked nodes on filesystem:")
-                for node_name in status.comparison.extra_nodes[:5]:
+                limit = None if args.verbose else 5
+                nodes_to_show = status.comparison.extra_nodes if limit is None else status.comparison.extra_nodes[:limit]
+                for node_name in nodes_to_show:
                     print(f"    - {node_name}")
-                if len(status.comparison.extra_nodes) > 5:
-                    print(f"    ... and {len(status.comparison.extra_nodes) - 5} more")
+                if limit and len(status.comparison.extra_nodes) > limit:
+                    print(f"    ... and {len(status.comparison.extra_nodes) - limit} more")
 
             if status.comparison.version_mismatches:
                 print(f"  • {len(status.comparison.version_mismatches)} version mismatches")
@@ -401,19 +403,23 @@ class EnvironmentCommands:
 
             if has_specific_changes:
                 print("\n📦 Uncommitted changes:")
+                limit = None if args.verbose else 3
+
                 if status.git.nodes_added:
-                    for node in status.git.nodes_added[:3]:
+                    nodes_to_show = status.git.nodes_added if limit is None else status.git.nodes_added[:limit]
+                    for node in nodes_to_show:
                         name = node['name'] if isinstance(node, dict) else node
                         print(f"  • Added node: {name}")
-                    if len(status.git.nodes_added) > 3:
-                        print(f"  • ... and {len(status.git.nodes_added) - 3} more nodes")
+                    if limit and len(status.git.nodes_added) > limit:
+                        print(f"  • ... and {len(status.git.nodes_added) - limit} more nodes")
 
                 if status.git.nodes_removed:
-                    for node in status.git.nodes_removed[:3]:
+                    nodes_to_show = status.git.nodes_removed if limit is None else status.git.nodes_removed[:limit]
+                    for node in nodes_to_show:
                         name = node['name'] if isinstance(node, dict) else node
                         print(f"  • Removed node: {name}")
-                    if len(status.git.nodes_removed) > 3:
-                        print(f"  • ... and {len(status.git.nodes_removed) - 3} more nodes")
+                    if limit and len(status.git.nodes_removed) > limit:
+                        print(f"  • ... and {len(status.git.nodes_removed) - limit} more nodes")
 
                 if status.git.workflow_changes:
                     count = len(status.git.workflow_changes)
@@ -434,10 +440,13 @@ class EnvironmentCommands:
         dev_drift = env.check_development_node_drift()
         if dev_drift:
             print("\n🔧 Dev node updates available:")
-            for node_name in list(dev_drift.keys())[:3]:
+            limit = None if args.verbose else 3
+            keys = list(dev_drift.keys())
+            keys_to_show = keys if limit is None else keys[:limit]
+            for node_name in keys_to_show:
                 print(f"  • {node_name}")
-            if len(dev_drift) > 3:
-                print(f"  • ... and {len(dev_drift) - 3} more")
+            if limit and len(keys) > limit:
+                print(f"  • ... and {len(keys) - limit} more")
 
         # Suggested actions - smart and contextual
         self._show_smart_suggestions(status, dev_drift)
