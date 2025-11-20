@@ -385,6 +385,12 @@ class EnvironmentCommands:
             if not status.comparison.packages_in_sync:
                 print("  • Python packages out of sync")
 
+        # Disabled nodes (informational, not a warning)
+        if status.comparison.disabled_nodes:
+            print("\n📴 Disabled nodes:")
+            for node_name in status.comparison.disabled_nodes:
+                print(f"  • {node_name}")
+
         # Git changes
         if status.git.has_changes:
             has_specific_changes = (

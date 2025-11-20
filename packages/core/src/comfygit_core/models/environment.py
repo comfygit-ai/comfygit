@@ -55,6 +55,7 @@ class EnvironmentComparison:
 
     missing_nodes: list[str] = field(default_factory=list)
     extra_nodes: list[str] = field(default_factory=list)
+    disabled_nodes: list[str] = field(default_factory=list)
     version_mismatches: list[dict] = field(
         default_factory=list
     )  # {name, expected, actual}

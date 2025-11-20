@@ -115,20 +115,37 @@ class StatusScanner:
             if not node_dir.is_dir() or node_dir.name in skip_dirs:
                 continue
 
-            # Skip hidden directories and disabled nodes
-            if node_dir.name.startswith(".") or node_dir.name.endswith(".disabled"):
+            # Skip hidden directories
+            if node_dir.name.startswith("."):
+                continue
+
+            # Skip timestamped backup disabled nodes (e.g., MyNode.1700000000.disabled)
+            # These are internal implementation details
+            if node_dir.name.endswith(".disabled"):
+                parts = node_dir.name[:-9].split(".")  # Remove .disabled suffix
+                if len(parts) > 1 and parts[-1].isdigit():
+                    continue  # Skip timestamped backups
+
+            # Determine if disabled and extract base name
+            is_disabled = node_dir.name.endswith(".disabled")
+            base_name = node_dir.name[:-9] if is_disabled else node_dir.name
+
+            # Skip if we already have an enabled version (enabled takes precedence)
+            if base_name in nodes and not nodes[base_name].disabled:
                 continue
 
             try:
                 node_state = self._scan_single_node(node_dir)
-                nodes[node_dir.name] = node_state
+                node_state.name = base_name  # Use normalized name
+                node_state.disabled = is_disabled
+                nodes[base_name] = node_state
             except Exception as e:
                 logger.debug(f"Error scanning node {node_dir.name}: {e}")
                 # Still record it as present but with minimal info
-                nodes[node_dir.name] = NodeState(
-                    name=node_dir.name,
+                nodes[base_name] = NodeState(
+                    name=base_name,
                     path=node_dir,
-                    disabled=node_dir.name.endswith(".disabled"),
+                    disabled=is_disabled,
                 )
 
         return nodes
@@ -300,6 +317,14 @@ class StatusScanner:
         current_nodes = set(current.custom_nodes.keys())
         expected_nodes = set(expected.custom_nodes.keys())
 
+        # Identify disabled nodes (in both current and expected, but disabled on disk)
+        disabled_nodes = []
+        for name in current_nodes & expected_nodes:
+            if current.custom_nodes[name].disabled:
+                disabled_nodes.append(name)
+        comparison.disabled_nodes = disabled_nodes
+
+        # Missing nodes: expected but not in current (disabled nodes ARE in current, so not missing)
         comparison.missing_nodes = list(expected_nodes - current_nodes)
         comparison.extra_nodes = list(current_nodes - expected_nodes)
 
