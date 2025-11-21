@@ -1460,3 +1460,298 @@ class GlobalCommands:
             print("  Cancelled")
         else:
             print("  Invalid choice")
+
+    # === Orchestrator Management ===
+
+    def orch_status(self, args: argparse.Namespace) -> None:
+        """Show orchestrator status."""
+        from .utils.orchestrator import (
+            is_orchestrator_running,
+            read_switch_status,
+            get_orchestrator_uptime,
+            format_uptime
+        )
+
+        metadata_dir = self.workspace.path / ".metadata"
+
+        # Check orchestrator status
+        is_running, pid = is_orchestrator_running(metadata_dir)
+
+        if args.json:
+            # JSON output mode
+            import json
+            status_data = {
+                "running": is_running,
+                "pid": pid,
+            }
+
+            if is_running:
+                uptime = get_orchestrator_uptime(metadata_dir, pid)
+                if uptime:
+                    status_data["uptime_seconds"] = int(uptime)
+
+                # Check switch status
+                switch_status = read_switch_status(metadata_dir)
+                if switch_status:
+                    status_data["switch"] = switch_status
+
+            print(json.dumps(status_data, indent=2))
+            return
+
+        # Human-readable output
+        print("\nOrchestrator Status")
+        print("━" * 70)
+
+        if not is_running:
+            if pid:
+                print(f"Running:        No (stale PID {pid})")
+            else:
+                print("Running:        No")
+            print("\nOrchestrator is not running.")
+            print("Start ComfyUI to launch the orchestrator automatically.")
+            print("━" * 70)
+            return
+
+        print(f"Running:        Yes (PID {pid})")
+
+        # Show uptime
+        uptime = get_orchestrator_uptime(metadata_dir, pid)
+        if uptime:
+            print(f"Uptime:         {format_uptime(uptime)}")
+
+        # Show control port
+        control_port_file = metadata_dir / ".control_port"
+        if control_port_file.exists():
+            try:
+                port = control_port_file.read_text().strip()
+                print(f"Control Port:   {port}")
+            except IOError:
+                pass
+
+        # Check switch status
+        switch_status = read_switch_status(metadata_dir)
+        if switch_status:
+            state = switch_status.get("state", "unknown")
+            progress = switch_status.get("progress", 0)
+            message = switch_status.get("message", "")
+            target_env = switch_status.get("target_env", "")
+            source_env = switch_status.get("source_env", "")
+
+            print(f"\nSwitch Status:  {state.replace('_', ' ').title()} ({progress}%)")
+            if message:
+                print(f"                {message}")
+            if source_env:
+                print(f"Source Env:     {source_env}")
+            if target_env:
+                print(f"Target Env:     {target_env}")
+        else:
+            print("\nSwitch Status:  Idle")
+
+        print("━" * 70)
+
+    def orch_restart(self, args: argparse.Namespace) -> None:
+        """Request orchestrator to restart ComfyUI."""
+        import time
+        from .utils.orchestrator import is_orchestrator_running, safe_write_command
+
+        metadata_dir = self.workspace.path / ".metadata"
+
+        # Check if orchestrator is running
+        is_running, pid = is_orchestrator_running(metadata_dir)
+
+        if not is_running:
+            print("✗ Orchestrator is not running")
+            print("  Start ComfyUI to launch the orchestrator")
+            sys.exit(1)
+
+        # Send restart command
+        print(f"✓ Sending restart command to orchestrator (PID {pid})")
+        safe_write_command(metadata_dir, {
+            "command": "restart",
+            "timestamp": time.time()
+        })
+
+        print("  ComfyUI will restart within 500ms...")
+
+        if args.wait:
+            print("\n  Waiting for restart to complete...")
+            time.sleep(2)  # Give orchestrator time to process
+
+            # Wait for restart (check if PID changes or process restarts)
+            for _ in range(30):  # 15 second timeout
+                time.sleep(0.5)
+                is_running, new_pid = is_orchestrator_running(metadata_dir)
+                if is_running:
+                    print(f"✓ Orchestrator restarted (PID {new_pid})")
+                    return
+
+            print("⚠️  Restart may still be in progress")
+
+    def orch_kill(self, args: argparse.Namespace) -> None:
+        """Shutdown orchestrator."""
+        import time
+        from .utils.orchestrator import (
+            is_orchestrator_running,
+            safe_write_command,
+            kill_orchestrator_process,
+            read_switch_status
+        )
+
+        metadata_dir = self.workspace.path / ".metadata"
+
+        # Check if orchestrator is running
+        is_running, pid = is_orchestrator_running(metadata_dir)
+
+        if not is_running:
+            print("✗ Orchestrator is not running")
+            if pid:
+                print(f"  (stale PID file exists: {pid})")
+            return
+
+        # Check if mid-switch (warn user)
+        switch_status = read_switch_status(metadata_dir)
+        if switch_status:
+            state = switch_status.get("state", "")
+            if state not in ["complete", "failed", "aborted"]:
+                print(f"⚠️  Orchestrator is currently switching environments (state: {state})")
+                if not args.force:
+                    response = input("   Shutdown anyway? [y/N]: ").strip().lower()
+                    if response not in ['y', 'yes']:
+                        print("✗ Shutdown cancelled")
+                        return
+
+        if args.force:
+            # Force kill (SIGTERM then SIGKILL if needed)
+            print(f"✓ Force killing orchestrator (PID {pid})")
+            # Sends SIGTERM, waits 3s for cleanup, then SIGKILL if still alive
+            kill_orchestrator_process(pid, force=False)
+            print("✓ Orchestrator terminated")
+            print("\nNote: ComfyUI should have been shut down gracefully.")
+            print("  If still running, check with: ps aux | grep 'ComfyUI/main.py'")
+        else:
+            # Graceful shutdown via command
+            print(f"✓ Sending shutdown command to orchestrator (PID {pid})")
+            safe_write_command(metadata_dir, {
+                "command": "shutdown",
+                "timestamp": time.time()
+            })
+            print("  Orchestrator will exit within 500ms...")
+
+            # Wait for shutdown
+            time.sleep(1)
+            is_running, _ = is_orchestrator_running(metadata_dir)
+            if not is_running:
+                print("✓ Orchestrator shut down")
+            else:
+                print("⚠️  Orchestrator may still be shutting down")
+
+    def orch_clean(self, args: argparse.Namespace) -> None:
+        """Clean orchestrator state files."""
+        from .utils.orchestrator import (
+            is_orchestrator_running,
+            kill_orchestrator_process,
+            cleanup_orchestrator_state
+        )
+
+        metadata_dir = self.workspace.path / ".metadata"
+
+        # Check if orchestrator is running
+        is_running, pid = is_orchestrator_running(metadata_dir)
+
+        # Show what will be cleaned
+        files_to_show = [
+            ".orchestrator.pid",
+            ".control_port",
+            ".cmd",
+            ".switch_request.json",
+            ".switch_status.json",
+            ".switch.lock",
+            ".startup_state.json",
+            ".cmd.tmp.* (temp files)"
+        ]
+
+        if args.dry_run:
+            print("\n🧹 Files that would be cleaned:")
+            for filename in files_to_show:
+                filepath = metadata_dir / filename.split()[0]
+                if '*' in filename or filepath.exists():
+                    print(f"  • {filename}")
+            print("\nNote: workspace_config.json will be preserved")
+            return
+
+        # Confirm if orchestrator is running
+        if is_running and not args.force:
+            print(f"⚠️  Warning: Orchestrator is currently running (PID {pid})")
+            print("\nThis will forcefully clean orchestrator state.")
+            print("Files to remove:")
+            for filename in files_to_show:
+                print(f"  • {filename}")
+            print("\nNote: workspace_config.json will be preserved")
+
+            if args.kill:
+                print(f"\n⚠️  --kill flag: Will also terminate orchestrator process")
+
+            response = input("\nContinue? [y/N]: ").strip().lower()
+            if response not in ['y', 'yes']:
+                print("✗ Cleaning cancelled")
+                return
+
+        # Kill orchestrator if requested
+        if is_running and args.kill:
+            print(f"\n✓ Terminating orchestrator process {pid}")
+            print("  (giving it a chance to shut down ComfyUI gracefully...)")
+            # Use force=False to send SIGTERM first, allowing cleanup handlers to run
+            # Will still SIGKILL after 3s if process doesn't exit
+            kill_orchestrator_process(pid, force=False)
+
+        # Clean up state files
+        print("\n🧹 Cleaning orchestrator state...")
+        removed = cleanup_orchestrator_state(metadata_dir, preserve_config=True)
+
+        if removed:
+            for filename in removed:
+                print(f"  ✓ Removed {filename}")
+            print(f"\n✓ Cleaned {len(removed)} file(s)")
+        else:
+            print("  No files to clean")
+
+        print("\n✓ Orchestrator state cleaned")
+
+        # Helpful next steps
+        if args.kill:
+            print("\nNote: If ComfyUI is still running, you can find it with:")
+            print("  ps aux | grep 'ComfyUI/main.py'")
+            print("\nOr restart fresh with:")
+            print("  cg -e <env> run")
+        else:
+            print("\nYou can now:")
+            print("  • Run ComfyUI manually from an environment directory")
+            print("  • Start new orchestrator via ComfyUI startup")
+
+    def orch_logs(self, args: argparse.Namespace) -> None:
+        """Show orchestrator logs."""
+        import subprocess
+        from .utils.orchestrator import tail_log_file
+
+        metadata_dir = self.workspace.path / ".metadata"
+        log_file = metadata_dir / "orchestrator.log"
+
+        if not log_file.exists():
+            print("✗ No orchestrator log file found")
+            print(f"  Expected: {log_file}")
+            return
+
+        if args.follow:
+            # Use tail -f for live following
+            print(f"Following {log_file} (Ctrl+C to stop)\n")
+            try:
+                subprocess.run(["tail", "-f", str(log_file)])
+            except KeyboardInterrupt:
+                print("\n")
+        else:
+            # Show last N lines
+            lines = tail_log_file(log_file, args.lines)
+            if lines:
+                print("".join(lines))
+            else:
+                print("(empty log file)")

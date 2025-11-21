@@ -287,6 +287,45 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     completion_status_parser = completion_subparsers.add_parser("status", help="Show tab completion installation status")
     completion_status_parser.set_defaults(func=completion_cmds.status)
 
+    # Orchestrator management subcommands
+    orch_parser = subparsers.add_parser(
+        "orch",
+        aliases=["orchestrator"],
+        help="Monitor and control orchestrator"
+    )
+    orch_subparsers = orch_parser.add_subparsers(
+        dest="orch_command",
+        help="Orchestrator commands"
+    )
+
+    # orch status
+    orch_status_parser = orch_subparsers.add_parser("status", help="Show orchestrator status")
+    orch_status_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    orch_status_parser.set_defaults(func=global_cmds.orch_status)
+
+    # orch restart
+    orch_restart_parser = orch_subparsers.add_parser("restart", help="Restart ComfyUI")
+    orch_restart_parser.add_argument("--wait", action="store_true", help="Wait for restart to complete")
+    orch_restart_parser.set_defaults(func=global_cmds.orch_restart)
+
+    # orch kill
+    orch_kill_parser = orch_subparsers.add_parser("kill", help="Shutdown orchestrator")
+    orch_kill_parser.add_argument("--force", action="store_true", help="Force kill (bypass command queue)")
+    orch_kill_parser.set_defaults(func=global_cmds.orch_kill)
+
+    # orch clean
+    orch_clean_parser = orch_subparsers.add_parser("clean", help="Clean orchestrator state")
+    orch_clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted")
+    orch_clean_parser.add_argument("--force", action="store_true", help="Skip confirmation")
+    orch_clean_parser.add_argument("--kill", action="store_true", help="Also kill orchestrator process")
+    orch_clean_parser.set_defaults(func=global_cmds.orch_clean)
+
+    # orch logs
+    orch_logs_parser = orch_subparsers.add_parser("logs", help="Show orchestrator logs")
+    orch_logs_parser.add_argument("-f", "--follow", action="store_true", help="Follow logs in real-time")
+    orch_logs_parser.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to show (default: 50)")
+    orch_logs_parser.set_defaults(func=global_cmds.orch_logs)
+
 
 def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     """Add environment-specific commands."""
