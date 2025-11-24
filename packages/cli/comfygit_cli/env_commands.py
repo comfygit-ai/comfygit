@@ -201,7 +201,7 @@ class EnvironmentCommands:
             # Sync before running (unless --no-sync)
             if not no_sync:
                 print(f"🔄 Syncing environment: {env.name}")
-                env.sync()
+                env.sync(preserve_workflows=True, remove_extra_nodes=False)
 
             print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
             if comfyui_args:
@@ -211,6 +211,7 @@ class EnvironmentCommands:
 
             if result.returncode == RESTART_EXIT_CODE:
                 print("\n🔄 Restart requested, syncing dependencies...\n")
+                no_sync = False  # Ensure sync runs on restart
                 continue
 
             sys.exit(result.returncode)

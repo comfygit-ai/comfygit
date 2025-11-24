@@ -243,7 +243,8 @@ class Environment:
         node_callbacks: NodeInstallCallbacks | None = None,
         remove_extra_nodes: bool = True,
         sync_callbacks: SyncCallbacks | None = None,
-        verbose: bool = False
+        verbose: bool = False,
+        preserve_workflows: bool = False
     ) -> SyncResult:
         """Apply changes: sync packages, nodes, workflows, and models with environment.
 
@@ -254,6 +255,9 @@ class Environment:
             node_callbacks: Optional callbacks for node installation progress
             remove_extra_nodes: If True, remove extra nodes. If False, only warn (default: True)
             verbose: If True, show uv output in real-time during dependency installation
+            preserve_workflows: If True, preserve uncommitted workflows during restore.
+                               Use True for runtime restarts (exit code 42) to keep user edits.
+                               Use False (default) for git operations and repairs.
 
         Returns:
             SyncResult with details of what was synced
@@ -296,7 +300,8 @@ class Environment:
             result.success = False
 
         # Restore workflows from .cec/ to ComfyUI (for git pull workflow)
-        if not dry_run:
+        if not dry_run and not preserve_workflows:
+            logger.debug("Restoring workflows from .cec/")
             try:
                 self.workflow_manager.restore_all_from_cec()
                 logger.info("Restored workflows from .cec/")
