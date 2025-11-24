@@ -180,7 +180,7 @@ class WorkflowCacheRepository:
         """Get cached workflow analysis + resolution with smart invalidation.
 
         Uses multi-phase lookup:
-        1. Session cache (instant)
+        1. Session cache (instant, includes mtime for auto-invalidation)
         2. Workflow mtime + size match (fast)
         3. Pyproject mtime fast-reject (instant)
         4. Resolution context hash check (moderate)
@@ -198,16 +198,7 @@ class WorkflowCacheRepository:
         import time
         start_time = time.perf_counter()
 
-        # TODO will not work for workflows in subdirectories
-        session_key = f"{env_name}:{workflow_name}"
-
-        # Phase 1: Check session cache
-        if session_key in self._session_cache:
-            elapsed = (time.perf_counter() - start_time) * 1000
-            logger.debug(f"[CACHE] Session HIT for '{workflow_name}' ({elapsed:.2f}ms)")
-            return self._session_cache[session_key]
-
-        # Get workflow file stats
+        # Get workflow file stats (needed for session key and later phases)
         try:
             stat = workflow_path.stat()
             mtime = stat.st_mtime
@@ -215,6 +206,16 @@ class WorkflowCacheRepository:
         except OSError as e:
             logger.warning(f"Failed to stat workflow file {workflow_path}: {e}")
             return None
+
+        # Phase 1: Check session cache (with mtime in key for auto-invalidation)
+        # This ensures session cache automatically invalidates when file changes,
+        # critical for long-running services where Environment instances persist
+        session_key = f"{env_name}:{workflow_name}:{mtime}"
+
+        if session_key in self._session_cache:
+            elapsed = (time.perf_counter() - start_time) * 1000
+            logger.debug(f"[CACHE] Session HIT for '{workflow_name}' ({elapsed:.2f}ms)")
+            return self._session_cache[session_key]
 
         # Phase 2: Fast path - mtime + size match
         query_start = time.perf_counter()
@@ -458,8 +459,8 @@ class WorkflowCacheRepository:
              dependencies_json, resolution_json, cached_at)
         )
 
-        # Update session cache
-        session_key = f"{env_name}:{workflow_name}"
+        # Update session cache (with mtime in key for auto-invalidation)
+        session_key = f"{env_name}:{workflow_name}:{workflow_mtime}"
         self._session_cache[session_key] = CachedWorkflowAnalysis(
             dependencies=dependencies,
             resolution=resolution,
@@ -480,9 +481,12 @@ class WorkflowCacheRepository:
             query = "DELETE FROM workflow_cache WHERE environment_name = ? AND workflow_name = ?"
             self.sqlite.execute_write(query, (env_name, workflow_name))
 
-            # Clear from session cache
-            session_key = f"{env_name}:{workflow_name}"
-            self._session_cache.pop(session_key, None)
+            # Clear from session cache - need to clear all mtime variants
+            # Session keys now include mtime: "env:workflow:mtime"
+            prefix = f"{env_name}:{workflow_name}:"
+            keys_to_remove = [k for k in self._session_cache if k.startswith(prefix)]
+            for key in keys_to_remove:
+                del self._session_cache[key]
 
             logger.debug(f"Invalidated cache for workflow '{workflow_name}'")
         else:
