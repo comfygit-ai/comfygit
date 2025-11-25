@@ -380,6 +380,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     manifest_parser = subparsers.add_parser("manifest", help="Show environment manifest (pyproject.toml)")
     manifest_parser.add_argument("--pretty", action="store_true", help="Output as YAML instead of TOML")
     manifest_parser.add_argument("--section", type=str, help="Show specific section (e.g., tool.comfygit.nodes)")
+    manifest_parser.add_argument("--ide", nargs="?", const="auto", metavar="CMD", help="Open in editor (uses $EDITOR if no command given)")
     manifest_parser.set_defaults(func=env_cmds.manifest)
 
     # repair - Repair environment drift (manual edits or git operations)

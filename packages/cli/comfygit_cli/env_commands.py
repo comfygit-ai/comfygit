@@ -220,6 +220,14 @@ class EnvironmentCommands:
         """Show environment manifest (pyproject.toml configuration)."""
         env = self._get_env(args)
 
+        # Handle --ide flag: open in editor and exit
+        if hasattr(args, 'ide') and args.ide:
+            import os
+            import subprocess
+            editor = args.ide if args.ide != "auto" else os.environ.get("EDITOR", "code")
+            subprocess.run([editor, str(env.pyproject.path)])
+            return
+
         import tomlkit
         import yaml
 
