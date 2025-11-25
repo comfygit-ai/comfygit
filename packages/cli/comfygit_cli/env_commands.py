@@ -1542,12 +1542,10 @@ class EnvironmentCommands:
 
         try:
             if args.branch:
-                # Create new branch and switch
-                # If ref is None, create_branch defaults to HEAD
+                # Create new branch and switch (git checkout -b semantics)
                 start_point = args.ref if args.ref is not None else "HEAD"
                 print(f"Creating and switching to branch '{args.branch}'...")
-                env.create_branch(args.branch, start_point=start_point)
-                env.switch_branch(args.branch)
+                env.create_and_switch_branch(args.branch, start_point=start_point)
                 print(f"✓ Switched to new branch '{args.branch}'")
             else:
                 # Just checkout ref - ref is required when not using -b

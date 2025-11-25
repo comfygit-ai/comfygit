@@ -181,6 +181,37 @@ class EnvironmentGitOrchestrator:
         self.git.delete_branch(name, force)
         logger.info(f"Deleted branch '{name}'")
 
+    def create_and_switch_branch(self, name: str, start_point: str = "HEAD") -> None:
+        """Create new branch and switch to it (git checkout -b semantics).
+
+        This is the atomic equivalent of 'git checkout -b'. It creates a branch
+        from start_point and switches to it in one operation, preserving any
+        uncommitted workflow changes. No conflict checking is performed since
+        the new branch is guaranteed to have the same tree as the start_point.
+
+        Args:
+            name: Branch name to create
+            start_point: Commit to branch from (default: HEAD)
+
+        Raises:
+            OSError: If branch already exists or git operations fail
+        """
+        # Create the branch
+        self.git.create_branch(name, start_point)
+        logger.info(f"Created branch '{name}' at {start_point}")
+
+        # Snapshot old state
+        old_nodes = self.pyproject.nodes.get_existing()
+
+        # Switch to the new branch
+        self.git.switch_branch(name, create=False)
+
+        # Sync environment with uncommitted workflows preserved
+        # No conflict checking needed - branch was just created from current state
+        self._sync_environment_after_git(old_nodes, preserve_uncommitted=True)
+
+        logger.info(f"Switched to new branch '{name}'")
+
     def switch_branch(self, branch: str, create: bool = False) -> None:
         """Switch to branch and sync environment.
 

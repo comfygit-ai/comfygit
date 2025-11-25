@@ -594,6 +594,22 @@ class Environment:
         """
         self.git_orchestrator.delete_branch(name, force)
 
+    def create_and_switch_branch(self, name: str, start_point: str = "HEAD") -> None:
+        """Create new branch and switch to it (git checkout -b semantics).
+
+        This is the atomic equivalent of 'git checkout -b'. It creates a branch
+        from start_point and switches to it in one operation, preserving any
+        uncommitted workflow changes.
+
+        Args:
+            name: Branch name to create
+            start_point: Commit to branch from (default: HEAD)
+
+        Raises:
+            OSError: If branch already exists or git operations fail
+        """
+        self.git_orchestrator.create_and_switch_branch(name, start_point)
+
     def switch_branch(self, branch: str, create: bool = False) -> None:
         """Switch to branch and sync environment.
 

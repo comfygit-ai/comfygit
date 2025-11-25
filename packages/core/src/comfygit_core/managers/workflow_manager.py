@@ -574,9 +574,22 @@ class WorkflowManager:
 
         # Phase 1: Restore workflows that exist in .cec
         if self.cec_workflows.exists():
-            # Copy every workflow from .cec to ComfyUI
+            # Get uncommitted workflows if we need to preserve them
+            uncommitted_workflows = set()
+            if preserve_uncommitted:
+                status = self.get_workflow_sync_status()
+                uncommitted_workflows = set(status.new + status.modified)
+
+            # Copy workflows from .cec to ComfyUI (skip uncommitted if preserving)
             for workflow_file in self.cec_workflows.glob("*.json"):
                 name = workflow_file.stem
+
+                # Skip if this workflow has uncommitted changes and we're preserving
+                if preserve_uncommitted and name in uncommitted_workflows:
+                    results[name] = "preserved"
+                    logger.debug(f"Preserved uncommitted changes to workflow '{name}'")
+                    continue
+
                 if self.restore_from_cec(name):
                     results[name] = "restored"
                 else:
