@@ -287,6 +287,19 @@ class TestNodeInfoFromGlobalPackage:
 class TestWorkspaceConfigCachePreference:
     """Test workspace config methods for cache preference."""
 
+    def _create_valid_config(self, config_path: Path):
+        """Helper to create a valid workspace config file."""
+        import json
+        config = {
+            "version": 1,
+            "active_environment": "",
+            "created_at": "2025-01-01T00:00:00",
+            "global_model_directory": None,
+            "api_credentials": None,
+            "prefer_registry_cache": True
+        }
+        config_path.write_text(json.dumps(config))
+
     def test_get_prefer_registry_cache_default_true(self):
         """SHOULD default to True for prefer_registry_cache."""
         # ARRANGE
@@ -294,6 +307,7 @@ class TestWorkspaceConfigCachePreference:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "workspace.json"
+            self._create_valid_config(config_path)
             repo = WorkspaceConfigRepository(config_file=config_path)
 
             # ACT
@@ -309,6 +323,7 @@ class TestWorkspaceConfigCachePreference:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "workspace.json"
+            self._create_valid_config(config_path)
             repo = WorkspaceConfigRepository(config_file=config_path)
 
             # ACT

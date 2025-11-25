@@ -1,11 +1,6 @@
 """ComfyDock workspace - manages multiple environments within a validated workspace."""
 
 import json
-import os
-import platform
-import shutil
-import stat
-import time
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -151,7 +146,10 @@ class Workspace:
 
     @cached_property
     def workspace_config_manager(self) -> WorkspaceConfigRepository:
-        return WorkspaceConfigRepository(self.paths.workspace_file)
+        return WorkspaceConfigRepository(
+            self.paths.workspace_file,
+            default_models_path=self.paths.models
+        )
 
     @cached_property
     def registry_data_manager(self) -> RegistryDataManager:
