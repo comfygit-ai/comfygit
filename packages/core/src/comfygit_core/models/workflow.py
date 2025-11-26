@@ -822,8 +822,14 @@ class WorkflowAnalysisStatus:
 
     @property
     def issue_summary(self) -> str:
-        """Human-readable summary of issues."""
+        """Human-readable summary of all issues that make has_issues=True.
+
+        Invariant: if has_issues is True, this must NOT return "No issues".
+        Note: path sync issues are intentionally excluded (auto-fixable, not in has_issues).
+        """
         parts = []
+
+        # Resolution blocking issues
         if self.resolution.models_ambiguous:
             parts.append(f"{len(self.resolution.models_ambiguous)} ambiguous models")
         if self.resolution.models_unresolved:
@@ -832,6 +838,12 @@ class WorkflowAnalysisStatus:
             parts.append(f"{len(self.resolution.nodes_unresolved)} missing nodes")
         if self.resolution.nodes_ambiguous:
             parts.append(f"{len(self.resolution.nodes_ambiguous)} ambiguous nodes")
+
+        # Actionable issues (these also trigger has_issues=True)
+        if self.uninstalled_nodes:
+            parts.append(f"{len(self.uninstalled_nodes)} packages to install")
+        if self.download_intents_count > 0:
+            parts.append(f"{self.download_intents_count} pending downloads")
 
         return ", ".join(parts) if parts else "No issues"
 
