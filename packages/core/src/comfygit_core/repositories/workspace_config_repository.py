@@ -61,10 +61,12 @@ class WorkspaceConfigRepository:
         return self._load_or_fail()
 
     def save(self, data: WorkspaceConfig):
-        # First serialize to JSON
-        with self.config_file_path.open("w") as f:
-            data_dict = WorkspaceConfig.to_dict(data)
+        """Save config atomically (write to temp, then rename)."""
+        data_dict = WorkspaceConfig.to_dict(data)
+        temp_path = self.config_file_path.with_suffix(".tmp")
+        with temp_path.open("w") as f:
             json.dump(data_dict, f, indent=2)
+        temp_path.replace(self.config_file_path)  # Atomic on POSIX
 
     def set_models_directory(self, path: Path):
         logger.info(f"Setting models directory to {path}")
