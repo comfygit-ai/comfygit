@@ -118,6 +118,79 @@ class EnvironmentModelManager:
             url=url
         )
 
+    def remove_model_source(self, identifier: str, url: str) -> ModelSourceResult:
+        """Remove a download source URL from a model.
+
+        Updates both pyproject.toml and the workspace model index.
+
+        Args:
+            identifier: Model hash or filename
+            url: Download URL to remove
+
+        Returns:
+            ModelSourceResult with success status and model details
+        """
+        # Find model by hash or filename
+        all_models = self.pyproject.models.get_all()
+
+        model = None
+
+        # Try exact hash match first (unambiguous)
+        hash_matches = [m for m in all_models if m.hash == identifier]
+        if hash_matches:
+            model = hash_matches[0]
+        else:
+            # Try filename match (potentially ambiguous)
+            filename_matches = [m for m in all_models if m.filename == identifier]
+
+            if len(filename_matches) == 0:
+                return ModelSourceResult(
+                    success=False,
+                    error="model_not_found",
+                    identifier=identifier
+                )
+            elif len(filename_matches) > 1:
+                return ModelSourceResult(
+                    success=False,
+                    error="ambiguous_filename",
+                    identifier=identifier,
+                    matches=filename_matches
+                )
+            else:
+                model = filename_matches[0]
+
+        # Check if URL exists in model sources
+        if url not in model.sources:
+            return ModelSourceResult(
+                success=False,
+                error="url_not_found",
+                model=model,
+                model_hash=model.hash
+            )
+
+        # Update pyproject.toml
+        config = self.pyproject.load()
+        current_sources = config["tool"]["comfygit"]["models"][model.hash].get("sources", [])
+        updated_sources = [s for s in current_sources if s != url]
+        config["tool"]["comfygit"]["models"][model.hash]["sources"] = updated_sources
+        self.pyproject.save(config)
+
+        # Update model repository (SQLite index) - only if model exists locally
+        if self.model_repository.has_model(model.hash):
+            self.model_repository.remove_source(
+                model_hash=model.hash,
+                source_url=url
+            )
+
+        logger.info(f"Removed source from model {model.filename}: {url}")
+
+        return ModelSourceResult(
+            success=True,
+            model=model,
+            model_hash=model.hash,
+            url=url
+        )
+
     def get_models_without_sources(self) -> list[ModelSourceStatus]:
         """Get all models in pyproject that don't have download sources.
 

@@ -558,6 +558,30 @@ class ModelRepository:
 
         logger.debug(f"Added source for {model_hash[:8]}...: {source_type} - {source_url}")
 
+    def remove_source(self, model_hash: str, source_url: str) -> bool:
+        """Remove a download source for a model.
+
+        Args:
+            model_hash: Hash of the model
+            source_url: URL of the source to remove
+
+        Returns:
+            True if source was removed, False if source didn't exist
+        """
+        query = """
+        DELETE FROM model_sources
+        WHERE model_hash = ? AND source_url = ?
+        """
+
+        rows_affected = self.sqlite.execute_write(query, (model_hash, source_url))
+
+        if rows_affected > 0:
+            logger.debug(f"Removed source for {model_hash[:8]}...: {source_url}")
+            return True
+        else:
+            logger.debug(f"Source not found for {model_hash[:8]}...: {source_url}")
+            return False
+
     def get_stats(self, base_directory: Path | None = "USE_CURRENT") -> dict[str, int]:
         """Get index statistics, optionally filtered by directory.
 

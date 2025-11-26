@@ -672,7 +672,7 @@ class Environment:
         Returns:
             Status dictionary
         """
-        logger.info(f"Configuring model symlink for environment '{self.name}'")
+        logger.debug(f"Configuring model symlink for environment '{self.name}'")
         try:
             self.model_symlink_manager.create_symlink()
             return {
@@ -1148,6 +1148,18 @@ class Environment:
             ModelSourceResult with success status and model details
         """
         return self.model_manager.add_model_source(identifier, url)
+
+    def remove_model_source(self, identifier: str, url: str) -> ModelSourceResult:
+        """Remove a download source URL from a model.
+
+        Args:
+            identifier: Model hash or filename
+            url: Download URL to remove
+
+        Returns:
+            ModelSourceResult with success status and model details
+        """
+        return self.model_manager.remove_model_source(identifier, url)
 
     def get_models_without_sources(self) -> list[ModelSourceStatus]:
         """Get all models in pyproject that don't have download sources.
