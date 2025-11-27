@@ -445,20 +445,8 @@ class EnvironmentCommands:
                 else:
                     print("  • Configuration updated")
 
-        # Dev node drift (requirements changed)
-        dev_drift = env.check_development_node_drift()
-        if dev_drift:
-            print("\n🔧 Dev node updates available:")
-            limit = None if args.verbose else 3
-            keys = list(dev_drift.keys())
-            keys_to_show = keys if limit is None else keys[:limit]
-            for node_name in keys_to_show:
-                print(f"  • {node_name}")
-            if limit and len(keys) > limit:
-                print(f"  • ... and {len(keys) - limit} more")
-
         # Suggested actions - smart and contextual
-        self._show_smart_suggestions(status, dev_drift)
+        self._show_smart_suggestions(status)
 
     # Removed: _has_uninstalled_packages - this logic is now in core's WorkflowAnalysisStatus
 
@@ -492,7 +480,7 @@ class EnvironmentCommands:
         if parts:
             print(f"      {', '.join(parts)}")
 
-    def _show_smart_suggestions(self, status: EnvironmentStatus, dev_drift) -> None:
+    def _show_smart_suggestions(self, status: EnvironmentStatus) -> None:
         """Show contextual suggestions based on current state."""
         suggestions = []
 
@@ -625,11 +613,6 @@ class EnvironmentCommands:
         elif status.git.has_changes:
             # Uncommitted pyproject changes without workflow issues
             suggestions.append("Commit changes: cg commit -m \"<message>\"")
-
-        # Dev node updates
-        if dev_drift:
-            for node_name in list(dev_drift.keys())[:1]:
-                suggestions.append(f"Update dev node: cg node update {node_name}")
 
         # Show suggestions if any
         if suggestions:

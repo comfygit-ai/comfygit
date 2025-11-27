@@ -51,7 +51,7 @@ def test_missing_models_with_workflow_nodes_only(env_commands, mock_env):
         captured_output = StringIO()
         sys.stdout = captured_output
 
-        env_commands._show_smart_suggestions(status, {})
+        env_commands._show_smart_suggestions(status)
 
         sys.stdout = sys.__stdout__
         output = captured_output.getvalue()
@@ -84,7 +84,7 @@ def test_missing_models_with_orphan_nodes(env_commands, mock_env):
         captured_output = StringIO()
         sys.stdout = captured_output
 
-        env_commands._show_smart_suggestions(status, {})
+        env_commands._show_smart_suggestions(status)
 
         sys.stdout = sys.__stdout__
         output = captured_output.getvalue()
@@ -117,7 +117,7 @@ def test_missing_models_with_extra_nodes(env_commands, mock_env):
         captured_output = StringIO()
         sys.stdout = captured_output
 
-        env_commands._show_smart_suggestions(status, {})
+        env_commands._show_smart_suggestions(status)
 
         sys.stdout = sys.__stdout__
         output = captured_output.getvalue()
@@ -147,7 +147,7 @@ def test_environment_drift_only(env_commands, mock_env):
         captured_output = StringIO()
         sys.stdout = captured_output
 
-        env_commands._show_smart_suggestions(status, {})
+        env_commands._show_smart_suggestions(status)
 
         sys.stdout = sys.__stdout__
         output = captured_output.getvalue()
