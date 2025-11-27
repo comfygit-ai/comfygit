@@ -206,16 +206,26 @@ class TestCacheHitOnMtimeMatch:
         assert elapsed_ms < 10
 
 
-class TestCacheHitAfterTouchOnly:
-    """Test that hash fallback works when only mtime changes."""
+class TestCacheMissAfterMtimeChange:
+    """Test that cache misses when mtime changes (even if content is same).
 
-    def test_cache_hit_after_touch_only(
+    Note: We intentionally removed the content hash fallback for simplicity.
+    When mtime changes, the cache returns MISS and recomputes. This is a
+    trade-off: we lose cache hits on `touch` (rare) but gain simpler code.
+    """
+
+    def test_cache_miss_after_touch(
         self,
         cache_db,
         sample_workflow_file,
         sample_dependencies
     ):
-        """Touch file (change mtime, same content) - cache should hit via hash fallback."""
+        """Touch file (change mtime, same content) - cache should MISS.
+
+        This is expected behavior after removing the content hash fallback.
+        The trade-off is: simpler code at the cost of extra recomputation
+        in the rare case of `touch` without content change.
+        """
         # Cache workflow
         cache_db.set(
             env_name="test-env",
@@ -231,16 +241,15 @@ class TestCacheHitAfterTouchOnly:
         # Clear session cache to force SQLite lookup
         cache_db._session_cache.clear()
 
-        # Query again - should hit via hash fallback
+        # Query again - should MISS because mtime changed
         result = cache_db.get(
             env_name="test-env",
             workflow_name="test_workflow",
             workflow_path=sample_workflow_file
         )
 
-        assert result is not None
-        assert result.dependencies is not None
-        assert len(result.dependencies.builtin_nodes) == 2
+        # With simplified caching (no content hash fallback), mtime change = MISS
+        assert result is None
 
 
 class TestSessionCacheIsolation:
@@ -514,3 +523,95 @@ class TestSessionCacheInvalidationOnFileChange:
         # If mtime is in key and file hasn't changed, all 3 gets use same session key
         session_keys = list(cache_db._session_cache.keys())
         assert len(session_keys) == 1, "Should have exactly 1 session cache entry for unchanged file"
+
+
+class TestCacheHashVerification:
+    """Test that cache verifies content hash to prevent stale data.
+
+    Bug scenario: When another process (e.g., panel) computes a resolution
+    and stores it in the cache with the current file's mtime+size, but the
+    resolution was actually computed against DIFFERENT content, the cache
+    should detect this via hash verification and return a MISS.
+
+    This simulates the race condition where:
+    1. File has content A with mtime T1
+    2. Panel reads file (sees mtime T1)
+    3. User modifies file to content B with mtime T2
+    4. Panel computes resolution (against content A it read earlier)
+    5. Panel calls cache.set() which captures current mtime T2
+    6. CLI queries cache with mtime T2 - gets HIT but resolution is for content A!
+    """
+
+    def test_cache_miss_when_hash_differs_despite_mtime_match(
+        self,
+        tmp_path,
+        sample_dependencies
+    ):
+        """Cache should MISS when mtime+size matches but content hash differs.
+
+        This is the critical fix for the cache invalidation bug: even when
+        mtime+size matches, we must verify the content hash before returning
+        cached data.
+        """
+        db_path = tmp_path / "test.db"
+        cache = WorkflowCacheRepository(db_path)
+
+        # Create workflow with initial content
+        workflow_path = tmp_path / "test_workflow.json"
+        initial_content = {
+            "nodes": [{"id": 1, "type": "NodeA", "widgets_values": ["value_a"]}]
+        }
+        with open(workflow_path, 'w') as f:
+            json.dump(initial_content, f)
+
+        # Simulate Process A (e.g., panel) caching a resolution
+        cache.set("test-env", "test_workflow", workflow_path, sample_dependencies)
+
+        # Get the mtime+size that was cached
+        stat = workflow_path.stat()
+        original_mtime = stat.st_mtime
+        original_size = stat.st_size
+
+        # Now modify the file content but preserve SAME mtime+size
+        # This simulates the race where content changed between panel read and cache set
+        modified_content = {
+            "nodes": [{"id": 1, "type": "NodeB", "widgets_values": ["value_b"]}]
+        }
+
+        # Write different content with exact same size (pad if needed)
+        modified_json = json.dumps(modified_content)
+        original_json = json.dumps(initial_content)
+
+        # If sizes differ, pad the shorter one to match
+        if len(modified_json) < len(original_json):
+            # Add whitespace to pad
+            modified_content["_pad"] = " " * (len(original_json) - len(modified_json) - 10)
+            modified_json = json.dumps(modified_content)
+        elif len(modified_json) > len(original_json):
+            # Just use a different approach - write same size content
+            modified_content = {
+                "nodes": [{"id": 1, "type": "NodeZ", "widgets_values": ["value_z"]}]
+            }
+            modified_json = json.dumps(modified_content)
+
+        # Write the modified content
+        with open(workflow_path, 'w') as f:
+            f.write(modified_json)
+
+        # Restore the original mtime (simulating the race condition)
+        import os
+        os.utime(workflow_path, (original_mtime, original_mtime))
+
+        # Clear session cache to force SQLite lookup
+        cache._session_cache.clear()
+
+        # Query cache - mtime matches, but content hash differs
+        # BUG: Current implementation returns HIT because mtime+size matches
+        # FIX: Should return MISS because content hash differs
+        result = cache.get("test-env", "test_workflow", workflow_path)
+
+        # With the fix, this should be None (cache miss due to hash mismatch)
+        assert result is None, (
+            "Cache should MISS when content hash differs, even if mtime+size matches. "
+            "The mtime+size fast path must verify content hash before returning cached data."
+        )

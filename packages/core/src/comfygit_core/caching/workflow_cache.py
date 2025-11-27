@@ -233,9 +233,10 @@ class WorkflowCacheRepository:
         if results:
             cached_row = results[0]
             logger.debug(f"[CACHE] DB query (mtime+size) HIT for '{workflow_name}' ({query_elapsed:.2f}ms)")
-        else:
-            logger.debug(f"[CACHE] DB query (mtime+size) MISS for '{workflow_name}' ({query_elapsed:.2f}ms)")
-            # Phase 3: Content hash fallback
+
+            # Verify content hash matches (prevents stale cache from race conditions)
+            # This catches the case where another process stored a resolution
+            # computed against different content but with the same mtime
             hash_start = time.perf_counter()
             try:
                 current_hash = compute_workflow_hash(workflow_path)
@@ -243,22 +244,20 @@ class WorkflowCacheRepository:
                 logger.warning(f"Failed to compute workflow hash for {workflow_path}: {e}")
                 return None
             hash_elapsed = (time.perf_counter() - hash_start) * 1000
-            logger.debug(f"[CACHE] Hash computation took {hash_elapsed:.2f}ms")
 
-            query_start = time.perf_counter()
-            query = """
-                SELECT workflow_hash, dependencies_json, resolution_json,
-                       resolution_context_hash, pyproject_mtime, models_sync_time, comfygit_version
-                FROM workflow_cache
-                WHERE environment_name = ? AND workflow_name = ?
-                  AND workflow_hash = ?
-            """
-            results = self.sqlite.execute_query(query, (env_name, workflow_name, current_hash))
-            query_elapsed = (time.perf_counter() - query_start) * 1000
+            if current_hash != cached_row['workflow_hash']:
+                logger.debug(
+                    f"[CACHE] mtime+size matched but hash differs for '{workflow_name}' "
+                    f"(cached={cached_row['workflow_hash']}, current={current_hash}, {hash_elapsed:.2f}ms) - treating as MISS"
+                )
+                # Content changed - cache is stale
+                return None
 
-            if results:
-                cached_row = results[0]
-                logger.debug(f"[CACHE] DB query (content hash) HIT for '{workflow_name}' ({query_elapsed:.2f}ms)")
+            logger.debug(f"[CACHE] Hash verification passed for '{workflow_name}' ({hash_elapsed:.2f}ms)")
+        else:
+            logger.debug(f"[CACHE] DB query (mtime+size) MISS for '{workflow_name}' ({query_elapsed:.2f}ms)")
+            # mtime+size miss = file metadata changed, so cache is definitely stale
+            # No need to check content hash - if mtime changed, the resolution is outdated
 
         if not cached_row:
             elapsed = (time.perf_counter() - start_time) * 1000

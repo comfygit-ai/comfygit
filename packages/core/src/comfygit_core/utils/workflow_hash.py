@@ -2,33 +2,28 @@
 
 Provides content-based hashing of workflow JSON with normalization
 to ignore volatile fields like UI state and random seeds.
+
+Uses xxhash (XXH3_64) for extremely fast content verification (~0.5ms).
 """
 import copy
 import json
 from pathlib import Path
 
-import blake3
+import xxhash
 
 
 def compute_workflow_hash(workflow_path: Path) -> str:
     """Compute content hash for a workflow file.
 
-    Uses blake3 for fast hashing and normalization to ignore
-    volatile fields (UI state, random seeds, etc.).
+    Uses xxhash XXH3_64 for fast hashing (~0.5ms for typical workflows)
+    with normalization to ignore volatile fields (UI state, random seeds).
 
     Args:
         workflow_path: Path to workflow JSON file
 
     Returns:
-        16-character hex hash string (64-bit)
-
-    Examples:
-        >>> compute_workflow_hash(Path("my_workflow.json"))
-        "a1b2c3d4e5f6g7h8"
+        16-character hex hash string
     """
-    # Note: Using direct json.load() rather than WorkflowRepository for performance
-    # and separation of concerns (hashing != parsing). This is intentional.
-    # Load workflow JSON
     with open(workflow_path, 'r', encoding='utf-8') as f:
         workflow = json.load(f)
 
@@ -38,12 +33,8 @@ def compute_workflow_hash(workflow_path: Path) -> str:
     # Serialize with sorted keys for determinism
     normalized_json = json.dumps(normalized, sort_keys=True, separators=(',', ':'))
 
-    # Compute blake3 hash
-    hasher = blake3.blake3()
-    hasher.update(normalized_json.encode('utf-8'))
-
-    # Return first 16 hex chars (64-bit hash)
-    return hasher.hexdigest()[:16]
+    # Compute xxhash (XXH3_64 for best performance)
+    return xxhash.xxh3_64_hexdigest(normalized_json.encode('utf-8'))
 
 def normalize_workflow(workflow: dict) -> dict:
     """Remove volatile fields that don't affect workflow functionality.
