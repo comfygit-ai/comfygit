@@ -1596,6 +1596,10 @@ class WorkflowManager:
         This is a functional issue (not cosmetic like path sync) - ComfyUI cannot
         load a model that's in the wrong directory for the node type.
 
+        When a model exists in multiple locations (e.g., copied from checkpoints/
+        to loras/), this checks if ANY location satisfies the requirement.
+        Only flags mismatch if NO location is in an expected directory.
+
         Args:
             resolved: ResolvedModel with reference and resolved_model
 
@@ -1618,15 +1622,26 @@ class WorkflowManager:
         if not expected_dirs:
             return (False, [], None)
 
-        # Extract actual category from model path (first path component)
+        # Extract actual category from resolved model path (first path component)
         path_parts = model.relative_path.replace('\\', '/').split('/')
         actual_category = path_parts[0] if path_parts else None
 
-        # Check if actual category is NOT in expected directories
-        if actual_category and actual_category not in expected_dirs:
-            return (True, expected_dirs, actual_category)
+        # If resolved location is in expected directory, no mismatch
+        if actual_category in expected_dirs:
+            return (False, expected_dirs, actual_category)
 
-        return (False, expected_dirs, actual_category)
+        # Resolved location is wrong, but check if model exists in ANY valid location
+        # This handles the case where user copied (not moved) the model
+        all_locations = self.model_repository.get_locations(model.hash)
+        for location in all_locations:
+            loc_path_parts = location['relative_path'].replace('\\', '/').split('/')
+            loc_category = loc_path_parts[0] if loc_path_parts else None
+            if loc_category in expected_dirs:
+                # Model exists in a valid location - no functional mismatch
+                return (False, expected_dirs, actual_category)
+
+        # No location in expected directory - this is a real mismatch
+        return (True, expected_dirs, actual_category)
 
     def _strip_base_directory_for_node(self, node_type: str, relative_path: str) -> str:
         """Strip base directory prefix from path for BUILTIN ComfyUI node loaders.

@@ -240,3 +240,90 @@ class TestModelCategoryMismatchDetection:
 
         assert resolved_model.actual_category == "loras", \
             f"Actual should be loras, got {resolved_model.actual_category}"
+
+    def test_model_in_multiple_locations_prefers_correct_category(self, test_env, test_workspace):
+        """Test that when model exists in multiple locations, correct category is preferred.
+
+        Scenario:
+        1. User downloads LoRA to checkpoints/ by mistake
+        2. Model is resolved and saved to pyproject.toml with its hash
+        3. User copies (not moves) file to loras/
+        4. Model now exists in BOTH locations with same hash
+        5. On subsequent status check (from pyproject context), should NOT flag mismatch
+           because the model exists in a valid location (loras/)
+
+        This is a regression test for the bug where:
+        - _try_context_resolution looks up model by hash
+        - get_model() returns first location alphabetically (checkpoints/ < loras/)
+        - _check_category_mismatch only checks that one location
+        - Even though loras/ exists, mismatch is falsely flagged
+        """
+        # ARRANGE Step 1: Create model in checkpoints/ (WRONG location)
+        model_builder = ModelIndexBuilder(test_workspace)
+        model_builder.add_model(
+            filename="dual_location_lora.safetensors",
+            relative_path="checkpoints",  # Wrong location
+            category="checkpoints"
+        )
+        model_builder.index_all()
+
+        # Create workflow with LoraLoader
+        workflow = (
+            WorkflowBuilder()
+            .add_lora_loader("dual_location_lora.safetensors")
+            .build()
+        )
+        simulate_comfyui_save_workflow(test_env, "dual_location_workflow", workflow)
+
+        # ARRANGE Step 2: First resolution - model gets saved to pyproject.toml
+        # This simulates `cg workflow resolve` which saves the model with its hash
+        workflow_status = test_env.workflow_manager.get_workflow_status()
+        test_wf = next(
+            (wf for wf in workflow_status.analyzed_workflows if wf.name == "dual_location_workflow"),
+            None
+        )
+        assert test_wf is not None
+
+        # At this point, model should be flagged (only in checkpoints/)
+        resolved_model = test_wf.resolution.models_resolved[0]
+        assert resolved_model.has_category_mismatch is True, \
+            "Before copy: model only in checkpoints/ should flag mismatch"
+
+        # Apply resolution to save to pyproject.toml (this writes the hash)
+        test_env.workflow_manager.apply_resolution(test_wf.resolution)
+
+        # ARRANGE Step 3: User copies model to correct location (loras/)
+        wrong_path = test_workspace.workspace_config_manager.get_models_directory() / "checkpoints/dual_location_lora.safetensors"
+        content = wrong_path.read_bytes()
+
+        correct_path = test_workspace.workspace_config_manager.get_models_directory() / "loras/dual_location_lora.safetensors"
+        correct_path.parent.mkdir(parents=True, exist_ok=True)
+        correct_path.write_bytes(content)
+
+        # Re-scan to pick up the new location
+        test_workspace.sync_model_directory()
+
+        # ACT: Get workflow status AGAIN (this time model is in pyproject.toml)
+        # Resolution will use Strategy 0 (_try_context_resolution) which looks up by hash
+        workflow_status_2 = test_env.workflow_manager.get_workflow_status()
+        test_wf_2 = next(
+            (wf for wf in workflow_status_2.analyzed_workflows if wf.name == "dual_location_workflow"),
+            None
+        )
+
+        # ASSERT: Model should be resolved
+        assert test_wf_2 is not None, "Workflow should exist"
+        assert len(test_wf_2.resolution.models_resolved) == 1, \
+            "Model should resolve"
+
+        resolved_model_2 = test_wf_2.resolution.models_resolved[0]
+
+        # KEY ASSERTION: Since model now exists in loras/, no mismatch should be flagged
+        # The system should check ALL locations, not just the first alphabetically
+        assert resolved_model_2.has_category_mismatch is False, \
+            f"Model exists in loras/, should NOT flag category mismatch. " \
+            f"Got actual_category={resolved_model_2.actual_category}, " \
+            f"expected_categories={resolved_model_2.expected_categories}"
+
+        assert test_wf_2.has_category_mismatch_issues is False, \
+            "Workflow should NOT have category mismatch issues when correct location exists"
