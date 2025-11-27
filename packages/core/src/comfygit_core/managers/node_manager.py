@@ -633,40 +633,34 @@ class NodeManager:
     def reconcile_nodes_for_rollback(self, old_nodes: dict[str, NodeInfo], new_nodes: dict[str, NodeInfo]):
         """Reconcile filesystem nodes after rollback with full context.
 
+        Dev nodes are SKIPPED entirely - ComfyGit never touches their filesystem state.
+        This ensures developer's local work is preserved during any git operation.
+
         Args:
             old_nodes: Nodes that were in pyproject before rollback
             new_nodes: Nodes that are in pyproject after rollback
         """
         import shutil
-        import time
 
         # Nodes that were removed (in old, not in new)
         removed_node_names = set(old_nodes.keys()) - set(new_nodes.keys())
 
         for identifier in removed_node_names:
             old_node_info = old_nodes[identifier]
+
+            # SKIP dev nodes entirely - never touch their filesystem state
+            if old_node_info.source == 'development':
+                logger.debug(f"Skipping dev node '{old_node_info.name}' during reconciliation")
+                continue
+
             node_path = self.custom_nodes_path / old_node_info.name
 
             if not node_path.exists():
                 continue  # Already gone
 
-            # We KNOW what type it was from old_nodes - no guessing needed!
-            if old_node_info.source == 'development':
-                # Dev node - preserve with .disabled suffix
-                disabled_path = self.custom_nodes_path / f"{old_node_info.name}.disabled"
-
-                # Handle existing .disabled directory (backup with timestamp)
-                if disabled_path.exists():
-                    backup_path = self.custom_nodes_path / f"{old_node_info.name}.{int(time.time())}.disabled"
-                    shutil.move(disabled_path, backup_path)
-                    logger.info(f"Backed up old .disabled to {backup_path.name}")
-
-                shutil.move(node_path, disabled_path)
-                logger.info(f"Disabled dev node '{old_node_info.name}' (rollback)")
-            else:
-                # Registry/git node - delete it (cached globally, can reinstall)
-                shutil.rmtree(node_path)
-                logger.info(f"Removed '{old_node_info.name}' (rollback, cached)")
+            # Registry/git node - delete it (cached globally, can reinstall)
+            shutil.rmtree(node_path)
+            logger.info(f"Removed '{old_node_info.name}' (rollback, cached)")
 
         # Nodes that were added (in new, not in old)
         added_node_identifiers = set(new_nodes.keys()) - set(old_nodes.keys())

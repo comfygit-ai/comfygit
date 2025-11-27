@@ -58,17 +58,10 @@ class ExportImportManager:
                 for workflow_file in workflows_path.glob("*.json"):
                     tar.add(workflow_file, arcname=f"workflows/{workflow_file.name}")
 
-            # Add dev nodes (read from pyproject.toml)
-            pyproject_data = pyproject_manager.load()
-            nodes_config = pyproject_data.get("tool", {}).get("comfygit", {}).get("nodes", {})
-            dev_nodes = [name for name, node in nodes_config.items() if node.get("source") == "development"]
-
-            custom_nodes_path = self.comfyui_path / "custom_nodes"
-            if custom_nodes_path.exists():
-                for node_name in dev_nodes:
-                    node_path = custom_nodes_path / node_name
-                    if node_path.exists():
-                        self._add_filtered_directory(tar, node_path, f"dev_nodes/{node_name}")
+            # NOTE: Dev nodes are NO LONGER bundled.
+            # They use git references (repository/branch/pinned_commit) instead.
+            # This enables team collaboration on custom nodes without large bundles.
+            # See: auto_populate_dev_node_git_info() which captures git info during export.
 
         logger.info(f"Export created successfully: {output_path}")
         return output_path

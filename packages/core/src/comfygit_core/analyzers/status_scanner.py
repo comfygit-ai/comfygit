@@ -304,6 +304,8 @@ class StatusScanner:
     ) -> EnvironmentComparison:
         """Compare current and expected environment states.
 
+        Dev nodes are reported separately (informational only, not sync errors).
+
         Args:
             current: Current environment state
             expected: Expected environment state
@@ -324,9 +326,26 @@ class StatusScanner:
                 disabled_nodes.append(name)
         comparison.disabled_nodes = disabled_nodes
 
-        # Missing nodes: expected but not in current (disabled nodes ARE in current, so not missing)
-        comparison.missing_nodes = list(expected_nodes - current_nodes)
-        comparison.extra_nodes = list(current_nodes - expected_nodes)
+        # Compute basic missing/extra first
+        raw_missing_nodes = list(expected_nodes - current_nodes)
+        raw_extra_nodes = list(current_nodes - expected_nodes)
+
+        # Separate dev nodes from regular nodes for proper reporting
+        # Missing dev nodes go to dev_nodes_missing, not missing_nodes
+        for name in raw_missing_nodes[:]:  # Iterate copy to allow removal
+            if name in expected.custom_nodes and expected.custom_nodes[name].source == 'development':
+                comparison.dev_nodes_missing.append(name)
+                raw_missing_nodes.remove(name)
+
+        # Extra nodes with git repos go to dev_nodes_untracked, not extra_nodes
+        for name in raw_extra_nodes[:]:  # Iterate copy to allow removal
+            node_path = self._comfyui_path / 'custom_nodes' / name
+            if (node_path / '.git').exists():
+                comparison.dev_nodes_untracked.append(name)
+                raw_extra_nodes.remove(name)
+
+        comparison.missing_nodes = raw_missing_nodes
+        comparison.extra_nodes = raw_extra_nodes
 
         # Check version mismatches (skip development nodes)
         for name in current_nodes & expected_nodes:
@@ -347,16 +366,10 @@ class StatusScanner:
                 )
 
         # Detect potential dev node renames (simple heuristic)
-        if comparison.missing_nodes and comparison.extra_nodes:
-            missing_dev = any(
-                expected.custom_nodes[n].source == 'development'
-                for n in comparison.missing_nodes
-                if n in expected.custom_nodes
-            )
-            extra_git = any(
-                (self._comfyui_path / 'custom_nodes' / n / '.git').exists()
-                for n in comparison.extra_nodes
-            )
+        # Note: Now we check dev_nodes_missing instead of missing_nodes for dev nodes
+        if (comparison.missing_nodes or comparison.dev_nodes_missing) and (comparison.extra_nodes or comparison.dev_nodes_untracked):
+            missing_dev = bool(comparison.dev_nodes_missing)
+            extra_git = bool(comparison.dev_nodes_untracked)
             comparison.potential_dev_rename = missing_dev and extra_git
 
         # Package comparison is handled separately since it requires UV

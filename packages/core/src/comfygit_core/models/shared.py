@@ -76,6 +76,10 @@ class NodeInfo:
     source: str = "unknown"             # "registry", "git", "development", or "unknown"
     dependency_sources: list[str] | None = None  # UV source names added for this node's deps
 
+    # Git reference fields for dev nodes (optional, used for sharing)
+    branch: str | None = None           # Branch to track (e.g., "dev", "main")
+    pinned_commit: str | None = None    # Commit hash at export time (advisory only)
+
     @property
     def identifier(self) -> str:
         """Get the best identifier for this node."""
@@ -147,6 +151,8 @@ class NodeInfo:
             registry_id=node_config.get("registry_id"),
             repository=node_config.get("repository"),
             dependency_sources=node_config.get("dependency_sources"),
+            branch=node_config.get("branch"),
+            pinned_commit=node_config.get("pinned_commit"),
         )
 
 @dataclass

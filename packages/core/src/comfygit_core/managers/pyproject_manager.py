@@ -813,7 +813,9 @@ class NodeHandler(BaseHandler):
                 version=node_data.get('version'),
                 source=node_data.get('source', 'unknown'),
                 download_url=node_data.get('download_url'),
-                dependency_sources=node_data.get('dependency_sources')
+                dependency_sources=node_data.get('dependency_sources'),
+                branch=node_data.get('branch'),
+                pinned_commit=node_data.get('pinned_commit'),
             )
 
         return result

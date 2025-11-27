@@ -1356,9 +1356,77 @@ class Environment:
             if callbacks:
                 callbacks.on_models_without_sources(models_without_sources)
 
+        # Auto-populate git info for dev nodes before export
+        self._auto_populate_dev_node_git_info(callbacks)
+
         # Create export
         manager = ExportImportManager(self.cec_path, self.comfyui_path)
         return manager.create_export(output_path, self.pyproject)
+
+    def _auto_populate_dev_node_git_info(
+        self,
+        callbacks: ExportCallbacks | None = None
+    ) -> None:
+        """Auto-populate git info (repository/branch/pinned_commit) for dev nodes.
+
+        Called during export to capture git state for dev nodes that have git remotes.
+        This enables teammates to clone from the same repository.
+
+        Dev nodes without git remotes will trigger a callback notification but
+        will still be exported (they just can't be shared).
+        """
+        from ..analyzers.node_git_analyzer import get_node_git_info
+
+        nodes = self.pyproject.nodes.get_existing()
+        config = self.pyproject.load()
+        modified = False
+
+        for identifier, node_info in nodes.items():
+            if node_info.source != 'development':
+                continue
+
+            node_path = self.custom_nodes_path / node_info.name
+            if not node_path.exists():
+                continue
+
+            # Get git info from the node's directory
+            git_info = get_node_git_info(node_path)
+
+            if git_info is None:
+                # Not a git repo - notify callback
+                if callbacks and hasattr(callbacks, 'on_dev_node_no_git'):
+                    callbacks.on_dev_node_no_git(node_info.name)
+                continue
+
+            if not git_info.remote_url:
+                # Git repo but no remote - notify callback
+                if callbacks and hasattr(callbacks, 'on_dev_node_no_git'):
+                    callbacks.on_dev_node_no_git(node_info.name)
+                continue
+
+            # Update node info with git data
+            node_data = config['tool']['comfygit']['nodes'].get(identifier, {})
+            update_needed = False
+
+            if git_info.remote_url and node_data.get('repository') != git_info.remote_url:
+                node_data['repository'] = git_info.remote_url
+                update_needed = True
+
+            if git_info.branch and node_data.get('branch') != git_info.branch:
+                node_data['branch'] = git_info.branch
+                update_needed = True
+
+            if git_info.commit and node_data.get('pinned_commit') != git_info.commit:
+                node_data['pinned_commit'] = git_info.commit
+                update_needed = True
+
+            if update_needed:
+                config['tool']['comfygit']['nodes'][identifier] = node_data
+                modified = True
+                logger.info(f"Captured git info for dev node '{node_info.name}'")
+
+        if modified:
+            self.pyproject.save(config)
 
     def finalize_import(
         self,
