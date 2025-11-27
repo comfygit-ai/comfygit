@@ -335,13 +335,14 @@ class EnvironmentCommands:
                 }
 
             # Show workflows with inline issue details
+            verbose = args.verbose
             for name in status.workflow.sync_status.synced:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
                     # Show warning if has issues OR path sync needed
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (synced)")
-                        self._print_workflow_issues(wf)
+                        self._print_workflow_issues(wf, verbose)
                     else:
                         print(f"  ✓ {name}")
 
@@ -351,7 +352,7 @@ class EnvironmentCommands:
                     # Show warning if has issues OR path sync needed
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (new)")
-                        self._print_workflow_issues(wf)
+                        self._print_workflow_issues(wf, verbose)
                     else:
                         print(f"  🆕 {name} (new, ready to commit)")
 
@@ -364,7 +365,7 @@ class EnvironmentCommands:
                     # Show warning if has issues OR path sync needed
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (modified)")
-                        self._print_workflow_issues(wf)
+                        self._print_workflow_issues(wf, verbose)
                     elif missing_for_wf:
                         print(f"  ⬇️  {name} (modified, missing models)")
                         print(f"      {len(missing_for_wf)} model(s) need downloading")
@@ -450,7 +451,7 @@ class EnvironmentCommands:
 
     # Removed: _has_uninstalled_packages - this logic is now in core's WorkflowAnalysisStatus
 
-    def _print_workflow_issues(self, wf_analysis: WorkflowAnalysisStatus) -> None:
+    def _print_workflow_issues(self, wf_analysis: WorkflowAnalysisStatus, verbose: bool = False) -> None:
         """Print compact workflow issues summary using model properties only."""
         # Build compact summary using WorkflowAnalysisStatus properties (no pyproject access!)
         parts = []
@@ -458,6 +459,10 @@ class EnvironmentCommands:
         # Path sync warnings (FIRST - most actionable fix)
         if wf_analysis.models_needing_path_sync_count > 0:
             parts.append(f"{wf_analysis.models_needing_path_sync_count} model paths need syncing")
+
+        # Category mismatch (blocking - model in wrong directory for loader)
+        if wf_analysis.models_with_category_mismatch_count > 0:
+            parts.append(f"{wf_analysis.models_with_category_mismatch_count} models in wrong directory")
 
         # Use the uninstalled_count property (populated by core)
         if wf_analysis.uninstalled_count > 0:
@@ -479,6 +484,19 @@ class EnvironmentCommands:
         # Print compact issue line
         if parts:
             print(f"      {', '.join(parts)}")
+
+        # Detailed category mismatch info (always show brief, verbose shows full details)
+        if wf_analysis.has_category_mismatch_issues:
+            for model in wf_analysis.resolution.models_resolved:
+                if model.has_category_mismatch:
+                    expected = model.expected_categories[0] if model.expected_categories else "unknown"
+                    if verbose:
+                        print(f"        ↳ {model.name}")
+                        print(f"          Node: {model.reference.node_type} expects {expected}/")
+                        print(f"          Actual: {model.actual_category}/")
+                        print(f"          Fix: Move file to models/{expected}/ or re-download")
+                    else:
+                        print(f"        ↳ {model.name}: in {model.actual_category}/, needs {expected}/")
 
     def _show_smart_suggestions(self, status: EnvironmentStatus) -> None:
         """Show contextual suggestions based on current state."""
@@ -557,6 +575,25 @@ class EnvironmentCommands:
                 suggestions.append("Or remove untracked: cg repair")
             else:
                 suggestions.append("Run: cg repair")
+            print("\n💡 Next:")
+            for s in suggestions:
+                print(f"  {s}")
+            return
+
+        # Category mismatch (blocking - model in wrong directory for loader)
+        workflows_with_category_mismatch = [
+            w for w in status.workflow.analyzed_workflows
+            if w.has_category_mismatch_issues
+        ]
+
+        if workflows_with_category_mismatch:
+            suggestions.append("Models in wrong directory (move files manually):")
+            for wf in workflows_with_category_mismatch[:2]:
+                for m in wf.resolution.models_resolved:
+                    if m.has_category_mismatch:
+                        expected = m.expected_categories[0] if m.expected_categories else "unknown"
+                        suggestions.append(f"  {m.actual_category}/{m.name} → {expected}/")
+
             print("\n💡 Next:")
             for s in suggestions:
                 print(f"  {s}")
@@ -2335,6 +2372,9 @@ class EnvironmentCommands:
         # Display final results - check issues first
         uninstalled = env.get_uninstalled_nodes(workflow_name=args.name)
 
+        # Check for category mismatch (blocking issue that resolve can't fix)
+        category_mismatches = [m for m in result.models_resolved if m.has_category_mismatch]
+
         if result.has_issues or uninstalled:
             print("\n⚠️  Partial resolution - issues remain:")
 
@@ -2353,9 +2393,17 @@ class EnvironmentCommands:
                 print(f"  ✗ {len(result.models_ambiguous)} ambiguous models")
             if uninstalled:
                 print(f"  ✗ {len(uninstalled)} packages need installation")
+            if category_mismatches:
+                print(f"  ✗ {len(category_mismatches)} models in wrong directory")
 
             print("\n💡 Next:")
-            print(f"  Re-run: cg workflow resolve \"{args.name}\"")
+            if category_mismatches:
+                print("  Models in wrong directory (move files manually):")
+                for m in category_mismatches:
+                    expected = m.expected_categories[0] if m.expected_categories else "unknown"
+                    print(f"    {m.actual_category}/{m.name} → {expected}/")
+            else:
+                print(f"  Re-run: cg workflow resolve \"{args.name}\"")
             print("  Or commit with issues: cg commit -m \"...\" --allow-issues")
 
         elif result.models_resolved or result.nodes_resolved:
@@ -2388,12 +2436,34 @@ class EnvironmentCommands:
                 print(f"  Try again: cg workflow resolve \"{args.name}\"")
                 print("  Or commit anyway: cg commit -m \"...\" --allow-issues")
             else:
-                print("\n✅ Resolution complete!")
-                if result.models_resolved:
-                    print(f"  • Resolved {len(result.models_resolved)} models")
-                if result.nodes_resolved:
-                    print(f"  • Resolved {len(result.nodes_resolved)} nodes")
-                print("\n💡 Next:")
-                print(f"  Commit workflows: cg commit -m \"Resolved {args.name}\"")
+                # Check for category mismatch even in "success" case
+                if category_mismatches:
+                    print("\n⚠️  Resolution complete but models in wrong directory:")
+                    if result.models_resolved:
+                        print(f"  ✓ Resolved {len(result.models_resolved)} models")
+                    if result.nodes_resolved:
+                        print(f"  ✓ Resolved {len(result.nodes_resolved)} nodes")
+                    print(f"  ✗ {len(category_mismatches)} models in wrong directory")
+                    print("\n💡 Next (move files manually):")
+                    for m in category_mismatches:
+                        expected = m.expected_categories[0] if m.expected_categories else "unknown"
+                        print(f"    {m.actual_category}/{m.name} → {expected}/")
+                else:
+                    print("\n✅ Resolution complete!")
+                    if result.models_resolved:
+                        print(f"  • Resolved {len(result.models_resolved)} models")
+                    if result.nodes_resolved:
+                        print(f"  • Resolved {len(result.nodes_resolved)} nodes")
+                    print("\n💡 Next:")
+                    print(f"  Commit workflows: cg commit -m \"Resolved {args.name}\"")
         else:
-            print("✓ No changes needed - all dependencies already resolved")
+            # No changes case - still check for category mismatch
+            if category_mismatches:
+                print("\n⚠️  No resolution changes but models in wrong directory:")
+                print(f"  ✗ {len(category_mismatches)} models in wrong directory")
+                print("\n💡 Next (move files manually):")
+                for m in category_mismatches:
+                    expected = m.expected_categories[0] if m.expected_categories else "unknown"
+                    print(f"    {m.actual_category}/{m.name} → {expected}/")
+            else:
+                print("✓ No changes needed - all dependencies already resolved")
