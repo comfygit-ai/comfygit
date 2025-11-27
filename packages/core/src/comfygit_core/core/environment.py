@@ -1111,13 +1111,22 @@ class Environment:
                 # Apply resolution results to pyproject (in-memory mutations)
                 self.workflow_manager.apply_resolution(wf_analysis.resolution, config=config)
 
-        # Clean up deleted workflows from pyproject.toml
-        if workflow_status.sync_status.deleted:
-            logger.info("Cleaning up deleted workflows from pyproject.toml...")
-            removed_count = self.pyproject.workflows.remove_workflows(
-                workflow_status.sync_status.deleted,
-                config=config
-            )
+        # Clean up orphaned workflows from pyproject.toml
+        # This handles BOTH:
+        # 1. Committed workflows deleted from ComfyUI (detected by sync_status.deleted)
+        # 2. Resolved-but-never-committed workflows deleted from ComfyUI (only in pyproject)
+        workflows_in_pyproject = set(
+            config.get('tool', {}).get('comfygit', {}).get('workflows', {}).keys()
+        )
+        workflows_in_comfyui = set()
+        comfyui_workflows_dir = self.comfyui_path / "user" / "default" / "workflows"
+        if comfyui_workflows_dir.exists():
+            workflows_in_comfyui = {f.stem for f in comfyui_workflows_dir.glob("*.json")}
+
+        orphaned_workflows = list(workflows_in_pyproject - workflows_in_comfyui)
+        if orphaned_workflows:
+            logger.info(f"Cleaning up {len(orphaned_workflows)} orphaned workflow(s) from pyproject.toml...")
+            removed_count = self.pyproject.workflows.remove_workflows(orphaned_workflows, config=config)
             logger.debug(f"Removed {removed_count} workflow section(s)")
 
             # Clean up orphaned models (must run AFTER workflow sections are removed)

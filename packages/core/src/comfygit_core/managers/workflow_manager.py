@@ -1386,20 +1386,16 @@ class WorkflowManager:
         # Write all models to workflow
         self.pyproject.workflows.set_workflow_models(workflow_name, manifest_models, config=config)
 
-        # Clean up deleted workflows from pyproject.toml
-        # This handles both:
-        # 1. Committed workflows that were deleted (in .cec, in pyproject, not in ComfyUI)
-        # 2. Resolved-but-not-committed workflows (in pyproject, not in .cec, not in ComfyUI)
-        # Read from in-memory config instead of loading from disk
+        # Clean up orphaned workflows from pyproject.toml
+        # This handles workflows deleted from ComfyUI (whether committed or never-committed)
         workflows_in_pyproject = set(config.get('tool', {}).get('comfygit', {}).get('workflows', {}).keys())
         workflows_in_comfyui = set()
         if self.comfyui_workflows.exists():
-            for workflow_file in self.comfyui_workflows.glob("*.json"):
-                workflows_in_comfyui.add(workflow_file.stem)
+            workflows_in_comfyui = {f.stem for f in self.comfyui_workflows.glob("*.json")}
 
-        workflows_to_remove = workflows_in_pyproject - workflows_in_comfyui
-        if workflows_to_remove:
-            removed_count = self.pyproject.workflows.remove_workflows(list(workflows_to_remove), config=config)
+        orphaned_workflows = workflows_in_pyproject - workflows_in_comfyui
+        if orphaned_workflows:
+            removed_count = self.pyproject.workflows.remove_workflows(list(orphaned_workflows), config=config)
             if removed_count > 0:
                 logger.info(f"Cleaned up {removed_count} deleted workflow(s) from pyproject.toml")
 
