@@ -535,11 +535,7 @@ class WorkflowCacheRepository:
     def _deserialize_dependencies(self, dependencies_json: str) -> WorkflowDependencies:
         """Deserialize JSON string to WorkflowDependencies.
 
-        Args:
-            dependencies_json: JSON string
-
-        Returns:
-            WorkflowDependencies object
+        Uses **kwargs to auto-forward new fields without explicit mapping.
         """
         from ..models.workflow import WorkflowNode, WorkflowNodeWidgetRef
 
@@ -550,8 +546,14 @@ class WorkflowCacheRepository:
         non_builtin_nodes = [WorkflowNode(**node) for node in deps_dict.get('non_builtin_nodes', [])]
         found_models = [WorkflowNodeWidgetRef(**ref) for ref in deps_dict.get('found_models', [])]
 
+        # Auto-forward all other fields, override nested objects
+        simple_fields = {
+            k: v for k, v in deps_dict.items()
+            if k not in ('builtin_nodes', 'non_builtin_nodes', 'found_models')
+        }
+
         return WorkflowDependencies(
-            workflow_name=deps_dict['workflow_name'],
+            **simple_fields,
             builtin_nodes=builtin_nodes,
             non_builtin_nodes=non_builtin_nodes,
             found_models=found_models
@@ -623,26 +625,32 @@ class WorkflowCacheRepository:
                 **{**node_dict, 'package_data': reconstruct_package_data(pkg_data)}
             )
 
-        # Reconstruct ResolvedModel with nested ModelWithLocation
+        # Reconstruct ResolvedModel with nested objects
+        # Uses **kwargs to auto-forward new fields without explicit mapping
         def reconstruct_resolved_model(model_dict: dict) -> ResolvedModel:
+            # Fields requiring special handling (nested objects, Path conversion)
             reference = WorkflowNodeWidgetRef(**model_dict['reference'])
+
             resolved_model = None
             if model_dict.get('resolved_model'):
                 resolved_model = ModelWithLocation(**model_dict['resolved_model'])
+
             target_path = None
             if model_dict.get('target_path'):
                 target_path = Path(model_dict['target_path'])
 
+            # Auto-forward all other fields via **kwargs
+            # Exclude fields we're handling explicitly to avoid duplicate kwargs
+            simple_fields = {
+                k: v for k, v in model_dict.items()
+                if k not in ('reference', 'resolved_model', 'target_path')
+            }
+
             return ResolvedModel(
-                workflow=model_dict['workflow'],
+                **simple_fields,
                 reference=reference,
                 resolved_model=resolved_model,
-                model_source=model_dict.get('model_source'),
-                is_optional=model_dict.get('is_optional', False),
-                match_type=model_dict.get('match_type'),
-                match_confidence=model_dict.get('match_confidence', 1.0),
                 target_path=target_path,
-                needs_path_sync=model_dict.get('needs_path_sync', False)
             )
 
         # Reconstruct nested dataclasses
@@ -662,8 +670,18 @@ class WorkflowCacheRepository:
 
         download_results = [DownloadResult(**dl) for dl in res_dict.get('download_results', [])]
 
+        # Auto-forward any new fields, override nested objects
+        simple_fields = {
+            k: v for k, v in res_dict.items()
+            if k not in (
+                'nodes_resolved', 'nodes_unresolved', 'nodes_ambiguous',
+                'models_resolved', 'models_unresolved', 'models_ambiguous',
+                'download_results'
+            )
+        }
+
         return ResolutionResult(
-            workflow_name=res_dict['workflow_name'],
+            **simple_fields,
             nodes_resolved=nodes_resolved,
             nodes_unresolved=nodes_unresolved,
             nodes_ambiguous=nodes_ambiguous,

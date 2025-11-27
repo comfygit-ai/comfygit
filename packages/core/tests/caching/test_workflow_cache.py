@@ -615,3 +615,162 @@ class TestCacheHashVerification:
             "Cache should MISS when content hash differs, even if mtime+size matches. "
             "The mtime+size fast path must verify content hash before returning cached data."
         )
+
+
+class TestResolutionRoundTrip:
+    """Test that all dataclass fields survive cache serialization/deserialization.
+
+    This catches bugs where new fields are added to dataclasses but not included
+    in the reconstruct_* functions.
+    """
+
+    def test_resolved_model_category_mismatch_fields_survive_cache(
+        self,
+        tmp_path,
+        sample_workflow_file,
+        sample_dependencies
+    ):
+        """Category mismatch fields on ResolvedModel must survive cache round-trip.
+
+        Bug: reconstruct_resolved_model() explicitly maps each field, so new fields
+        (has_category_mismatch, expected_categories, actual_category) get dropped.
+        """
+        from comfygit_core.models.workflow import (
+            ResolutionResult, ResolvedModel, WorkflowNodeWidgetRef
+        )
+
+        db_path = tmp_path / "test.db"
+        cache = WorkflowCacheRepository(db_path)
+
+        # Create pyproject.toml (needed for full cache hit with resolution)
+        pyproject_path = tmp_path / "pyproject.toml"
+        pyproject_path.write_text("[project]\nname = 'test'\n")
+
+        # Create a ResolvedModel with category mismatch fields populated
+        reference = WorkflowNodeWidgetRef(
+            node_id="1",
+            node_type="LoraLoader",
+            widget_index=0,
+            widget_value="test_lora.safetensors"
+        )
+
+        resolved_model = ResolvedModel(
+            workflow="test_workflow",
+            reference=reference,
+            resolved_model=None,
+            model_source=None,
+            is_optional=False,
+            match_type="filename",
+            match_confidence=0.7,
+            target_path=None,
+            needs_path_sync=True,
+            # The new category mismatch fields
+            has_category_mismatch=True,
+            expected_categories=["loras"],
+            actual_category="checkpoints"
+        )
+
+        resolution = ResolutionResult(
+            workflow_name="test_workflow",
+            models_resolved=[resolved_model]
+        )
+
+        # Cache the resolution with pyproject_path
+        cache.set(
+            env_name="test-env",
+            workflow_name="test_workflow",
+            workflow_path=sample_workflow_file,
+            dependencies=sample_dependencies,
+            resolution=resolution,
+            pyproject_path=pyproject_path
+        )
+
+        # Clear session cache to force deserialization from SQLite
+        cache._session_cache.clear()
+
+        # Retrieve from cache (provide same pyproject_path for full hit)
+        result = cache.get(
+            "test-env", "test_workflow", sample_workflow_file,
+            pyproject_path=pyproject_path
+        )
+
+        assert result is not None
+        assert result.resolution is not None, \
+            "Resolution should be returned on cache hit with pyproject_path"
+        assert len(result.resolution.models_resolved) == 1
+
+        cached_model = result.resolution.models_resolved[0]
+
+        # These assertions fail with the bug (fields are dropped during deserialization)
+        assert cached_model.has_category_mismatch == True, \
+            "has_category_mismatch should survive cache round-trip"
+        assert cached_model.expected_categories == ["loras"], \
+            "expected_categories should survive cache round-trip"
+        assert cached_model.actual_category == "checkpoints", \
+            "actual_category should survive cache round-trip"
+
+        # Verify other fields are still correct
+        assert cached_model.needs_path_sync == True
+        assert cached_model.match_type == "filename"
+        assert cached_model.match_confidence == 0.7
+
+    def test_old_cache_entries_without_new_fields_use_defaults(self, tmp_path):
+        """Old cache entries (missing new fields) should use dataclass defaults gracefully.
+
+        This ensures backward compatibility when loading cache created before
+        new fields were added.
+        """
+        from comfygit_core.models.workflow import (
+            ResolutionResult, ResolvedModel, WorkflowNodeWidgetRef
+        )
+        from comfygit_core.caching.workflow_cache import WorkflowCacheRepository
+        import json
+
+        db_path = tmp_path / "test.db"
+        cache = WorkflowCacheRepository(db_path)
+
+        # Simulate old cache entry without category mismatch fields
+        old_model_dict = {
+            'workflow': 'test',
+            'reference': {
+                'node_id': '1',
+                'node_type': 'LoraLoader',
+                'widget_index': 0,
+                'widget_value': 'test.safetensors'
+            },
+            'resolved_model': None,
+            'model_source': None,
+            'is_optional': False,
+            'match_type': 'filename',
+            'match_confidence': 0.7,
+            'target_path': None,
+            'needs_path_sync': True
+            # NOTE: No has_category_mismatch, expected_categories, actual_category
+        }
+
+        # Call the private deserialize method directly to test backward compat
+        old_resolution_dict = {
+            'workflow_name': 'test',
+            'nodes_resolved': [],
+            'nodes_unresolved': [],
+            'nodes_ambiguous': [],
+            'models_resolved': [old_model_dict],
+            'models_unresolved': [],
+            'models_ambiguous': [],
+            'download_results': []
+        }
+
+        # Deserialize should not raise, should use defaults
+        result = cache._deserialize_resolution(json.dumps(old_resolution_dict))
+
+        assert len(result.models_resolved) == 1
+        model = result.models_resolved[0]
+
+        # New fields should use defaults
+        assert model.has_category_mismatch == False
+        assert model.expected_categories == []
+        assert model.actual_category is None
+
+        # Existing fields should still work
+        assert model.needs_path_sync == True
+        assert model.match_type == "filename"
