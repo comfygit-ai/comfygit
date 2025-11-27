@@ -958,6 +958,59 @@ def git_remote_remove(repo_path: Path, name: str) -> None:
     _git(["remote", "remove", name], repo_path)
 
 
+def git_remote_set_url(repo_path: Path, name: str, url: str, push: bool = False) -> None:
+    """Set URL for a git remote.
+
+    Args:
+        repo_path: Path to git repository
+        name: Remote name
+        url: New URL
+        push: If True, update push URL; otherwise update fetch URL
+
+    Raises:
+        ValueError: If remote doesn't exist
+        OSError: If update fails
+    """
+    # Check if remote exists
+    existing_url = git_remote_get_url(repo_path, name)
+    if not existing_url:
+        raise ValueError(f"Remote '{name}' not found")
+
+    cmd = ["remote", "set-url"]
+    if push:
+        cmd.append("--push")
+    cmd.extend([name, url])
+
+    _git(cmd, repo_path)
+
+
+def git_rev_list_count(repo_path: Path, left_ref: str, right_ref: str) -> tuple[int, int]:
+    """Count commits ahead and behind between two refs.
+
+    Uses symmetric difference (left...right) to count commits unique to each ref.
+
+    Args:
+        repo_path: Path to git repository
+        left_ref: Left reference (e.g., "origin/main")
+        right_ref: Right reference (e.g., "HEAD")
+
+    Returns:
+        Tuple of (left_only, right_only) counts - commits unique to each side
+    """
+    result = _git(
+        ["rev-list", "--left-right", "--count", f"{left_ref}...{right_ref}"],
+        repo_path,
+        check=False
+    )
+    if result.returncode != 0:
+        return (0, 0)
+
+    parts = result.stdout.strip().split('\t')
+    if len(parts) == 2:
+        return (int(parts[0]), int(parts[1]))
+    return (0, 0)
+
+
 def git_remote_list(repo_path: Path) -> list[tuple[str, str, str]]:
     """List all git remotes.
 
