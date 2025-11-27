@@ -193,17 +193,153 @@ class TestPhase2ExportChanges:
 class TestPhase3ImportChanges:
     """Phase 3: Import should clone dev nodes from git reference."""
 
-    def test_import_clones_dev_node_from_git_reference(self, test_workspace, tmp_path):
-        """Import should clone dev node from repository URL if node is missing."""
-        pytest.skip("Requires mocking git clone - implement after core changes")
+    def test_sync_clones_missing_dev_node_with_repository(self, test_env):
+        """sync_nodes_to_filesystem should clone dev node from repository if missing."""
+        from unittest.mock import patch, MagicMock
 
-    def test_import_skips_existing_dev_node(self, test_workspace, tmp_path):
-        """Import should skip dev node if directory already exists locally."""
-        pytest.skip("Requires full import setup - implement after core changes")
+        # ARRANGE - Track a dev node with repository but NO local directory
+        node_info = NodeInfo(
+            name="team-dev-node",
+            source="development",
+            version="dev",
+            repository="https://github.com/user/team-dev-node.git",
+            branch="dev"
+        )
+        test_env.pyproject.nodes.add(node_info, "team-dev-node")
 
-    def test_import_warns_for_dev_node_without_repository(self, test_workspace, tmp_path):
-        """Import should warn (not error) when dev node has no repository URL."""
-        pytest.skip("Requires callback testing - implement after core changes")
+        # Verify node does NOT exist on filesystem
+        node_path = test_env.comfyui_path / "custom_nodes" / "team-dev-node"
+        assert not node_path.exists(), "Node should NOT exist before sync"
+
+        # ACT - Mock git_clone to verify it gets called
+        with patch('comfygit_core.managers.node_manager.git_clone') as mock_clone:
+            # Make mock create the directory (simulating successful clone)
+            # Match the actual function signature: git_clone(url, target_path, depth=1, ref=None, timeout=30)
+            def clone_side_effect(url, target_path, depth=1, ref=None, timeout=30):
+                target_path.mkdir(parents=True, exist_ok=True)
+                (target_path / "nodes.py").write_text("# cloned code")
+
+            mock_clone.side_effect = clone_side_effect
+
+            test_env.node_manager.sync_nodes_to_filesystem()
+
+            # ASSERT - git_clone should have been called for the dev node
+            mock_clone.assert_called_once()
+            call_args = mock_clone.call_args
+            # Check kwargs since we're calling with keyword args
+            assert call_args.kwargs.get('url') == "https://github.com/user/team-dev-node.git"
+            assert "team-dev-node" in str(call_args.kwargs.get('target_path'))
+            # Should use branch, not depth=1 (full clone for dev nodes)
+            assert call_args.kwargs.get('ref') == "dev"
+            assert call_args.kwargs.get('depth') == 0  # Full clone, not shallow
+
+    def test_sync_clones_dev_node_with_pinned_commit_when_no_branch(self, test_env):
+        """sync_nodes_to_filesystem should use pinned_commit if branch not set."""
+        from unittest.mock import patch
+
+        # ARRANGE - Dev node with pinned_commit but no branch
+        node_info = NodeInfo(
+            name="pinned-dev-node",
+            source="development",
+            version="dev",
+            repository="https://github.com/user/pinned-dev-node.git",
+            pinned_commit="abc123def456"
+        )
+        test_env.pyproject.nodes.add(node_info, "pinned-dev-node")
+
+        # ACT
+        with patch('comfygit_core.managers.node_manager.git_clone') as mock_clone:
+            def clone_side_effect(url, target_path, depth=1, ref=None, timeout=30):
+                target_path.mkdir(parents=True, exist_ok=True)
+
+            mock_clone.side_effect = clone_side_effect
+            test_env.node_manager.sync_nodes_to_filesystem()
+
+            # ASSERT - Should use pinned_commit as ref
+            mock_clone.assert_called_once()
+            call_args = mock_clone.call_args
+            assert call_args.kwargs.get('ref') == "abc123def456"
+
+    def test_sync_skips_existing_dev_node(self, test_env):
+        """sync_nodes_to_filesystem should NOT clone dev node if already exists."""
+        from unittest.mock import patch
+
+        # ARRANGE - Dev node with repository AND local directory exists
+        node_info = NodeInfo(
+            name="existing-dev-node",
+            source="development",
+            version="dev",
+            repository="https://github.com/user/existing-dev-node.git",
+            branch="main"
+        )
+        test_env.pyproject.nodes.add(node_info, "existing-dev-node")
+
+        # Create the directory (simulating existing local copy)
+        node_path = test_env.comfyui_path / "custom_nodes" / "existing-dev-node"
+        node_path.mkdir(parents=True)
+        (node_path / "nodes.py").write_text("# local code")
+
+        # ACT
+        with patch('comfygit_core.managers.node_manager.git_clone') as mock_clone:
+            test_env.node_manager.sync_nodes_to_filesystem()
+
+            # ASSERT - git_clone should NOT have been called
+            mock_clone.assert_not_called()
+
+        # Local code should be preserved
+        assert (node_path / "nodes.py").read_text() == "# local code"
+
+    def test_sync_warns_for_dev_node_without_repository(self, test_env):
+        """sync_nodes_to_filesystem should warn via callback when dev node has no repository."""
+        from unittest.mock import MagicMock
+
+        # ARRANGE - Dev node WITHOUT repository
+        node_info = NodeInfo(
+            name="local-only-node",
+            source="development",
+            version="dev"
+            # No repository field
+        )
+        test_env.pyproject.nodes.add(node_info, "local-only-node")
+
+        # Create mock callbacks
+        callbacks = MagicMock()
+
+        # ACT
+        test_env.node_manager.sync_nodes_to_filesystem(callbacks=callbacks)
+
+        # ASSERT - Callback should have been called for missing repo
+        callbacks.on_dev_node_missing_repository.assert_called_once_with("local-only-node")
+
+    def test_sync_calls_dev_node_cloned_callback(self, test_env):
+        """sync_nodes_to_filesystem should call on_dev_node_cloned callback on success."""
+        from unittest.mock import patch, MagicMock
+
+        # ARRANGE
+        node_info = NodeInfo(
+            name="callback-test-node",
+            source="development",
+            version="dev",
+            repository="https://github.com/user/callback-test-node.git",
+            branch="main"
+        )
+        test_env.pyproject.nodes.add(node_info, "callback-test-node")
+
+        callbacks = MagicMock()
+
+        # ACT
+        with patch('comfygit_core.managers.node_manager.git_clone') as mock_clone:
+            def clone_side_effect(url, target_path, depth=1, ref=None, timeout=30):
+                target_path.mkdir(parents=True, exist_ok=True)
+
+            mock_clone.side_effect = clone_side_effect
+            test_env.node_manager.sync_nodes_to_filesystem(callbacks=callbacks)
+
+            # ASSERT
+            callbacks.on_dev_node_cloned.assert_called_once_with(
+                "callback-test-node",
+                "https://github.com/user/callback-test-node.git"
+            )
 
 
 class TestPhase4RollbackChanges:

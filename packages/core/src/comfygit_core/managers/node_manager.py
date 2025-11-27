@@ -22,7 +22,7 @@ from ..services.node_lookup_service import NodeLookupService
 from ..strategies.confirmation import AutoConfirmStrategy, ConfirmationStrategy
 from ..utils.conflict_parser import extract_conflicting_packages
 from ..utils.dependency_parser import parse_dependency_string
-from ..utils.git import is_github_url, normalize_github_url
+from ..utils.git import git_clone, is_github_url, normalize_github_url
 from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
@@ -628,7 +628,77 @@ class NodeManager:
         if callbacks and callbacks.on_batch_complete and nodes_to_install:
             callbacks.on_batch_complete(success_count, len(nodes_to_install))
 
+        # Handle missing dev nodes with repository (clone from git)
+        self._sync_dev_nodes_from_git(expected_nodes, existing_nodes, callbacks)
+
         logger.info("Finished syncing custom nodes")
+
+    def _sync_dev_nodes_from_git(self, expected_nodes: dict, existing_nodes: dict, callbacks=None):
+        """Clone missing dev nodes that have repository URLs.
+
+        Dev nodes with repository are cloned if missing locally.
+        Dev nodes without repository trigger a warning callback.
+        Dev nodes that already exist locally are skipped (local state is authoritative).
+
+        Args:
+            expected_nodes: Dict of identifier -> NodeInfo from pyproject.toml
+            existing_nodes: Dict of node_name -> Path for nodes on filesystem
+            callbacks: Optional callbacks for progress feedback
+        """
+        for identifier, node_info in expected_nodes.items():
+            if node_info.source != 'development':
+                continue
+
+            node_path = self.custom_nodes_path / node_info.name
+
+            # Skip if already exists locally (local state is authoritative)
+            if node_path.exists():
+                logger.debug(f"Dev node '{node_info.name}' exists locally, skipping")
+                continue
+
+            # No repository - can't clone, warn via callback
+            if not node_info.repository:
+                logger.warning(f"Dev node '{node_info.name}' missing and has no repository")
+                if callbacks and hasattr(callbacks, 'on_dev_node_missing_repository'):
+                    callbacks.on_dev_node_missing_repository(node_info.name)
+                continue
+
+            # Clone from repository
+            success = self._install_dev_node_from_git(node_info)
+            if success and callbacks and hasattr(callbacks, 'on_dev_node_cloned'):
+                callbacks.on_dev_node_cloned(node_info.name, node_info.repository)
+
+    def _install_dev_node_from_git(self, node_info: NodeInfo) -> bool:
+        """Clone dev node from git reference.
+
+        Args:
+            node_info: NodeInfo with repository and optional branch/pinned_commit
+
+        Returns:
+            True if successfully cloned, False otherwise
+        """
+        node_path = self.custom_nodes_path / node_info.name
+
+        # Determine ref: branch takes priority over pinned_commit
+        ref = node_info.branch or node_info.pinned_commit
+
+        logger.info(f"Cloning dev node '{node_info.name}' from {node_info.repository}")
+        if ref:
+            logger.info(f"  Using ref: {ref}")
+
+        try:
+            # Full clone (depth=0) for dev nodes since developers will push changes
+            git_clone(
+                url=node_info.repository,
+                target_path=node_path,
+                depth=0,
+                ref=ref
+            )
+            logger.info(f"Successfully cloned dev node: {node_info.name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clone dev node '{node_info.name}': {e}")
+            return False
 
     def reconcile_nodes_for_rollback(self, old_nodes: dict[str, NodeInfo], new_nodes: dict[str, NodeInfo]):
         """Reconcile filesystem nodes after rollback with full context.
