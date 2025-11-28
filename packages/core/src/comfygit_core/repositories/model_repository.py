@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import xxhash
 from blake3 import blake3
 
 from ..logging.logging_config import get_logger
@@ -14,7 +15,8 @@ from ..infrastructure.sqlite_manager import SQLiteManager
 logger = get_logger(__name__)
 
 # Database schema version
-SCHEMA_VERSION = 9
+# v10: Switch from blake3 to xxhash for short hash (7x faster)
+SCHEMA_VERSION = 10
 
 # Models table: One entry per unique model file (by hash)
 CREATE_MODELS_TABLE = """
@@ -658,10 +660,10 @@ class ModelRepository:
         logger.debug(f"Updated SHA256 for {hash[:8]}...: {sha256_hash[:8]}...")
 
     def calculate_short_hash(self, file_path: Path) -> str:
-        """Calculate fast short hash by sampling file chunks.
+        """Calculate fast short hash by sampling file chunks using xxhash.
 
         Samples 5MB each from start, middle, and end of file plus file size.
-        Provides excellent duplicate detection with ~200ms vs 30-60s for full hash.
+        Uses xxhash for ~7x faster hashing compared to blake3.
 
         Args:
             file_path: Path to model file
@@ -677,7 +679,7 @@ class ModelRepository:
                 raise ComfyDockError(f"File does not exist or is not a regular file: {file_path}")
 
             file_size = file_path.stat().st_size
-            hasher = blake3()
+            hasher = xxhash.xxh3_128()
 
             # Include file size as discriminator
             hasher.update(str(file_size).encode())
