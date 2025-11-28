@@ -7,6 +7,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..analyzers.ref_diff_analyzer import RefDiffAnalyzer
 from ..analyzers.status_scanner import StatusScanner
 from ..factories.uv_factory import create_uv_for_environment
 from ..logging.logging_config import get_logger
@@ -27,6 +28,7 @@ from ..models.shared import (
     NodeRemovalResult,
     UpdateResult,
 )
+from ..models.ref_diff import RefDiff
 from ..models.sync import SyncResult
 from ..strategies.confirmation import ConfirmationStrategy
 from ..utils.common import run_command
@@ -416,6 +418,52 @@ class Environment:
             logger.warning(f"Sync completed with {len(result.errors)} errors")
 
         return result
+
+    # =====================================================
+    # Pull/Merge Preview
+    # =====================================================
+
+    def preview_pull(
+        self,
+        remote: str = "origin",
+        branch: str | None = None,
+    ) -> RefDiff:
+        """Preview what changes a pull operation would bring.
+
+        Fetches from remote and compares to show what nodes, models,
+        workflows, and dependencies would change.
+
+        Args:
+            remote: Remote name (default: origin)
+            branch: Branch to pull (default: current branch)
+
+        Returns:
+            RefDiff showing all changes
+        """
+        from ..utils.git import git_fetch, git_get_current_branch
+
+        # Fetch to update remote refs
+        git_fetch(self.cec_path, remote)
+
+        # Determine target ref
+        current_branch = branch or git_get_current_branch(self.cec_path)
+        target_ref = f"{remote}/{current_branch}"
+
+        # Analyze diff
+        analyzer = RefDiffAnalyzer(self.cec_path)
+        return analyzer.analyze(base_ref="HEAD", target_ref=target_ref)
+
+    def preview_merge(self, branch: str) -> RefDiff:
+        """Preview what changes merging a branch would bring.
+
+        Args:
+            branch: Branch to merge
+
+        Returns:
+            RefDiff showing all changes and conflicts
+        """
+        analyzer = RefDiffAnalyzer(self.cec_path)
+        return analyzer.analyze(base_ref="HEAD", target_ref=branch, detect_conflicts=True)
 
     def pull_and_repair(
         self,
