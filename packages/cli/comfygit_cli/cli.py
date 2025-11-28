@@ -442,6 +442,11 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     merge_parser = subparsers.add_parser("merge", help="Merge branch into current")
     merge_parser.add_argument("branch", help="Branch to merge")
     merge_parser.add_argument("-m", "--message", help="Merge commit message")
+    merge_parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Preview changes without applying (read-only diff with conflict detection)"
+    )
     merge_parser.set_defaults(func=env_cmds.merge)
 
     # revert - Revert commits
@@ -469,6 +474,11 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         "--force",
         action="store_true",
         help="Discard uncommitted changes and force pull"
+    )
+    pull_parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Preview changes without applying (read-only fetch and diff)"
     )
     pull_parser.set_defaults(func=env_cmds.pull)
 

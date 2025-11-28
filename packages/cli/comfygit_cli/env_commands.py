@@ -88,6 +88,90 @@ class EnvironmentCommands:
             sys.exit(1)
         return active
 
+    def _format_size(self, size_bytes: int) -> str:
+        """Format bytes as human-readable size."""
+        for unit in ("B", "KB", "MB", "GB"):
+            if abs(size_bytes) < 1024:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024  # type: ignore[assignment]
+        return f"{size_bytes:.1f} TB"
+
+    def _display_diff_preview(self, diff: Any) -> None:
+        """Display a RefDiff to the user."""
+        from comfygit_core.models.ref_diff import RefDiff
+
+        if not isinstance(diff, RefDiff):
+            return
+
+        summary = diff.summary()
+        print(f"\nChanges from {diff.target_ref}:")
+        print("-" * 40)
+
+        # Nodes
+        if diff.node_changes:
+            print("\nNodes:")
+            for node_change in diff.node_changes:
+                symbol = {"added": "+", "removed": "-", "version_changed": "~"}[
+                    node_change.change_type
+                ]
+                conflict_mark = " (CONFLICT)" if node_change.conflict else ""
+                version_info = ""
+                if node_change.change_type == "version_changed":
+                    version_info = f" ({node_change.base_version} -> {node_change.target_version})"
+                print(f"  {symbol} {node_change.name}{version_info}{conflict_mark}")
+
+        # Models
+        if diff.model_changes:
+            print("\nModels:")
+            for model_change in diff.model_changes:
+                symbol = "+" if model_change.change_type == "added" else "-"
+                size_str = self._format_size(model_change.size)
+                print(f"  {symbol} {model_change.filename} ({size_str})")
+
+        # Workflows
+        if diff.workflow_changes:
+            print("\nWorkflows:")
+            for wf_change in diff.workflow_changes:
+                symbol = {"added": "+", "deleted": "-", "modified": "~"}[
+                    wf_change.change_type
+                ]
+                conflict_mark = " (CONFLICT)" if wf_change.conflict else ""
+                print(f"  {symbol} {wf_change.name}.json{conflict_mark}")
+
+        # Dependencies
+        deps = diff.dependency_changes
+        if deps.has_changes:
+            print("\nDependencies:")
+            for dep in deps.added:
+                print(f"  + {dep.get('name', 'unknown')}")
+            for dep in deps.removed:
+                print(f"  - {dep.get('name', 'unknown')}")
+            for dep in deps.updated:
+                print(f"  ~ {dep.get('name', 'unknown')} ({dep.get('old', '?')} -> {dep.get('new', '?')})")
+
+        # Summary
+        print()
+        summary_parts = []
+        if summary["nodes_added"] or summary["nodes_removed"]:
+            summary_parts.append(
+                f"{summary['nodes_added']} nodes added, {summary['nodes_removed']} removed"
+            )
+        if summary["models_added"]:
+            summary_parts.append(
+                f"{summary['models_added']} models to download ({self._format_size(summary['models_added_size'])})"
+            )
+        if summary["workflows_added"] or summary["workflows_modified"] or summary["workflows_deleted"]:
+            summary_parts.append(
+                f"{summary['workflows_added']} workflows added, {summary['workflows_modified']} modified, {summary['workflows_deleted']} deleted"
+            )
+        if summary["conflicts"]:
+            summary_parts.append(f"{summary['conflicts']} conflicts to resolve")
+
+        if summary_parts:
+            print("Summary:")
+            for part in summary_parts:
+                print(f"  {part}")
+
     # === Commands that operate ON environments ===
 
     @with_env_logging("env create")
@@ -1702,8 +1786,22 @@ class EnvironmentCommands:
                 print("✗ Cannot merge while in detached HEAD state")
                 sys.exit(1)
 
+            # Preview mode - read-only, just show what would change
+            if getattr(args, "preview", False):
+                diff = env.preview_merge(args.branch)
+
+                if not diff.has_changes:
+                    print(f"\n✓ '{args.branch}' is already merged into '{current}'.")
+                    return
+
+                self._display_diff_preview(diff)
+
+                if diff.has_conflicts:
+                    print("\n⚠️  Conflicts will occur. Review before merging.")
+                return  # Preview is read-only, don't continue to actual merge
+
             print(f"Merging '{args.branch}' into '{current}'...")
-            env.merge_branch(args.branch, message=args.message)
+            env.merge_branch(args.branch, message=getattr(args, "message", None))
             print(f"✓ Merged '{args.branch}' into '{current}'")
         except Exception as e:
             if logger:
@@ -1814,6 +1912,35 @@ class EnvironmentCommands:
         """Pull from remote and repair environment."""
         env = self._get_env(args)
 
+        # Check remote exists
+        if not env.git_manager.has_remote(args.remote):
+            print(f"✗ Remote '{args.remote}' not configured")
+            print()
+            print("💡 Set up a remote first:")
+            print(f"   cg remote add {args.remote} <url>")
+            sys.exit(1)
+
+        # Preview mode - read-only, just show what would change
+        if getattr(args, "preview", False):
+            try:
+                print(f"Fetching from {args.remote}...")
+                diff = env.preview_pull(remote=args.remote)
+
+                if not diff.has_changes:
+                    print("\n✓ Already up to date.")
+                    return
+
+                self._display_diff_preview(diff)
+
+                if diff.has_conflicts:
+                    print("\n⚠️  Conflicts will occur. Resolve before pulling.")
+                return  # Preview is read-only, don't continue to actual pull
+            except Exception as e:
+                if logger:
+                    logger.error(f"Preview failed: {e}", exc_info=True)
+                print(f"✗ Preview failed: {e}", file=sys.stderr)
+                sys.exit(1)
+
         # Check for uncommitted changes first
         if env.has_committable_changes() and not getattr(args, 'force', False):
             print("⚠️  You have uncommitted changes")
@@ -1822,14 +1949,6 @@ class EnvironmentCommands:
             print("  • Commit: cg commit -m 'message'")
             print("  • Discard: cg reset --hard")
             print("  • Force: cg pull origin --force")
-            sys.exit(1)
-
-        # Check remote exists
-        if not env.git_manager.has_remote(args.remote):
-            print(f"✗ Remote '{args.remote}' not configured")
-            print()
-            print("💡 Set up a remote first:")
-            print(f"   cg remote add {args.remote} <url>")
             sys.exit(1)
 
         try:
