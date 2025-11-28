@@ -720,6 +720,7 @@ def git_merge(
     ref: str,
     ff_only: bool = False,
     timeout: int = 30,
+    strategy_option: str | None = None,
 ) -> str:
     """Merge a ref into current branch.
 
@@ -728,6 +729,7 @@ def git_merge(
         ref: Ref to merge (e.g., "origin/main")
         ff_only: Only allow fast-forward merges (default: False)
         timeout: Command timeout in seconds
+        strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
     Returns:
         Merge output
@@ -739,6 +741,8 @@ def git_merge(
     cmd = ["merge"]
     if ff_only:
         cmd.append("--ff-only")
+    if strategy_option:
+        cmd.extend(["-X", strategy_option])
     cmd.append(ref)
 
     try:
@@ -783,6 +787,7 @@ def git_pull(
     branch: str | None = None,
     ff_only: bool = False,
     timeout: int = 30,
+    strategy_option: str | None = None,
 ) -> dict:
     """Fetch and merge from remote (pull operation).
 
@@ -792,6 +797,7 @@ def git_pull(
         branch: Branch name (default: auto-detect current branch)
         ff_only: Only allow fast-forward merges (default: False)
         timeout: Command timeout in seconds
+        strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
     Returns:
         Dict with keys: 'fetch_output', 'merge_output', 'branch'
@@ -809,7 +815,7 @@ def git_pull(
 
     # Then merge
     merge_ref = f"{remote}/{branch}"
-    merge_output = git_merge(repo_path, merge_ref, ff_only, timeout)
+    merge_output = git_merge(repo_path, merge_ref, ff_only, timeout, strategy_option)
 
     return {
         'fetch_output': fetch_output,
@@ -1158,13 +1164,19 @@ def git_get_current_branch(repo_path: Path) -> str | None:
     return branch
 
 
-def git_merge_branch(repo_path: Path, branch: str, message: str | None = None) -> None:
+def git_merge_branch(
+    repo_path: Path,
+    branch: str,
+    message: str | None = None,
+    strategy_option: str | None = None,
+) -> None:
     """Merge branch into current branch (wrapper around git_merge with message support).
 
     Args:
         repo_path: Path to git repository
         branch: Branch name to merge
         message: Optional merge commit message
+        strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
     Raises:
         OSError: If branch doesn't exist or merge fails (conflicts, etc.)
@@ -1173,6 +1185,8 @@ def git_merge_branch(repo_path: Path, branch: str, message: str | None = None) -
     cmd = ["merge", branch]
     if message:
         cmd.extend(["-m", message])
+    if strategy_option:
+        cmd.extend(["-X", strategy_option])
 
     _git(
         cmd,

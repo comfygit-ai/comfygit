@@ -1800,8 +1800,49 @@ class EnvironmentCommands:
                     print("\n⚠️  Conflicts will occur. Review before merging.")
                 return  # Preview is read-only, don't continue to actual merge
 
+            # Determine merge strategy
+            strategy_option: str | None = None
+            auto_resolve = getattr(args, "auto_resolve", None)
+
+            if auto_resolve:
+                # Use git -X strategy based on auto-resolve choice
+                strategy_option = "theirs" if auto_resolve == "theirs" else "ours"
+            else:
+                # Check for conflicts before merge
+                diff = env.preview_merge(args.branch)
+                if diff.has_conflicts:
+                    # Interactive conflict resolution
+                    from .strategies.conflict_resolver import InteractiveConflictResolver
+
+                    print(f"\n⚠️  Conflicts detected between '{current}' and '{args.branch}':")
+                    self._display_diff_preview(diff)
+
+                    resolver = InteractiveConflictResolver()
+                    resolutions = resolver.resolve_all(diff)
+
+                    # Check if any conflicts were skipped
+                    skipped = [k for k, v in resolutions.items() if v == "skip"]
+                    if skipped:
+                        print(f"\n⚠️  {len(skipped)} conflict(s) will be skipped.")
+                        print("   You may need to resolve them manually after merge.")
+
+                    # Determine strategy from resolutions
+                    # If all are take_target, use "theirs"; if all take_base, use "ours"
+                    # If mixed, let git try without strategy (may still conflict)
+                    non_skip = [v for v in resolutions.values() if v != "skip"]
+                    unique_resolutions = set(non_skip)
+                    if unique_resolutions == {"take_target"}:
+                        strategy_option = "theirs"
+                    elif unique_resolutions == {"take_base"}:
+                        strategy_option = "ours"
+                    # Mixed or empty: no strategy, git decides
+
             print(f"Merging '{args.branch}' into '{current}'...")
-            env.merge_branch(args.branch, message=getattr(args, "message", None))
+            env.merge_branch(
+                args.branch,
+                message=getattr(args, "message", None),
+                strategy_option=strategy_option,
+            )
             print(f"✓ Merged '{args.branch}' into '{current}'")
         except Exception as e:
             if logger:
@@ -1952,6 +1993,43 @@ class EnvironmentCommands:
             sys.exit(1)
 
         try:
+            # Determine merge strategy
+            strategy_option: str | None = None
+            auto_resolve = getattr(args, "auto_resolve", None)
+
+            if auto_resolve:
+                # Use git -X strategy based on auto-resolve choice
+                strategy_option = "theirs" if auto_resolve == "theirs" else "ours"
+            else:
+                # Check for conflicts before pull
+                print(f"Checking for conflicts with {args.remote}...")
+                diff = env.preview_pull(remote=args.remote)
+                if diff.has_conflicts:
+                    # Interactive conflict resolution
+                    from .strategies.conflict_resolver import InteractiveConflictResolver
+
+                    current = env.get_current_branch() or "HEAD"
+                    print(f"\n⚠️  Conflicts detected between '{current}' and '{args.remote}':")
+                    self._display_diff_preview(diff)
+
+                    resolver = InteractiveConflictResolver()
+                    resolutions = resolver.resolve_all(diff)
+
+                    # Check if any conflicts were skipped
+                    skipped = [k for k, v in resolutions.items() if v == "skip"]
+                    if skipped:
+                        print(f"\n⚠️  {len(skipped)} conflict(s) will be skipped.")
+                        print("   You may need to resolve them manually after pull.")
+
+                    # Determine strategy from resolutions
+                    non_skip = [v for v in resolutions.values() if v != "skip"]
+                    unique_resolutions = set(non_skip)
+                    if unique_resolutions == {"take_target"}:
+                        strategy_option = "theirs"
+                    elif unique_resolutions == {"take_base"}:
+                        strategy_option = "ours"
+                    # Mixed or empty: no strategy, git decides
+
             print(f"📥 Pulling from {args.remote}...")
 
             # Create callbacks for node and model progress (reuse repair command patterns)
@@ -1959,10 +2037,10 @@ class EnvironmentCommands:
             from .utils.progress import create_progress_callback
 
             # Node installation callbacks
-            def on_node_start(node_id, idx, total):
-                print(f"  [{idx}/{total}] Installing {node_id}...", end=" ", flush=True)
+            def on_node_start(_node_id: str, idx: int, total: int) -> None:
+                print(f"  [{idx}/{total}] Installing {_node_id}...", end=" ", flush=True)
 
-            def on_node_complete(node_id, success, error):
+            def on_node_complete(_node_id: str, success: bool, error: str | None) -> None:
                 if success:
                     print("✓")
                 else:
@@ -1974,10 +2052,10 @@ class EnvironmentCommands:
             )
 
             # Model download callbacks
-            def on_file_start(filename, idx, total):
+            def on_file_start(filename: str, idx: int, total: int) -> None:
                 print(f"   [{idx}/{total}] Downloading {filename}...")
 
-            def on_file_complete(filename, success, error):
+            def on_file_complete(filename: str, success: bool, error: str | None) -> None:
                 print()  # New line after progress bar
                 if success:
                     print(f"   ✓ {filename}")
@@ -1995,7 +2073,8 @@ class EnvironmentCommands:
                 remote=args.remote,
                 model_strategy=getattr(args, 'models', 'all'),
                 model_callbacks=model_callbacks,
-                node_callbacks=node_callbacks
+                node_callbacks=node_callbacks,
+                strategy_option=strategy_option,
             )
 
             # Extract sync result for summary

@@ -447,13 +447,20 @@ __pycache__/
     # Pull/Push/Remote Operations
     # =============================================================================
 
-    def pull(self, remote: str = "origin", branch: str | None = None, ff_only: bool = False) -> dict:
+    def pull(
+        self,
+        remote: str = "origin",
+        branch: str | None = None,
+        ff_only: bool = False,
+        strategy_option: str | None = None,
+    ) -> dict:
         """Pull from remote (fetch + merge).
 
         Args:
             remote: Remote name (default: origin)
             branch: Branch to pull (default: current branch)
             ff_only: Only allow fast-forward merges (default: False)
+            strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
         Returns:
             Dict with keys: 'fetch_output', 'merge_output', 'branch'
@@ -466,7 +473,9 @@ __pycache__/
 
         logger.info(f"Pulling {remote}/{branch or 'current branch'}")
 
-        result = git_pull(self.repo_path, remote, branch, ff_only=ff_only)
+        result = git_pull(
+            self.repo_path, remote, branch, ff_only=ff_only, strategy_option=strategy_option
+        )
 
         return result
 
@@ -681,12 +690,18 @@ __pycache__/
 
         return git_get_current_branch(self.repo_path)
 
-    def merge_branch(self, branch: str, message: str | None = None) -> None:
+    def merge_branch(
+        self,
+        branch: str,
+        message: str | None = None,
+        strategy_option: str | None = None,
+    ) -> None:
         """Merge branch into current branch.
 
         Args:
             branch: Branch name to merge
             message: Optional merge commit message
+            strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
         Raises:
             OSError: If branch doesn't exist or merge fails (conflicts, etc.)
@@ -695,7 +710,7 @@ __pycache__/
         from ..utils.git import git_merge_branch
 
         logger.info(f"Merging branch '{branch}' into current branch")
-        git_merge_branch(self.repo_path, branch, message)
+        git_merge_branch(self.repo_path, branch, message, strategy_option)
 
     def reset_to(self, ref: str = "HEAD", mode: str = "hard") -> None:
         """Reset current branch to ref.

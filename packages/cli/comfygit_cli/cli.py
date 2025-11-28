@@ -447,6 +447,11 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Preview changes without applying (read-only diff with conflict detection)"
     )
+    merge_parser.add_argument(
+        "--auto-resolve",
+        choices=["mine", "theirs"],
+        help="Auto-resolve conflicts: 'mine' keeps local, 'theirs' takes incoming"
+    )
     merge_parser.set_defaults(func=env_cmds.merge)
 
     # revert - Revert commits
@@ -479,6 +484,11 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         "--preview",
         action="store_true",
         help="Preview changes without applying (read-only fetch and diff)"
+    )
+    pull_parser.add_argument(
+        "--auto-resolve",
+        choices=["mine", "theirs"],
+        help="Auto-resolve conflicts: 'mine' keeps local, 'theirs' takes incoming"
     )
     pull_parser.set_defaults(func=env_cmds.pull)
 

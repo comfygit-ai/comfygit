@@ -1,7 +1,7 @@
 """Resolution strategy protocols for dependency injection."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from .workflow import (
     ModelResolutionContext,
@@ -11,6 +11,7 @@ from .workflow import (
 )
 
 if TYPE_CHECKING:
+    from ..models.ref_diff import DependencyConflict, NodeConflict, WorkflowConflict
     from ..models.workflow import ResolvedNodePackage
 
 class NodeResolutionStrategy(Protocol):
@@ -244,5 +245,58 @@ class ExportCallbacks(Protocol):
 
         Args:
             models: List of ModelWithoutSourceInfo instances
+        """
+        ...
+
+
+class ConflictResolver(Protocol):
+    """Protocol for resolving merge conflicts interactively.
+
+    Used during pull/merge operations to handle conflicts detected
+    by RefDiffAnalyzer before the git merge occurs.
+    """
+
+    def resolve_workflow(
+        self, conflict: WorkflowConflict
+    ) -> Literal["take_base", "take_target", "skip"]:
+        """Resolve a workflow file conflict.
+
+        Args:
+            conflict: Workflow conflict with base/target hashes
+
+        Returns:
+            "take_base" to keep local version
+            "take_target" to take incoming version
+            "skip" to leave unresolved
+        """
+        ...
+
+    def resolve_node(
+        self, conflict: NodeConflict
+    ) -> Literal["take_base", "take_target", "skip"]:
+        """Resolve a node version conflict.
+
+        Args:
+            conflict: Node conflict with version info
+
+        Returns:
+            "take_base" to keep local version
+            "take_target" to take incoming version
+            "skip" to leave unresolved
+        """
+        ...
+
+    def resolve_dependency(
+        self, conflict: DependencyConflict
+    ) -> Literal["take_base", "take_target", "skip"]:
+        """Resolve a dependency version conflict.
+
+        Args:
+            conflict: Dependency conflict with version specs
+
+        Returns:
+            "take_base" to keep local version
+            "take_target" to take incoming version
+            "skip" to leave unresolved
         """
         ...

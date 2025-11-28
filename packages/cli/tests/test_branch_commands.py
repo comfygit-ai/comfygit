@@ -381,13 +381,20 @@ class TestMergeCommand:
         args = Namespace(
             branch="feature",
             message=None,
-            target_env=None
+            target_env=None,
+            preview=False,
+            auto_resolve=None,
         )
+
+        # Mock preview_merge to return no conflicts
+        mock_env.preview_merge.return_value = MagicMock(has_conflicts=False)
 
         with patch('builtins.print'):
             cmd.merge(args)
 
-        mock_env.merge_branch.assert_called_once_with("feature", message=None)
+        mock_env.merge_branch.assert_called_once_with(
+            "feature", message=None, strategy_option=None
+        )
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_merge_with_message(self, mock_workspace):
@@ -401,13 +408,20 @@ class TestMergeCommand:
         args = Namespace(
             branch="feature",
             message="Custom merge message",
-            target_env=None
+            target_env=None,
+            preview=False,
+            auto_resolve=None,
         )
+
+        # Mock preview_merge to return no conflicts
+        mock_env.preview_merge.return_value = MagicMock(has_conflicts=False)
 
         with patch('builtins.print'):
             cmd.merge(args)
 
-        mock_env.merge_branch.assert_called_once_with("feature", message="Custom merge message")
+        mock_env.merge_branch.assert_called_once_with(
+            "feature", message="Custom merge message", strategy_option=None
+        )
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_merge_fails_in_detached_head(self, mock_workspace):

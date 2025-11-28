@@ -472,6 +472,7 @@ class Environment:
         model_strategy: str = "all",
         model_callbacks: BatchDownloadCallbacks | None = None,
         node_callbacks: NodeInstallCallbacks | None = None,
+        strategy_option: str | None = None,
     ) -> dict:
         """Pull from remote and auto-repair environment (atomic operation).
 
@@ -484,6 +485,7 @@ class Environment:
             model_strategy: Model download strategy ("all", "required", "skip")
             model_callbacks: Optional callbacks for model download progress
             node_callbacks: Optional callbacks for node installation progress
+            strategy_option: Optional git merge strategy (e.g., "ours" or "theirs")
 
         Returns:
             Dict with pull results and sync_result
@@ -517,7 +519,7 @@ class Environment:
         try:
             # Pull (fetch + merge)
             logger.info("Pulling from remote...")
-            pull_result = self.git_manager.pull(remote, branch)
+            pull_result = self.git_manager.pull(remote, branch, strategy_option=strategy_option)
 
             # Auto-repair (restores workflows, installs nodes, downloads models)
             logger.info("Syncing environment after pull...")
@@ -686,14 +688,20 @@ class Environment:
         """
         return self.git_manager.get_current_branch()
 
-    def merge_branch(self, branch: str, message: str | None = None) -> None:
+    def merge_branch(
+        self,
+        branch: str,
+        message: str | None = None,
+        strategy_option: str | None = None,
+    ) -> None:
         """Merge branch into current branch and sync environment.
 
         Args:
             branch: Branch to merge
             message: Custom merge commit message
+            strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
         """
-        self.git_orchestrator.merge_branch(branch, message)
+        self.git_orchestrator.merge_branch(branch, message, strategy_option)
 
     def revert_commit(self, commit: str) -> None:
         """Revert a commit by creating new commit that undoes it.

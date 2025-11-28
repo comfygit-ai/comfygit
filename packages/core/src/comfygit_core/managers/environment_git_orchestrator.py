@@ -259,15 +259,21 @@ class EnvironmentGitOrchestrator:
 
         logger.info(f"Switched to branch '{branch}'")
 
-    def merge_branch(self, branch: str, message: str | None = None) -> None:
+    def merge_branch(
+        self,
+        branch: str,
+        message: str | None = None,
+        strategy_option: str | None = None,
+    ) -> None:
         """Merge branch into current branch and sync environment.
 
         Args:
             branch: Branch to merge
             message: Custom merge commit message
+            strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
         """
         old_nodes = self.pyproject.nodes.get_existing()
-        self.git.merge_branch(branch, message)
+        self.git.merge_branch(branch, message, strategy_option)
         self._sync_environment_after_git(old_nodes)
         logger.info(f"Merged branch '{branch}'")
 
