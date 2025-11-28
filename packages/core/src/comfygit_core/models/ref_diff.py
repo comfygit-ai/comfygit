@@ -145,6 +145,15 @@ class RefDiff:
         """True if target is strictly ahead of base (no divergence)."""
         return self.merge_base == self.base_ref
 
+    @property
+    def is_already_merged(self) -> bool:
+        """True if target is already merged into base.
+
+        This means target is an ancestor of base, or they point to the same commit.
+        In git terms: merge_base == target_ref means target is reachable from base.
+        """
+        return self.merge_base == self.target_ref
+
     def summary(self) -> dict:
         """Summary counts for display."""
         return {

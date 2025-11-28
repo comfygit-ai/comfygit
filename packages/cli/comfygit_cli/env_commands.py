@@ -1791,7 +1791,13 @@ class EnvironmentCommands:
                 diff = env.preview_merge(args.branch)
 
                 if not diff.has_changes:
-                    print(f"\n✓ '{args.branch}' is already merged into '{current}'.")
+                    if diff.is_already_merged:
+                        print(f"\n✓ '{args.branch}' is already merged into '{current}'.")
+                    elif diff.is_fast_forward:
+                        print(f"\n✓ '{args.branch}' has commits but no ComfyGit changes.")
+                        print("   Merge will bring in commits without affecting nodes/models/workflows.")
+                    else:
+                        print(f"\n✓ No ComfyGit configuration changes to merge from '{args.branch}'.")
                     return
 
                 self._display_diff_preview(diff)
@@ -1968,7 +1974,13 @@ class EnvironmentCommands:
                 diff = env.preview_pull(remote=args.remote)
 
                 if not diff.has_changes:
-                    print("\n✓ Already up to date.")
+                    if diff.is_already_merged:
+                        print("\n✓ Already up to date.")
+                    elif diff.is_fast_forward:
+                        print(f"\n✓ Remote has commits but no ComfyGit changes.")
+                        print("   Pull will bring in commits without affecting nodes/models/workflows.")
+                    else:
+                        print("\n✓ No ComfyGit configuration changes to pull.")
                     return
 
                 self._display_diff_preview(diff)

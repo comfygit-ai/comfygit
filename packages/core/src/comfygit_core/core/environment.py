@@ -498,7 +498,11 @@ class Environment:
         from ..models.exceptions import CDEnvironmentError
         from ..utils.git import git_reset_hard, git_rev_parse
 
-        # Check for uncommitted changes
+        # Clean up regenerated uv.lock before checking for real uncommitted changes
+        # (uv.lock gets regenerated after branch switch and would block the pull)
+        self._cleanup_uvlock_for_git_operation()
+
+        # Check for uncommitted changes (now excluding uv.lock)
         if self.git_manager.has_uncommitted_changes():
             raise CDEnvironmentError(
                 "Cannot pull with uncommitted changes.\n"
@@ -1832,3 +1836,35 @@ class Environment:
             logger.info("Committed import changes")
 
         logger.info("Import finalization completed successfully")
+
+    def _cleanup_uvlock_for_git_operation(self) -> None:
+        """Remove uv.lock if it would block a git operation.
+
+        After branch switch, uv.sync_project() regenerates uv.lock which can
+        differ from the committed version. This creates phantom "dirty" state
+        that blocks merge/pull operations. Since uv.lock gets regenerated
+        after every git operation anyway, we can safely remove it before
+        merge/pull to prevent blocking.
+        """
+        from ..utils.git import _git, get_uncommitted_changes
+
+        uvlock_path = self.cec_path / "uv.lock"
+        if not uvlock_path.exists():
+            return
+
+        # Check if uv.lock is modified (staged or unstaged)
+        changes = get_uncommitted_changes(self.cec_path)
+        if "uv.lock" in changes:
+            logger.debug("Removing regenerated uv.lock before git operation")
+            uvlock_path.unlink()
+            return
+
+        # Check for untracked uv.lock
+        result = _git(
+            ["ls-files", "--others", "--exclude-standard", "uv.lock"],
+            self.cec_path,
+            check=False
+        )
+        if result.stdout.strip() == "uv.lock":
+            logger.debug("Removing untracked uv.lock before git operation")
+            uvlock_path.unlink()

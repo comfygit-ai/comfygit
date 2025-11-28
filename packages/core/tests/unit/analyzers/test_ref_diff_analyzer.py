@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from comfygit_core.analyzers.ref_diff_analyzer import RefDiffAnalyzer
-from comfygit_core.models.ref_diff import RefDiff
+from comfygit_core.models.ref_diff import DependencyChanges, RefDiff
 
 
 class TestRefDiffAnalyzerBasics:
@@ -456,3 +456,82 @@ class TestMergeBaseDetection:
         assert result.merge_base is None
         # Should still work, just no conflict detection
         assert result.has_conflicts is False
+
+
+class TestRefDiffMergeStateProperties:
+    """Test RefDiff properties for determining merge state.
+
+    BUG: The CLI incorrectly says "already merged" when has_changes=False,
+    but this ignores git commit state. These tests verify the properties
+    needed to correctly distinguish merge states.
+    """
+
+    def test_is_already_merged_when_target_is_ancestor(self):
+        """Target being ancestor of base means it's already merged."""
+        # Scenario: main@abc123, feature@def456, merge_base=def456
+        # This means feature is an ancestor of main (already merged)
+        diff = RefDiff(
+            base_ref="abc123",
+            target_ref="def456",
+            merge_base="def456",  # merge_base == target_ref
+            node_changes=[],
+            model_changes=[],
+            workflow_changes=[],
+            dependency_changes=DependencyChanges(),
+        )
+
+        assert diff.is_already_merged is True
+        assert diff.is_fast_forward is False
+        assert diff.has_changes is False
+
+    def test_is_fast_forward_when_base_is_ancestor(self):
+        """Base being ancestor of target means fast-forward possible."""
+        # Scenario: test@abc123, main@def456, merge_base=abc123
+        # This means test is ancestor of main (main has commits to bring in)
+        diff = RefDiff(
+            base_ref="abc123",
+            target_ref="def456",
+            merge_base="abc123",  # merge_base == base_ref
+            node_changes=[],
+            model_changes=[],
+            workflow_changes=[],
+            dependency_changes=DependencyChanges(),
+        )
+
+        assert diff.is_already_merged is False
+        assert diff.is_fast_forward is True
+        assert diff.has_changes is False
+
+    def test_diverged_with_no_changes(self):
+        """Branches diverged but no ComfyGit config changes."""
+        # Scenario: both branches have commits since merge_base, but
+        # neither touched pyproject.toml/workflows
+        diff = RefDiff(
+            base_ref="abc123",
+            target_ref="def456",
+            merge_base="ghi789",  # Neither matches
+            node_changes=[],
+            model_changes=[],
+            workflow_changes=[],
+            dependency_changes=DependencyChanges(),
+        )
+
+        assert diff.is_already_merged is False
+        assert diff.is_fast_forward is False
+        assert diff.has_changes is False
+
+    def test_same_commit(self):
+        """Both refs point to same commit."""
+        diff = RefDiff(
+            base_ref="abc123",
+            target_ref="abc123",
+            merge_base="abc123",
+            node_changes=[],
+            model_changes=[],
+            workflow_changes=[],
+            dependency_changes=DependencyChanges(),
+        )
+
+        # Same commit is technically "already merged"
+        assert diff.is_already_merged is True
+        assert diff.has_changes is False
