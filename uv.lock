@@ -310,7 +310,7 @@ wheels = [
 
 [[package]]
 name = "comfygit"
-version = "0.2.6"
+version = "0.2.4"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "argcomplete" },
@@ -325,7 +325,7 @@ requires-dist = [
 
 [[package]]
 name = "comfygit-core"
-version = "0.2.6"
+version = "0.2.4"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "aiohttp" },
@@ -355,8 +355,8 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.4" },
     { name = "requirements-parser", specifier = ">=0.13.0" },
     { name = "tomlkit", specifier = ">=0.13.3" },
-    { name = "uv", specifier = ">=0.9.9" },
-    { name = "xxhash", specifier = ">=3.6.0" },
+    { name = "uv", specifier = "~=0.9" },
+    { name = "xxhash", specifier = ">=2.0.0" },
 ]
 
 [package.metadata.requires-dev]

@@ -13,8 +13,8 @@ dependencies = [
     "requests>=2.32.4",
     "requirements-parser>=0.13.0",
     "tomlkit>=0.13.3",
-    "uv>=0.9.9",
-    "xxhash>=3.6.0",
+    "uv>=0.7",
+    "xxhash>=2.0.0",
 ]
 
 [build-system]
