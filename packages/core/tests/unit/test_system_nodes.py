@@ -166,3 +166,116 @@ class TestSyncNodesSkipsSystemNodes:
 
         # If we get here without error, the sync skipped comfygit-manager
         # (which is the correct behavior - it's a system node)
+
+
+class TestSystemNodeSymlinkManager:
+    """Tests for SystemNodeSymlinkManager creating symlinks on environment creation."""
+
+    def test_system_node_manager_exists_on_environment(self, test_env):
+        """Environment should have system_node_manager property."""
+        assert hasattr(test_env, 'system_node_manager')
+        # Should return a SystemNodeSymlinkManager instance
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+        assert isinstance(test_env.system_node_manager, SystemNodeSymlinkManager)
+
+    def test_create_symlinks_creates_links_for_system_nodes(self, test_workspace):
+        """create_symlinks should create symlinks for all nodes in system_nodes directory."""
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+        from comfygit_core.utils.symlink_utils import is_link
+
+        # Create a system node in workspace system_nodes directory
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+        manager_node = system_nodes_dir / "comfygit-manager"
+        manager_node.mkdir()
+        (manager_node / "__init__.py").write_text("# comfygit-manager")
+
+        # Create test comfyui path
+        comfyui_path = test_workspace.paths.environments / "test-env" / "ComfyUI"
+        comfyui_path.mkdir(parents=True)
+        custom_nodes = comfyui_path / "custom_nodes"
+        custom_nodes.mkdir()
+
+        # Create manager and call create_symlinks
+        symlink_manager = SystemNodeSymlinkManager(comfyui_path, system_nodes_dir)
+        linked = symlink_manager.create_symlinks()
+
+        # Should have linked comfygit-manager
+        assert "comfygit-manager" in linked
+        link_path = custom_nodes / "comfygit-manager"
+        assert link_path.exists()
+        assert is_link(link_path)
+        assert link_path.resolve() == manager_node.resolve()
+
+    def test_create_symlinks_handles_empty_system_nodes_dir(self, test_workspace):
+        """create_symlinks should handle empty system_nodes directory gracefully."""
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+
+        # Create empty system nodes directory
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create test comfyui path
+        comfyui_path = test_workspace.paths.environments / "test-env" / "ComfyUI"
+        comfyui_path.mkdir(parents=True)
+
+        # Should return empty list without error
+        symlink_manager = SystemNodeSymlinkManager(comfyui_path, system_nodes_dir)
+        linked = symlink_manager.create_symlinks()
+        assert linked == []
+
+    def test_create_symlinks_skips_existing_real_directory(self, test_workspace):
+        """create_symlinks should not overwrite real directories."""
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+
+        # Create system node
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+        manager_node = system_nodes_dir / "comfygit-manager"
+        manager_node.mkdir()
+        (manager_node / "__init__.py").write_text("# source")
+
+        # Create real directory in custom_nodes (not a symlink)
+        comfyui_path = test_workspace.paths.environments / "test-env" / "ComfyUI"
+        comfyui_path.mkdir(parents=True)
+        custom_nodes = comfyui_path / "custom_nodes"
+        custom_nodes.mkdir()
+        existing_dir = custom_nodes / "comfygit-manager"
+        existing_dir.mkdir()
+        (existing_dir / "__init__.py").write_text("# existing user content")
+
+        # Should NOT overwrite the existing directory
+        symlink_manager = SystemNodeSymlinkManager(comfyui_path, system_nodes_dir)
+        linked = symlink_manager.create_symlinks()
+
+        # Should not have linked (real directory exists)
+        assert "comfygit-manager" not in linked
+        # Original content should be preserved
+        assert (existing_dir / "__init__.py").read_text() == "# existing user content"
+
+    def test_validate_symlinks_returns_status(self, test_workspace):
+        """validate_symlinks should return dict of node validity."""
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+
+        # Create system node
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+        manager_node = system_nodes_dir / "comfygit-manager"
+        manager_node.mkdir()
+
+        # Create comfyui structure without symlinks
+        comfyui_path = test_workspace.paths.environments / "test-env" / "ComfyUI"
+        comfyui_path.mkdir(parents=True)
+        custom_nodes = comfyui_path / "custom_nodes"
+        custom_nodes.mkdir()
+
+        symlink_manager = SystemNodeSymlinkManager(comfyui_path, system_nodes_dir)
+
+        # Before creating symlinks - should show invalid
+        status = symlink_manager.validate_symlinks()
+        assert status.get("comfygit-manager") is False
+
+        # After creating symlinks - should show valid
+        symlink_manager.create_symlinks()
+        status = symlink_manager.validate_symlinks()
+        assert status.get("comfygit-manager") is True

@@ -17,6 +17,7 @@ from ..managers.git_manager import GitManager
 from ..managers.model_symlink_manager import ModelSymlinkManager
 from ..managers.node_manager import NodeManager
 from ..managers.pyproject_manager import PyprojectManager
+from ..managers.system_node_symlink_manager import SystemNodeSymlinkManager
 from ..managers.user_content_symlink_manager import UserContentSymlinkManager
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
@@ -152,6 +153,14 @@ class Environment:
             self.name,
             self.workspace_paths.input,
             self.workspace_paths.output,
+        )
+
+    @cached_property
+    def system_node_manager(self) -> SystemNodeSymlinkManager:
+        """Get system node symlink manager for workspace-level infrastructure nodes."""
+        return SystemNodeSymlinkManager(
+            self.comfyui_path,
+            self.workspace_paths.system_nodes,
         )
 
     @cached_property
@@ -1632,6 +1641,14 @@ class Environment:
         if output_dir.exists() and not is_link(output_dir):
             shutil.rmtree(output_dir)
             logger.debug("Removed ComfyUI's default output directory during import")
+
+        # Create symlinks for user content and system nodes
+        self.user_content_manager.create_directories()
+        self.user_content_manager.create_symlinks()
+
+        linked_nodes = self.system_node_manager.create_symlinks()
+        if linked_nodes:
+            logger.info(f"Linked system nodes: {', '.join(linked_nodes)}")
 
         # Phase 1.5: Create venv and optionally install PyTorch with specific backend
         # Read Python version from .python-version file
