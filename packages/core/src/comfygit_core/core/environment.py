@@ -1443,8 +1443,11 @@ class Environment:
 
         Dev nodes without git remotes will trigger a callback notification but
         will still be exported (they just can't be shared).
+
+        System nodes (like comfygit-manager) are skipped - they should not be exported.
         """
         from ..analyzers.node_git_analyzer import get_node_git_info
+        from ..constants import SYSTEM_CUSTOM_NODES
 
         nodes = self.pyproject.nodes.get_existing()
         config = self.pyproject.load()
@@ -1452,6 +1455,11 @@ class Environment:
 
         for identifier, node_info in nodes.items():
             if node_info.source != 'development':
+                continue
+
+            # Skip system nodes - they should not be exported
+            if node_info.name in SYSTEM_CUSTOM_NODES:
+                logger.debug(f"Skipping system node '{node_info.name}' in export git capture")
                 continue
 
             node_path = self.custom_nodes_path / node_info.name

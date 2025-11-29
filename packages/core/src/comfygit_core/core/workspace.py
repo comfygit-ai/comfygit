@@ -112,6 +112,11 @@ class WorkspacePaths:
         """Base directory for per-environment output directories."""
         return self.root / "output"
 
+    @property
+    def system_nodes(self) -> Path:
+        """Directory for workspace-level system nodes (infrastructure custom nodes)."""
+        return self.metadata / "system_nodes"
+
     def exists(self) -> bool:
         return self.root.exists() and self.metadata.exists()
 
@@ -123,6 +128,7 @@ class WorkspacePaths:
         self.models.mkdir(parents=True, exist_ok=True)
         self.input.mkdir(parents=True, exist_ok=True)
         self.output.mkdir(parents=True, exist_ok=True)
+        self.system_nodes.mkdir(parents=True, exist_ok=True)
 
 class Workspace:
     """Manages ComfyDock workspace and all environments within it.

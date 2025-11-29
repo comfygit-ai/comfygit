@@ -63,6 +63,15 @@ CUSTOM_NODES_BLACKLIST = {
     '.temp'
 }
 
+# System custom nodes managed outside of pyproject.toml.
+# These are infrastructure/tooling nodes that exist in all environments
+# but are not tracked, exported, or synced through the normal node system.
+# They live at workspace level (.metadata/system_nodes/) and are symlinked
+# into each environment's custom_nodes/ directory.
+SYSTEM_CUSTOM_NODES = {
+    'comfygit-manager',
+}
+
 # Default values
 DEFAULT_REGISTRY_URL = "https://api.comfy.org"
 DEFAULT_GITHUB_URL = "https://github.com"
