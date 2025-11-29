@@ -423,20 +423,28 @@ class EnvironmentCommands:
             for name in status.workflow.sync_status.synced:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Show warning if has issues OR path sync needed
+                    # Check if workflow has missing models (from direct repo query, not cache)
+                    missing_for_wf = [m for m in status.missing_models if name in m.workflow_names]
+                    # Show warning if has issues OR path sync needed OR missing models
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (synced)")
                         self._print_workflow_issues(wf, verbose)
+                    elif missing_for_wf:
+                        print(f"  ⚠️  {name} (synced, {len(missing_for_wf)} missing models)")
                     else:
                         print(f"  ✓ {name}")
 
             for name in status.workflow.sync_status.new:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Show warning if has issues OR path sync needed
+                    # Check if workflow has missing models (from direct repo query, not cache)
+                    missing_for_wf = [m for m in status.missing_models if name in m.workflow_names]
+                    # Show warning if has issues OR path sync needed OR missing models
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (new)")
                         self._print_workflow_issues(wf, verbose)
+                    elif missing_for_wf:
+                        print(f"  ⚠️  {name} (new, {len(missing_for_wf)} missing models)")
                     else:
                         print(f"  🆕 {name} (new, ready to commit)")
 
@@ -1777,7 +1785,7 @@ class EnvironmentCommands:
 
     @with_env_logging("env merge")
     def merge(self, args: argparse.Namespace, logger=None) -> None:
-        """Merge branch into current."""
+        """Merge branch into current with atomic conflict resolution."""
         env = self._get_env(args)
 
         try:
@@ -1786,69 +1794,83 @@ class EnvironmentCommands:
                 print("✗ Cannot merge while in detached HEAD state")
                 sys.exit(1)
 
+            # Phase 1: Preview
+            diff = env.preview_merge(args.branch)
+
+            if not diff.has_changes:
+                if diff.is_already_merged:
+                    print(f"\n✓ '{args.branch}' is already merged into '{current}'.")
+                elif diff.is_fast_forward:
+                    print(f"\n✓ '{args.branch}' has commits but no ComfyGit changes.")
+                    print("   Merge will bring in commits without affecting nodes/models/workflows.")
+                else:
+                    print(f"\n✓ No ComfyGit configuration changes to merge from '{args.branch}'.")
+                return
+
             # Preview mode - read-only, just show what would change
             if getattr(args, "preview", False):
-                diff = env.preview_merge(args.branch)
-
-                if not diff.has_changes:
-                    if diff.is_already_merged:
-                        print(f"\n✓ '{args.branch}' is already merged into '{current}'.")
-                    elif diff.is_fast_forward:
-                        print(f"\n✓ '{args.branch}' has commits but no ComfyGit changes.")
-                        print("   Merge will bring in commits without affecting nodes/models/workflows.")
-                    else:
-                        print(f"\n✓ No ComfyGit configuration changes to merge from '{args.branch}'.")
-                    return
-
                 self._display_diff_preview(diff)
-
                 if diff.has_conflicts:
                     print("\n⚠️  Conflicts will occur. Review before merging.")
-                return  # Preview is read-only, don't continue to actual merge
+                return
 
-            # Determine merge strategy
+            self._display_diff_preview(diff)
+
+            # Phase 2: Collect resolutions if conflicts exist
+            resolutions: dict = {}
             strategy_option: str | None = None
             auto_resolve = getattr(args, "auto_resolve", None)
+            strategy = getattr(args, "strategy", None)
 
-            if auto_resolve:
-                # Use git -X strategy based on auto-resolve choice
+            if strategy:
+                # Global strategy flag - use for all conflicts
+                strategy_option = strategy
+            elif auto_resolve:
+                # Auto-resolve flag
+                from .strategies.conflict_resolver import AutoConflictResolver
+                resolver = AutoConflictResolver(auto_resolve)
+                resolutions = resolver.resolve_all(diff)
                 strategy_option = "theirs" if auto_resolve == "theirs" else "ours"
+            elif diff.has_conflicts:
+                # Interactive conflict resolution - ONLY workflow conflicts shown
+                from .strategies.conflict_resolver import InteractiveConflictResolver
+
+                print(f"\n⚠️  Conflicts detected:")
+                resolver = InteractiveConflictResolver()
+                resolutions = resolver.resolve_all(diff)
+
+                # All conflicts must be resolved - no skip option
+                if not resolutions and diff.has_conflicts:
+                    print("\n✗ No conflicts were resolved. Merge aborted.")
+                    sys.exit(1)
+
+                # Determine strategy from resolutions
+                unique_resolutions = set(resolutions.values())
+                if unique_resolutions == {"take_target"}:
+                    strategy_option = "theirs"
+                elif unique_resolutions == {"take_base"}:
+                    strategy_option = "ours"
+                # Mixed: no global strategy, rely on per-file resolution
+
+            # Phase 3: Execute merge
+            print(f"\nMerging '{args.branch}' into '{current}'...")
+
+            # Use atomic merge when we have per-file resolutions (mixed mine/theirs)
+            # Otherwise use standard merge with global strategy
+            if resolutions and strategy_option is None:
+                # Mixed resolutions - use atomic executor for per-file resolution
+                result = env.execute_atomic_merge(args.branch, resolutions)
+                if not result.success:
+                    print(f"✗ Merge failed: {result.error}", file=sys.stderr)
+                    sys.exit(1)
             else:
-                # Check for conflicts before merge
-                diff = env.preview_merge(args.branch)
-                if diff.has_conflicts:
-                    # Interactive conflict resolution
-                    from .strategies.conflict_resolver import InteractiveConflictResolver
+                # Global strategy or no resolutions - use standard merge
+                env.merge_branch(
+                    args.branch,
+                    message=getattr(args, "message", None),
+                    strategy_option=strategy_option,
+                )
 
-                    print(f"\n⚠️  Conflicts detected between '{current}' and '{args.branch}':")
-                    self._display_diff_preview(diff)
-
-                    resolver = InteractiveConflictResolver()
-                    resolutions = resolver.resolve_all(diff)
-
-                    # Check if any conflicts were skipped
-                    skipped = [k for k, v in resolutions.items() if v == "skip"]
-                    if skipped:
-                        print(f"\n⚠️  {len(skipped)} conflict(s) will be skipped.")
-                        print("   You may need to resolve them manually after merge.")
-
-                    # Determine strategy from resolutions
-                    # If all are take_target, use "theirs"; if all take_base, use "ours"
-                    # If mixed, let git try without strategy (may still conflict)
-                    non_skip = [v for v in resolutions.values() if v != "skip"]
-                    unique_resolutions = set(non_skip)
-                    if unique_resolutions == {"take_target"}:
-                        strategy_option = "theirs"
-                    elif unique_resolutions == {"take_base"}:
-                        strategy_option = "ours"
-                    # Mixed or empty: no strategy, git decides
-
-            print(f"Merging '{args.branch}' into '{current}'...")
-            env.merge_branch(
-                args.branch,
-                message=getattr(args, "message", None),
-                strategy_option=strategy_option,
-            )
             print(f"✓ Merged '{args.branch}' into '{current}'")
         except Exception as e:
             if logger:

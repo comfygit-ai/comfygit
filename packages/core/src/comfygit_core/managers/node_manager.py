@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..constants import SYSTEM_CUSTOM_NODES
 from ..logging.logging_config import get_logger
 from ..managers.pyproject_manager import PyprojectManager
 from ..managers.uv_project_manager import UVProjectManager
@@ -230,7 +231,16 @@ class NodeManager:
             CDNodeNotFoundError: If node not found
             CDNodeConflictError: If node has dependency conflicts
             CDEnvironmentError: If node with same name already exists
+            ValueError: If trying to add a system node
         """
+        # Reject system nodes - they are managed at workspace level
+        base_name = identifier.split('@')[0] if '@' in identifier else identifier
+        if base_name in SYSTEM_CUSTOM_NODES:
+            raise ValueError(
+                f"'{base_name}' is a system node and cannot be tracked in pyproject.toml. "
+                f"System nodes are managed at workspace level."
+            )
+
         logger.info(f"Adding node: {identifier}")
 
         # Handle development nodes
@@ -572,11 +582,13 @@ class NodeManager:
         if remove_extra:
             # ComfyUI's built-in files that should not be removed
             COMFYUI_BUILTINS = {'example_node.py.example', 'websocket_image_save.py', '__pycache__'}
+            # Combine with system nodes that should never be removed
+            SKIP_DIRS = COMFYUI_BUILTINS | SYSTEM_CUSTOM_NODES
 
             # Remove ALL untracked nodes (user confirmed deletion in repair preview)
             for node_name in untracked:
-                # Skip ComfyUI built-in example files
-                if node_name in COMFYUI_BUILTINS:
+                # Skip ComfyUI built-ins and system nodes
+                if node_name in SKIP_DIRS:
                     continue
 
                 node_path = self.custom_nodes_path / node_name
@@ -639,6 +651,7 @@ class NodeManager:
         Dev nodes with repository are cloned if missing locally.
         Dev nodes without repository trigger a warning callback.
         Dev nodes that already exist locally are skipped (local state is authoritative).
+        System nodes are always skipped - they're managed at workspace level.
 
         Args:
             expected_nodes: Dict of identifier -> NodeInfo from pyproject.toml
@@ -647,6 +660,11 @@ class NodeManager:
         """
         for identifier, node_info in expected_nodes.items():
             if node_info.source != 'development':
+                continue
+
+            # Skip system nodes - they're managed at workspace level
+            if node_info.name in SYSTEM_CUSTOM_NODES:
+                logger.debug(f"Skipping system node '{node_info.name}' in git sync")
                 continue
 
             node_path = self.custom_nodes_path / node_info.name

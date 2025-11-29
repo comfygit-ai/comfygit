@@ -150,6 +150,11 @@ class EnvironmentFactory:
         env.user_content_manager.create_symlinks()
         logger.debug("Created user content symlinks")
 
+        # Create system node symlinks (comfygit-manager, etc.)
+        linked_nodes = env.system_node_manager.create_symlinks()
+        if linked_nodes:
+            logger.info(f"Linked system nodes: {', '.join(linked_nodes)}")
+
         # Create initial pyproject.toml
         config = EnvironmentFactory._create_initial_pyproject(
             name,

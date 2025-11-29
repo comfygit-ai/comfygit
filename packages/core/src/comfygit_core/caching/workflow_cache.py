@@ -33,8 +33,9 @@ logger = get_logger(__name__)
 # Breaking changes requiring version bump:
 # - Database: Add/remove/rename columns
 # - Resolution: Change node ID format (e.g., subgraph scoping), WorkflowNodeWidgetRef structure, etc.
+# - Model index: Hash algorithm changes (blake3 -> xxhash)
 # Migration: Wipes cache and rebuilds (cache is ephemeral)
-SCHEMA_VERSION = 4  # Bumped for models_sync_time column (cache invalidation on model index changes)
+SCHEMA_VERSION = 5  # Invalidate after model hash algorithm change (blake3 -> xxhash)
 
 
 class CachedWorkflowAnalysis:

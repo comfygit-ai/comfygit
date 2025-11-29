@@ -17,6 +17,7 @@ from ..managers.git_manager import GitManager
 from ..managers.model_symlink_manager import ModelSymlinkManager
 from ..managers.node_manager import NodeManager
 from ..managers.pyproject_manager import PyprojectManager
+from ..managers.system_node_symlink_manager import SystemNodeSymlinkManager
 from ..managers.user_content_symlink_manager import UserContentSymlinkManager
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
@@ -47,6 +48,7 @@ if TYPE_CHECKING:
     )
 
     from ..caching.workflow_cache import WorkflowCacheRepository
+    from ..models.merge_plan import MergeResult, MergeValidation
     from ..models.workflow import (
         BatchDownloadCallbacks,
         DetailedWorkflowStatus,
@@ -152,6 +154,14 @@ class Environment:
             self.name,
             self.workspace_paths.input,
             self.workspace_paths.output,
+        )
+
+    @cached_property
+    def system_node_manager(self) -> SystemNodeSymlinkManager:
+        """Get system node symlink manager for workspace-level infrastructure nodes."""
+        return SystemNodeSymlinkManager(
+            self.comfyui_path,
+            self.workspace_paths.system_nodes,
         )
 
     @cached_property
@@ -706,6 +716,107 @@ class Environment:
             strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
         """
         self.git_orchestrator.merge_branch(branch, message, strategy_option)
+
+    def validate_merge(
+        self,
+        branch: str,
+        workflow_resolutions: dict,
+    ) -> "MergeValidation":
+        """Validate merge compatibility before execution.
+
+        Checks for node version conflicts that would occur if the merge
+        proceeded with the given workflow resolutions.
+
+        Args:
+            branch: Branch to merge
+            workflow_resolutions: Dict mapping workflow names to "take_base" or "take_target"
+
+        Returns:
+            MergeValidation with is_compatible flag and any conflicts
+        """
+        from ..merging.merge_validator import MergeValidator
+        from ..utils.git import git_show
+        import tomllib
+
+        # Load configs from both branches
+        pyproject_path = Path("pyproject.toml")
+        base_content = git_show(self.cec_path, "HEAD", pyproject_path)
+        target_content = git_show(self.cec_path, branch, pyproject_path)
+
+        base_config = tomllib.loads(base_content) if base_content else {}
+        target_config = tomllib.loads(target_content) if target_content else {}
+
+        validator = MergeValidator()
+        return validator.validate(base_config, target_config, workflow_resolutions)
+
+    def execute_atomic_merge(
+        self,
+        branch: str,
+        workflow_resolutions: dict,
+    ) -> "MergeResult":
+        """Execute merge with atomic semantics and semantic pyproject merging.
+
+        This method:
+        1. Starts git merge without committing
+        2. Resolves workflow files per user choices (--ours/--theirs)
+        3. Builds merged pyproject.toml using semantic rules
+        4. Commits the merge
+        5. Syncs environment (nodes, deps, workflows)
+
+        If any step fails, rolls back to pre-merge state.
+
+        Args:
+            branch: Branch to merge
+            workflow_resolutions: Dict mapping workflow names to "take_base" or "take_target"
+
+        Returns:
+            MergeResult with success status and details
+        """
+        from ..merging.atomic_executor import AtomicMergeExecutor
+        from ..merging.merge_validator import MergeValidator
+        from ..models.merge_plan import MergePlan
+        from ..utils.git import git_show
+        import tomllib
+
+        # Load configs to compute final workflow set
+        pyproject_path = Path("pyproject.toml")
+        base_content = git_show(self.cec_path, "HEAD", pyproject_path)
+        target_content = git_show(self.cec_path, branch, pyproject_path)
+
+        base_config = tomllib.loads(base_content) if base_content else {}
+        target_config = tomllib.loads(target_content) if target_content else {}
+
+        # Compute final workflow set
+        validator = MergeValidator()
+        validation = validator.validate(base_config, target_config, workflow_resolutions)
+
+        # Build merge plan
+        plan = MergePlan(
+            target_branch=branch,
+            base_ref="HEAD",
+            workflow_resolutions=workflow_resolutions,
+            final_workflow_set=validation.merged_workflow_set,
+            node_conflicts=validation.conflicts,
+            is_compatible=validation.is_compatible,
+        )
+
+        # Remove uv.lock if it would block the merge
+        self.git_orchestrator._cleanup_uvlock_before_git_operation()
+
+        # Execute atomic merge
+        executor = AtomicMergeExecutor(
+            repo_path=self.cec_path,
+            pyproject_manager=self.pyproject,
+        )
+
+        result = executor.execute(plan)
+
+        # If merge succeeded, sync environment
+        if result.success:
+            old_nodes = self.pyproject.nodes.get_existing()
+            self.git_orchestrator._sync_environment_after_git(old_nodes)
+
+        return result
 
     def revert_commit(self, commit: str) -> None:
         """Revert a commit by creating new commit that undoes it.
@@ -1443,8 +1554,11 @@ class Environment:
 
         Dev nodes without git remotes will trigger a callback notification but
         will still be exported (they just can't be shared).
+
+        System nodes (like comfygit-manager) are skipped - they should not be exported.
         """
         from ..analyzers.node_git_analyzer import get_node_git_info
+        from ..constants import SYSTEM_CUSTOM_NODES
 
         nodes = self.pyproject.nodes.get_existing()
         config = self.pyproject.load()
@@ -1452,6 +1566,11 @@ class Environment:
 
         for identifier, node_info in nodes.items():
             if node_info.source != 'development':
+                continue
+
+            # Skip system nodes - they should not be exported
+            if node_info.name in SYSTEM_CUSTOM_NODES:
+                logger.debug(f"Skipping system node '{node_info.name}' in export git capture")
                 continue
 
             node_path = self.custom_nodes_path / node_info.name
@@ -1624,6 +1743,14 @@ class Environment:
         if output_dir.exists() and not is_link(output_dir):
             shutil.rmtree(output_dir)
             logger.debug("Removed ComfyUI's default output directory during import")
+
+        # Create symlinks for user content and system nodes
+        self.user_content_manager.create_directories()
+        self.user_content_manager.create_symlinks()
+
+        linked_nodes = self.system_node_manager.create_symlinks()
+        if linked_nodes:
+            logger.info(f"Linked system nodes: {', '.join(linked_nodes)}")
 
         # Phase 1.5: Create venv and optionally install PyTorch with specific backend
         # Read Python version from .python-version file

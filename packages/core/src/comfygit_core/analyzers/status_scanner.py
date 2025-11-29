@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from comfygit_core.constants import CUSTOM_NODES_BLACKLIST
+from comfygit_core.constants import CUSTOM_NODES_BLACKLIST, SYSTEM_CUSTOM_NODES
 
 from ..logging.logging_config import get_logger
 from ..models.environment import (
@@ -107,8 +107,8 @@ class StatusScanner:
             logger.debug("custom_nodes directory not found")
             return nodes
 
-        # Skip these directories
-        skip_dirs = CUSTOM_NODES_BLACKLIST
+        # Skip these directories (blacklist + system nodes)
+        skip_dirs = CUSTOM_NODES_BLACKLIST | SYSTEM_CUSTOM_NODES
 
         # TODO: Support .comfygit_ignore
         for node_dir in custom_nodes_path.iterdir():
