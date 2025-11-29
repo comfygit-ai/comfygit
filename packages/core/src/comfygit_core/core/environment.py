@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     )
 
     from ..caching.workflow_cache import WorkflowCacheRepository
+    from ..models.merge_plan import MergeResult, MergeValidation
     from ..models.workflow import (
         BatchDownloadCallbacks,
         DetailedWorkflowStatus,
@@ -715,6 +716,107 @@ class Environment:
             strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
         """
         self.git_orchestrator.merge_branch(branch, message, strategy_option)
+
+    def validate_merge(
+        self,
+        branch: str,
+        workflow_resolutions: dict,
+    ) -> "MergeValidation":
+        """Validate merge compatibility before execution.
+
+        Checks for node version conflicts that would occur if the merge
+        proceeded with the given workflow resolutions.
+
+        Args:
+            branch: Branch to merge
+            workflow_resolutions: Dict mapping workflow names to "take_base" or "take_target"
+
+        Returns:
+            MergeValidation with is_compatible flag and any conflicts
+        """
+        from ..merging.merge_validator import MergeValidator
+        from ..utils.git import git_show
+        import tomllib
+
+        # Load configs from both branches
+        pyproject_path = Path("pyproject.toml")
+        base_content = git_show(self.cec_path, "HEAD", pyproject_path)
+        target_content = git_show(self.cec_path, branch, pyproject_path)
+
+        base_config = tomllib.loads(base_content) if base_content else {}
+        target_config = tomllib.loads(target_content) if target_content else {}
+
+        validator = MergeValidator()
+        return validator.validate(base_config, target_config, workflow_resolutions)
+
+    def execute_atomic_merge(
+        self,
+        branch: str,
+        workflow_resolutions: dict,
+    ) -> "MergeResult":
+        """Execute merge with atomic semantics and semantic pyproject merging.
+
+        This method:
+        1. Starts git merge without committing
+        2. Resolves workflow files per user choices (--ours/--theirs)
+        3. Builds merged pyproject.toml using semantic rules
+        4. Commits the merge
+        5. Syncs environment (nodes, deps, workflows)
+
+        If any step fails, rolls back to pre-merge state.
+
+        Args:
+            branch: Branch to merge
+            workflow_resolutions: Dict mapping workflow names to "take_base" or "take_target"
+
+        Returns:
+            MergeResult with success status and details
+        """
+        from ..merging.atomic_executor import AtomicMergeExecutor
+        from ..merging.merge_validator import MergeValidator
+        from ..models.merge_plan import MergePlan
+        from ..utils.git import git_show
+        import tomllib
+
+        # Load configs to compute final workflow set
+        pyproject_path = Path("pyproject.toml")
+        base_content = git_show(self.cec_path, "HEAD", pyproject_path)
+        target_content = git_show(self.cec_path, branch, pyproject_path)
+
+        base_config = tomllib.loads(base_content) if base_content else {}
+        target_config = tomllib.loads(target_content) if target_content else {}
+
+        # Compute final workflow set
+        validator = MergeValidator()
+        validation = validator.validate(base_config, target_config, workflow_resolutions)
+
+        # Build merge plan
+        plan = MergePlan(
+            target_branch=branch,
+            base_ref="HEAD",
+            workflow_resolutions=workflow_resolutions,
+            final_workflow_set=validation.merged_workflow_set,
+            node_conflicts=validation.conflicts,
+            is_compatible=validation.is_compatible,
+        )
+
+        # Remove uv.lock if it would block the merge
+        self.git_orchestrator._cleanup_uvlock_before_git_operation()
+
+        # Execute atomic merge
+        executor = AtomicMergeExecutor(
+            repo_path=self.cec_path,
+            pyproject_manager=self.pyproject,
+        )
+
+        result = executor.execute(plan)
+
+        # If merge succeeded, sync environment
+        if result.success:
+            old_nodes = self.pyproject.nodes.get_existing()
+            self.git_orchestrator._sync_environment_after_git(old_nodes)
+
+        return result
 
     def revert_commit(self, commit: str) -> None:
         """Revert a commit by creating new commit that undoes it.

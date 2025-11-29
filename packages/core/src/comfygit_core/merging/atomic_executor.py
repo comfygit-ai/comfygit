@@ -42,7 +42,7 @@ class AtomicMergeExecutor:
             self._start_merge(plan.target_branch)
 
             # Phase 2: Resolve workflow files
-            self._resolve_workflow_files(plan.workflow_resolutions)
+            self._resolve_workflow_files(plan.workflow_resolutions, plan.target_branch)
 
             # Phase 3: Build and write merged pyproject
             self._build_merged_pyproject(plan)
@@ -65,19 +65,40 @@ class AtomicMergeExecutor:
         """Start merge without committing."""
         _git(["merge", "--no-commit", "--no-ff", branch], self.repo_path)
 
-    def _resolve_workflow_files(self, resolutions: dict[str, Resolution]) -> None:
-        """Checkout correct version of each conflicting workflow."""
+    def _resolve_workflow_files(
+        self, resolutions: dict[str, Resolution], target_branch: str
+    ) -> None:
+        """Checkout correct version of each workflow based on resolution.
+
+        For take_base: checkout from HEAD (current branch before merge)
+        For take_target: checkout from target branch
+
+        This works regardless of whether git detected a conflict.
+        """
         for wf_name, resolution in resolutions.items():
             wf_path = f"workflows/{wf_name}.json"
-            version = "ours" if resolution == "take_base" else "theirs"
 
-            # Try to checkout the file - may not exist in both versions
+            # Determine which ref to checkout from
+            if resolution == "take_base":
+                # HEAD is the original branch we're merging INTO
+                ref = "HEAD"
+            else:
+                # target_branch is the branch we're merging FROM
+                ref = target_branch
+
+            # Checkout the file from the appropriate ref
+            # Use git show to get content, then write it (avoids merge conflicts)
             result = _git(
-                ["checkout", f"--{version}", "--", wf_path],
+                ["show", f"{ref}:{wf_path}"],
                 self.repo_path,
                 check=False,
             )
+
             if result.returncode == 0:
+                # Write the content to the file
+                file_path = self.repo_path / wf_path
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(result.stdout)
                 _git(["add", wf_path], self.repo_path)
 
     def _build_merged_pyproject(self, plan: MergePlan) -> None:
@@ -85,8 +106,9 @@ class AtomicMergeExecutor:
         from ..utils.git import git_show
 
         # Get base and target configs
-        base_content = git_show(self.repo_path, "HEAD", "pyproject.toml")
-        target_content = git_show(self.repo_path, plan.target_branch, "pyproject.toml")
+        pyproject_path = Path("pyproject.toml")
+        base_content = git_show(self.repo_path, "HEAD", pyproject_path)
+        target_content = git_show(self.repo_path, plan.target_branch, pyproject_path)
 
         import tomllib
 

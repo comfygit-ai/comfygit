@@ -1854,11 +1854,23 @@ class EnvironmentCommands:
 
             # Phase 3: Execute merge
             print(f"\nMerging '{args.branch}' into '{current}'...")
-            env.merge_branch(
-                args.branch,
-                message=getattr(args, "message", None),
-                strategy_option=strategy_option,
-            )
+
+            # Use atomic merge when we have per-file resolutions (mixed mine/theirs)
+            # Otherwise use standard merge with global strategy
+            if resolutions and strategy_option is None:
+                # Mixed resolutions - use atomic executor for per-file resolution
+                result = env.execute_atomic_merge(args.branch, resolutions)
+                if not result.success:
+                    print(f"✗ Merge failed: {result.error}", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                # Global strategy or no resolutions - use standard merge
+                env.merge_branch(
+                    args.branch,
+                    message=getattr(args, "message", None),
+                    strategy_option=strategy_option,
+                )
+
             print(f"✓ Merged '{args.branch}' into '{current}'")
         except Exception as e:
             if logger:
