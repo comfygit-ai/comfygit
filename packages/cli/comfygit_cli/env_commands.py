@@ -423,20 +423,28 @@ class EnvironmentCommands:
             for name in status.workflow.sync_status.synced:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Show warning if has issues OR path sync needed
+                    # Check if workflow has missing models (from direct repo query, not cache)
+                    missing_for_wf = [m for m in status.missing_models if name in m.workflow_names]
+                    # Show warning if has issues OR path sync needed OR missing models
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (synced)")
                         self._print_workflow_issues(wf, verbose)
+                    elif missing_for_wf:
+                        print(f"  ⚠️  {name} (synced, {len(missing_for_wf)} missing models)")
                     else:
                         print(f"  ✓ {name}")
 
             for name in status.workflow.sync_status.new:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Show warning if has issues OR path sync needed
+                    # Check if workflow has missing models (from direct repo query, not cache)
+                    missing_for_wf = [m for m in status.missing_models if name in m.workflow_names]
+                    # Show warning if has issues OR path sync needed OR missing models
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (new)")
                         self._print_workflow_issues(wf, verbose)
+                    elif missing_for_wf:
+                        print(f"  ⚠️  {name} (new, {len(missing_for_wf)} missing models)")
                     else:
                         print(f"  🆕 {name} (new, ready to commit)")
 
