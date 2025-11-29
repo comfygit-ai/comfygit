@@ -355,7 +355,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.4" },
     { name = "requirements-parser", specifier = ">=0.13.0" },
     { name = "tomlkit", specifier = ">=0.13.3" },
-    { name = "uv", specifier = "~=0.9" },
+    { name = "uv", specifier = ">=0.7" },
     { name = "xxhash", specifier = ">=2.0.0" },
 ]
 
