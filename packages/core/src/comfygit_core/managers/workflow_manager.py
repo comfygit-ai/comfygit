@@ -625,7 +625,6 @@ class WorkflowManager:
         self,
         name: str,
         sync_state: str,
-        workflows_config: dict | None = None,
         installed_nodes: set[str] | None = None
     ) -> WorkflowAnalysisStatus:
         """Analyze a single workflow for dependencies and resolution status.
@@ -635,37 +634,20 @@ class WorkflowManager:
         Args:
             name: Workflow name
             sync_state: Sync state ("new", "modified", "deleted", "synced")
-            workflows_config: Pre-loaded workflows config (avoids re-reading pyproject)
             installed_nodes: Pre-loaded set of installed node IDs (avoids re-reading pyproject)
 
         Returns:
             WorkflowAnalysisStatus with complete dependency and resolution info
         """
-        # Phase 1 & 2: Analyze and resolve (both cached!)
+        # Analyze and resolve workflow (cached)
         dependencies, resolution = self.analyze_and_resolve_workflow(name)
 
-        # Phase 3: Calculate uninstalled nodes (for CLI display)
-        # Load pyproject data if not provided
-        if workflows_config is None:
-            workflows_config = self.pyproject.workflows.get_all_with_resolutions()
+        # Calculate uninstalled nodes from current resolution
         if installed_nodes is None:
             installed_nodes = set(self.pyproject.nodes.get_existing().keys())
 
-        # Check if workflow has an entry in pyproject.toml
-        workflow_config = workflows_config.get(name, {})
-        pyproject_nodes = set(workflow_config.get('nodes', []))
-
-        # For NEW workflows not yet in pyproject, use resolution result
-        # For workflows already in pyproject (modified, synced, or new from git), use pyproject
-        if sync_state == "new" and not pyproject_nodes:
-            # Use resolved nodes from current analysis (not yet committed)
-            workflow_needs = set(r.package_id for r in resolution.nodes_resolved if r.package_id)
-        else:
-            # Use pyproject for all other cases
-            workflow_needs = pyproject_nodes
-
-        # Calculate uninstalled = needed - installed
-        uninstalled_nodes = list(workflow_needs - installed_nodes)
+        resolved_packages = set(r.package_id for r in resolution.nodes_resolved if r.package_id)
+        uninstalled_nodes = list(resolved_packages - installed_nodes)
 
         return WorkflowAnalysisStatus(
             name=name,
@@ -684,24 +666,13 @@ class WorkflowManager:
         Returns:
             DetailedWorkflowStatus with sync status and analysis for each workflow
         """
-        # Step 1: Get file sync status (fast)
         sync_status = self.get_workflow_sync_status()
-
-        # Step 2: Pre-load pyproject data once for all workflows
-        workflows_config = self.pyproject.workflows.get_all_with_resolutions()
         installed_nodes = set(self.pyproject.nodes.get_existing().keys())
 
-        # Step 3: Analyze all workflows (reusing pyproject data)
-        all_workflow_names = (
-            sync_status.new +
-            sync_status.modified +
-            sync_status.synced
-        )
-
+        all_workflow_names = sync_status.new + sync_status.modified + sync_status.synced
         analyzed: list[WorkflowAnalysisStatus] = []
 
         for name in all_workflow_names:
-            # Determine sync state
             if name in sync_status.new:
                 state = "new"
             elif name in sync_status.modified:
@@ -710,16 +681,10 @@ class WorkflowManager:
                 state = "synced"
 
             try:
-                analysis = self.analyze_single_workflow_status(
-                    name,
-                    state,
-                    workflows_config=workflows_config,
-                    installed_nodes=installed_nodes
-                )
+                analysis = self.analyze_single_workflow_status(name, state, installed_nodes)
                 analyzed.append(analysis)
             except Exception as e:
                 logger.error(f"Failed to analyze workflow {name}: {e}")
-                # Continue with other workflows
 
         return DetailedWorkflowStatus(
             sync_status=sync_status,
