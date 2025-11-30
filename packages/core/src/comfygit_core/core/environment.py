@@ -298,6 +298,22 @@ class Environment:
             result.errors.append(f"Package sync failed: {e}")
             result.success = False
 
+        # Handle version mismatches by removing nodes with wrong versions
+        # They will be reinstalled by sync_nodes_to_filesystem
+        if not dry_run:
+            import shutil
+            try:
+                # Get current status to find version mismatches
+                current_status = self.status()
+                for mismatch in current_status.comparison.version_mismatches:
+                    node_name = mismatch['name']
+                    node_path = self.custom_nodes_path / node_name
+                    if node_path.exists():
+                        logger.info(f"Removing node with wrong version: {node_name} ({mismatch['actual']} → {mismatch['expected']})")
+                        shutil.rmtree(node_path)
+            except Exception as e:
+                logger.warning(f"Could not check/fix version mismatches: {e}")
+
         # Sync custom nodes to filesystem
         try:
             # Pass remove_extra flag (default True for aggressive repair behavior)
