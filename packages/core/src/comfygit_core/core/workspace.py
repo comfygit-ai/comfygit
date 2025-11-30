@@ -30,7 +30,7 @@ from ..utils.environment_cleanup import (
 from .environment import Environment
 
 if TYPE_CHECKING:
-    from ..models.protocols import ImportCallbacks
+    from ..models.protocols import EnvironmentCreateProgress, ImportCallbacks
 
 logger = get_logger(__name__)
 
@@ -283,6 +283,7 @@ class Workspace:
         comfyui_version: str | None = None,
         template_path: Path | None = None,
         torch_backend: str = "auto",
+        progress: "EnvironmentCreateProgress | None" = None,
     ) -> Environment:
         """Create a new environment.
 
@@ -292,6 +293,7 @@ class Workspace:
             comfyui_version: ComfyUI version
             template_path: Optional template to copy from
             torch_backend: PyTorch backend (auto, cpu, cu118, cu121, etc.)
+            progress: Optional progress callback for tracking creation phases
 
         Returns:
             Environment
@@ -319,6 +321,7 @@ class Workspace:
                 python_version=python_version,
                 comfyui_version=comfyui_version,
                 torch_backend=torch_backend,
+                progress=progress,
             )
 
             # TODO: Apply template if provided

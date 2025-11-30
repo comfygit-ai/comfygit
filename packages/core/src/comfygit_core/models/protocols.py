@@ -249,6 +249,34 @@ class ExportCallbacks(Protocol):
         ...
 
 
+class EnvironmentCreateProgress(Protocol):
+    """Protocol for environment creation progress updates.
+
+    Provides callbacks for tracking environment creation phases,
+    enabling UI progress bars and status messages.
+    """
+
+    def on_phase(self, phase: str, description: str, progress_pct: int) -> None:
+        """Called when entering a new creation phase.
+
+        Args:
+            phase: Phase identifier (e.g., "clone_comfyui", "install_pytorch")
+            description: Human-readable phase description for UI display
+            progress_pct: Overall progress percentage (0-100)
+        """
+        ...
+
+    def on_phase_complete(self, phase: str, success: bool, error: str | None = None) -> None:
+        """Called when a phase completes.
+
+        Args:
+            phase: Phase identifier that completed
+            success: Whether the phase succeeded
+            error: Error message if failed (None if succeeded)
+        """
+        ...
+
+
 class ConflictResolver(Protocol):
     """Protocol for resolving merge conflicts interactively.
 
