@@ -490,7 +490,8 @@ class NodeManager:
             if found:
                 actual_identifier, removed_node = found
             else:
-                raise CDNodeNotFoundError(f"Node '{identifier}' not found in environment")
+                # Check if untracked node exists on filesystem
+                return self._remove_untracked_node(identifier)
 
         # At this point both must be set
         assert actual_identifier is not None
@@ -528,6 +529,9 @@ class NodeManager:
         if not removed:
             raise CDNodeNotFoundError(f"Node '{identifier}' not found in environment")
 
+        # Clean up workflow references to this node
+        self.pyproject.workflows.cleanup_node_references(actual_identifier, removed_node.name)
+
         # Clean up orphaned UV sources for registry/git nodes
         if not is_development:
             removed_sources = removed_node.dependency_sources or []
@@ -542,6 +546,52 @@ class NodeManager:
             identifier=actual_identifier,
             name=removed_node.name,
             source=removed_node.source,
+            filesystem_action=filesystem_action
+        )
+
+    def _remove_untracked_node(self, node_name: str) -> NodeRemovalResult:
+        """Remove an untracked node from filesystem only.
+
+        Called when remove_node() can't find a tracked node but filesystem has it.
+        Handles both regular directories and .disabled directories.
+
+        Args:
+            node_name: Name of the node directory
+
+        Returns:
+            NodeRemovalResult with details
+
+        Raises:
+            CDNodeNotFoundError: If node not found on filesystem either
+        """
+        node_path = self.custom_nodes_path / node_name
+        disabled_path = self.custom_nodes_path / f"{node_name}.disabled"
+
+        removed = False
+        filesystem_action = "none"
+
+        if node_path.exists() and node_path.is_dir():
+            shutil.rmtree(node_path)
+            removed = True
+            filesystem_action = "deleted"
+            logger.info(f"Removed untracked node directory: {node_name}")
+
+        if disabled_path.exists() and disabled_path.is_dir():
+            shutil.rmtree(disabled_path)
+            removed = True
+            filesystem_action = "deleted"
+            logger.info(f"Removed disabled node directory: {node_name}.disabled")
+
+        if not removed:
+            raise CDNodeNotFoundError(f"Node '{node_name}' not found in environment")
+
+        # Clean up any orphaned workflow references
+        self.pyproject.workflows.cleanup_node_references(node_name)
+
+        return NodeRemovalResult(
+            identifier=node_name,
+            name=node_name,
+            source="untracked",
             filesystem_action=filesystem_action
         )
 
