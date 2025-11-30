@@ -6,8 +6,9 @@ System nodes (like comfygit-manager) are infrastructure nodes that:
 - Are never tracked in pyproject.toml
 - Are never exported in tarballs
 """
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 class TestSystemCustomNodesConstant:
@@ -279,3 +280,254 @@ class TestSystemNodeSymlinkManager:
         symlink_manager.create_symlinks()
         status = symlink_manager.validate_symlinks()
         assert status.get("comfygit-manager") is True
+
+
+class TestSystemNodeRequirements:
+    """Tests for SystemNodeSymlinkManager.get_all_requirements()."""
+
+    def test_get_all_requirements_parses_pyproject_toml(self, test_workspace):
+        """get_all_requirements should parse dependencies from pyproject.toml."""
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+
+        # Create system node with pyproject.toml
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+        manager_node = system_nodes_dir / "comfygit-manager"
+        manager_node.mkdir()
+        (manager_node / "__init__.py").write_text("# comfygit-manager")
+
+        # Create pyproject.toml with dependencies
+        pyproject_content = """
+[project]
+name = "comfygit-manager"
+version = "0.1.0"
+dependencies = [
+    "comfygit-core",
+    "watchdog>=6.0.0",
+]
+"""
+        (manager_node / "pyproject.toml").write_text(pyproject_content)
+
+        # Create test comfyui path
+        comfyui_path = test_workspace.paths.environments / "test-env" / "ComfyUI"
+        comfyui_path.mkdir(parents=True)
+
+        symlink_manager = SystemNodeSymlinkManager(comfyui_path, system_nodes_dir)
+        requirements = symlink_manager.get_all_requirements()
+
+        assert "comfygit-core" in requirements
+        assert "watchdog>=6.0.0" in requirements
+
+    def test_get_all_requirements_parses_requirements_txt_fallback(self, test_workspace):
+        """get_all_requirements should fall back to requirements.txt if no pyproject.toml."""
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+
+        # Create system node with requirements.txt only
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+        node_dir = system_nodes_dir / "test-node"
+        node_dir.mkdir()
+        (node_dir / "__init__.py").write_text("# test-node")
+
+        # Create requirements.txt
+        (node_dir / "requirements.txt").write_text("requests>=2.0.0\naiohttp")
+
+        comfyui_path = test_workspace.paths.environments / "test-env" / "ComfyUI"
+        comfyui_path.mkdir(parents=True)
+
+        symlink_manager = SystemNodeSymlinkManager(comfyui_path, system_nodes_dir)
+        requirements = symlink_manager.get_all_requirements()
+
+        assert "requests>=2.0.0" in requirements
+        assert "aiohttp" in requirements
+
+    def test_get_all_requirements_handles_empty_system_nodes(self, test_workspace):
+        """get_all_requirements should return empty list for empty system_nodes dir."""
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+
+        # Create empty system nodes directory
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+
+        comfyui_path = test_workspace.paths.environments / "test-env" / "ComfyUI"
+        comfyui_path.mkdir(parents=True)
+
+        symlink_manager = SystemNodeSymlinkManager(comfyui_path, system_nodes_dir)
+        requirements = symlink_manager.get_all_requirements()
+
+        assert requirements == []
+
+    def test_get_all_requirements_deduplicates(self, test_workspace):
+        """get_all_requirements should deduplicate requirements across nodes."""
+        from comfygit_core.managers.system_node_symlink_manager import SystemNodeSymlinkManager
+
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create two nodes with overlapping requirements
+        for node_name in ["node-a", "node-b"]:
+            node_dir = system_nodes_dir / node_name
+            node_dir.mkdir()
+            (node_dir / "__init__.py").write_text(f"# {node_name}")
+            (node_dir / "requirements.txt").write_text("requests>=2.0.0\ncommon-dep")
+
+        comfyui_path = test_workspace.paths.environments / "test-env" / "ComfyUI"
+        comfyui_path.mkdir(parents=True)
+
+        symlink_manager = SystemNodeSymlinkManager(comfyui_path, system_nodes_dir)
+        requirements = symlink_manager.get_all_requirements()
+
+        # Should not have duplicates
+        assert requirements.count("requests>=2.0.0") == 1
+        assert requirements.count("common-dep") == 1
+
+
+class TestEnvironmentFactorySystemNodeDeps:
+    """Tests for EnvironmentFactory including system node deps in pyproject.toml."""
+
+    def test_create_environment_includes_system_node_deps_in_dependency_group(
+        self, test_workspace, mock_comfyui_clone, mock_github_api
+    ):
+        """Created environment should have system-nodes dependency group."""
+        # Create system node with dependencies
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+        manager_node = system_nodes_dir / "comfygit-manager"
+        manager_node.mkdir()
+        (manager_node / "__init__.py").write_text("# comfygit-manager")
+        pyproject_content = """
+[project]
+name = "comfygit-manager"
+version = "0.1.0"
+dependencies = [
+    "comfygit-core",
+    "watchdog>=6.0.0",
+]
+"""
+        (manager_node / "pyproject.toml").write_text(pyproject_content)
+
+        # Create environment
+        from comfygit_core.factories.environment_factory import EnvironmentFactory
+
+        env = EnvironmentFactory.create(
+            name="test-env",
+            env_path=test_workspace.paths.environments / "test-env",
+            workspace=test_workspace,
+            python_version="3.12",
+            comfyui_version="v0.3.20",
+        )
+
+        # Check pyproject.toml has system-nodes dependency group
+        config = env.pyproject.load()
+        assert "dependency-groups" in config
+        assert "system-nodes" in config["dependency-groups"]
+        system_deps = config["dependency-groups"]["system-nodes"]
+        assert "comfygit-core" in system_deps
+        assert "watchdog>=6.0.0" in system_deps
+
+    def test_create_environment_includes_schema_version(
+        self, test_workspace, mock_comfyui_clone, mock_github_api
+    ):
+        """Created environment should have schema_version in tool.comfygit."""
+        from comfygit_core.constants import PYPROJECT_SCHEMA_VERSION
+        from comfygit_core.factories.environment_factory import EnvironmentFactory
+
+        env = EnvironmentFactory.create(
+            name="test-env",
+            env_path=test_workspace.paths.environments / "test-env",
+            workspace=test_workspace,
+            python_version="3.12",
+            comfyui_version="v0.3.20",
+        )
+
+        config = env.pyproject.load()
+        assert config["tool"]["comfygit"]["schema_version"] == PYPROJECT_SCHEMA_VERSION
+
+
+class TestFinalizeImportSystemNodeDeps:
+    """Tests for finalize_import reconciling system node deps."""
+
+    def test_finalize_import_updates_system_nodes_dependency_group(
+        self, test_workspace, mock_comfyui_clone, mock_github_api
+    ):
+        """finalize_import should update system-nodes group from local workspace."""
+
+        # Create system node with dependencies in workspace
+        system_nodes_dir = test_workspace.paths.system_nodes
+        system_nodes_dir.mkdir(parents=True, exist_ok=True)
+        manager_node = system_nodes_dir / "comfygit-manager"
+        manager_node.mkdir()
+        (manager_node / "__init__.py").write_text("# comfygit-manager")
+        pyproject_content = """
+[project]
+name = "comfygit-manager"
+version = "0.2.0"
+dependencies = [
+    "comfygit-core>=0.2.0",
+    "watchdog>=7.0.0",
+    "new-local-dep",
+]
+"""
+        (manager_node / "pyproject.toml").write_text(pyproject_content)
+
+        # Create environment structure (simulating import_from_bundle)
+        env_path = test_workspace.paths.environments / "imported-env"
+        env_path.mkdir(parents=True)
+        cec_path = env_path / ".cec"
+        cec_path.mkdir()
+
+        # Create pyproject.toml as if it was imported (with old system-nodes deps)
+        import tomlkit
+        imported_config = {
+            "project": {
+                "name": "comfygit-env-imported-env",
+                "version": "0.1.0",
+                "requires-python": ">=3.12",
+                "dependencies": []
+            },
+            "tool": {
+                "comfygit": {
+                    "schema_version": 1,
+                    "comfyui_version": "v0.3.20",
+                    "comfyui_version_type": "release",
+                    "python_version": "3.12",
+                    "torch_backend": "auto",
+                    "nodes": {}
+                }
+            },
+            "dependency-groups": {
+                "system-nodes": [
+                    "comfygit-core>=0.1.0",  # Old version from export source
+                    "watchdog>=6.0.0",        # Old version
+                ]
+            }
+        }
+        with open(cec_path / "pyproject.toml", "w") as f:
+            tomlkit.dump(imported_config, f)
+
+        # Create .python-version file
+        (cec_path / ".python-version").write_text("3.12")
+
+        # Create environment instance and finalize import
+        from comfygit_core.core.environment import Environment
+        env = Environment(
+            name="imported-env",
+            path=env_path,
+            workspace=test_workspace,
+            torch_backend="auto",
+        )
+        env.finalize_import()
+
+        # Check that system-nodes dep group was updated from LOCAL workspace
+        config = env.pyproject.load()
+        assert "dependency-groups" in config
+        assert "system-nodes" in config["dependency-groups"]
+        system_deps = config["dependency-groups"]["system-nodes"]
+
+        # Should have the NEW local workspace deps, not the imported ones
+        assert "comfygit-core>=0.2.0" in system_deps
+        assert "watchdog>=7.0.0" in system_deps
+        assert "new-local-dep" in system_deps
+        # Old versions should NOT be present
+        assert "comfygit-core>=0.1.0" not in system_deps
+        assert "watchdog>=6.0.0" not in system_deps

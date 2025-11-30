@@ -1768,6 +1768,17 @@ class Environment:
         if linked_nodes:
             logger.info(f"Linked system nodes: {', '.join(linked_nodes)}")
 
+        # Update system-nodes dependency group from LOCAL workspace's system nodes
+        # (replaces any imported deps with local versions)
+        local_requirements = self.system_node_manager.get_all_requirements()
+        if local_requirements:
+            config = self.pyproject.load()
+            if "dependency-groups" not in config:
+                config["dependency-groups"] = {}
+            config["dependency-groups"]["system-nodes"] = list(local_requirements)
+            self.pyproject.save(config)
+            logger.info(f"Updated system-nodes deps: {', '.join(local_requirements)}")
+
         # Phase 1.5: Create venv and optionally install PyTorch with specific backend
         # Read Python version from .python-version file
         python_version_file = self.cec_path / ".python-version"

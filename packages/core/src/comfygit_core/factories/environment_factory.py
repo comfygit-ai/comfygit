@@ -196,6 +196,11 @@ class EnvironmentFactory:
         if linked_nodes:
             logger.info(f"Linked system nodes: {', '.join(linked_nodes)}")
 
+        # Collect system node requirements
+        system_node_requirements = env.system_node_manager.get_all_requirements()
+        if system_node_requirements:
+            logger.info(f"System node requirements: {', '.join(system_node_requirements)}")
+
         _complete("configure_environment")
 
         # Create initial pyproject.toml
@@ -205,7 +210,8 @@ class EnvironmentFactory:
             version_to_clone,
             version_type,
             commit_sha,
-            torch_backend
+            torch_backend,
+            system_node_requirements=system_node_requirements,
         )
         env.pyproject.save(config)
 
@@ -472,9 +478,12 @@ class EnvironmentFactory:
         comfyui_version: str,
         comfyui_version_type: str = "branch",
         comfyui_commit_sha: str | None = None,
-        torch_backend: str = "auto"
+        torch_backend: str = "auto",
+        system_node_requirements: list[str] | None = None,
     ) -> dict:
         """Create the initial pyproject.toml."""
+        from ..constants import PYPROJECT_SCHEMA_VERSION
+
         config = {
             "project": {
                 "name": f"comfygit-env-{name}",
@@ -484,6 +493,7 @@ class EnvironmentFactory:
             },
             "tool": {
                 "comfygit": {
+                    "schema_version": PYPROJECT_SCHEMA_VERSION,
                     "comfyui_version": comfyui_version,
                     "comfyui_version_type": comfyui_version_type,
                     "comfyui_commit_sha": comfyui_commit_sha,
@@ -493,4 +503,11 @@ class EnvironmentFactory:
                 }
             }
         }
+
+        # Add system-nodes dependency group if requirements exist
+        if system_node_requirements:
+            config["dependency-groups"] = {
+                "system-nodes": list(system_node_requirements)
+            }
+
         return config

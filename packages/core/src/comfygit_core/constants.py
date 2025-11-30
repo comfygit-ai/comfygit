@@ -72,6 +72,10 @@ SYSTEM_CUSTOM_NODES = {
     'comfygit-manager',
 }
 
+# Schema version for environment pyproject.toml format.
+# Increment when making breaking changes to the pyproject.toml structure.
+PYPROJECT_SCHEMA_VERSION = 1
+
 # Default values
 DEFAULT_REGISTRY_URL = "https://api.comfy.org"
 DEFAULT_GITHUB_URL = "https://github.com"

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import tomlkit
+
 from ..logging.logging_config import get_logger
 from ..utils.symlink_utils import create_platform_link, is_link
 
@@ -109,3 +111,62 @@ class SystemNodeSymlinkManager:
                 results[node_name] = True
 
         return results
+
+    def get_all_requirements(self) -> list[str]:
+        """Scan all system nodes and collect their requirements.
+
+        Reads pyproject.toml (preferred) or requirements.txt from each
+        system node and returns a combined list of requirements.
+
+        Returns:
+            List of requirement strings (e.g., ["comfygit-core", "watchdog>=6.0.0"])
+        """
+        if not self.system_nodes_path.exists():
+            return []
+
+        all_requirements: set[str] = set()
+
+        for node_dir in self.system_nodes_path.iterdir():
+            if not node_dir.is_dir():
+                continue
+
+            requirements = self._parse_node_requirements(node_dir)
+            all_requirements.update(requirements)
+
+        return list(all_requirements)
+
+    def _parse_node_requirements(self, node_dir: Path) -> list[str]:
+        """Parse requirements from a single system node.
+
+        Tries pyproject.toml first, then falls back to requirements.txt.
+        """
+        # Try pyproject.toml first
+        pyproject_path = node_dir / "pyproject.toml"
+        if pyproject_path.exists():
+            try:
+                with open(pyproject_path, encoding="utf-8") as f:
+                    config = tomlkit.load(f)
+                dependencies = config.get("project", {}).get("dependencies", [])
+                if dependencies:
+                    logger.debug(f"Found {len(dependencies)} deps in {node_dir.name}/pyproject.toml")
+                    return list(dependencies)
+            except Exception as e:
+                logger.warning(f"Failed to parse {pyproject_path}: {e}")
+
+        # Fall back to requirements.txt
+        requirements_path = node_dir / "requirements.txt"
+        if requirements_path.exists():
+            try:
+                content = requirements_path.read_text(encoding="utf-8")
+                requirements = [
+                    line.strip()
+                    for line in content.splitlines()
+                    if line.strip() and not line.strip().startswith("#")
+                ]
+                if requirements:
+                    logger.debug(f"Found {len(requirements)} deps in {node_dir.name}/requirements.txt")
+                    return requirements
+            except Exception as e:
+                logger.warning(f"Failed to parse {requirements_path}: {e}")
+
+        return []
