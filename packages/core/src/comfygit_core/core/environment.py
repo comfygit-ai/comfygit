@@ -22,6 +22,7 @@ from ..managers.user_content_symlink_manager import UserContentSymlinkManager
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
+from ..models.ref_diff import RefDiff
 from ..models.shared import (
     ModelSourceResult,
     ModelSourceStatus,
@@ -29,7 +30,6 @@ from ..models.shared import (
     NodeRemovalResult,
     UpdateResult,
 )
-from ..models.ref_diff import RefDiff
 from ..models.sync import SyncResult
 from ..strategies.confirmation import ConfirmationStrategy
 from ..utils.common import run_command
@@ -737,7 +737,7 @@ class Environment:
         self,
         branch: str,
         workflow_resolutions: dict,
-    ) -> "MergeValidation":
+    ) -> MergeValidation:
         """Validate merge compatibility before execution.
 
         Checks for node version conflicts that would occur if the merge
@@ -750,9 +750,10 @@ class Environment:
         Returns:
             MergeValidation with is_compatible flag and any conflicts
         """
+        import tomllib
+
         from ..merging.merge_validator import MergeValidator
         from ..utils.git import git_show
-        import tomllib
 
         # Load configs from both branches
         pyproject_path = Path("pyproject.toml")
@@ -769,7 +770,7 @@ class Environment:
         self,
         branch: str,
         workflow_resolutions: dict,
-    ) -> "MergeResult":
+    ) -> MergeResult:
         """Execute merge with atomic semantics and semantic pyproject merging.
 
         This method:
@@ -788,11 +789,12 @@ class Environment:
         Returns:
             MergeResult with success status and details
         """
+        import tomllib
+
         from ..merging.atomic_executor import AtomicMergeExecutor
         from ..merging.merge_validator import MergeValidator
         from ..models.merge_plan import MergePlan
         from ..utils.git import git_show
-        import tomllib
 
         # Load configs to compute final workflow set
         pyproject_path = Path("pyproject.toml")
@@ -1763,6 +1765,14 @@ class Environment:
         # Create symlinks for user content and system nodes
         self.user_content_manager.create_directories()
         self.user_content_manager.create_symlinks()
+
+        # Create default ComfyUI user settings (skip templates panel on first launch)
+        user_settings_dir = self.comfyui_path / "user" / "default"
+        user_settings_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = user_settings_dir / "comfy.settings.json"
+        if not settings_file.exists():
+            settings_file.write_text('{"Comfy.TutorialCompleted": true}')
+            logger.debug("Created default user settings (skip templates panel)")
 
         linked_nodes = self.system_node_manager.create_symlinks()
         if linked_nodes:

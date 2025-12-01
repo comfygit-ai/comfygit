@@ -191,6 +191,13 @@ class EnvironmentFactory:
         env.user_content_manager.create_symlinks()
         logger.debug("Created user content symlinks")
 
+        # Create default ComfyUI user settings (skip templates panel on first launch)
+        user_settings_dir = env.comfyui_path / "user" / "default"
+        user_settings_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = user_settings_dir / "comfy.settings.json"
+        settings_file.write_text('{"Comfy.TutorialCompleted": true}')
+        logger.debug("Created default user settings (skip templates panel)")
+
         # Create system node symlinks (comfygit-manager, etc.)
         linked_nodes = env.system_node_manager.create_symlinks()
         if linked_nodes:
