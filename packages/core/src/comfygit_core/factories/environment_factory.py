@@ -12,9 +12,9 @@ from ..managers.git_manager import GitManager
 from ..models.exceptions import (
     CDEnvironmentExistsError,
 )
-from ..utils.pytorch import extract_pip_show_package_version
 from ..utils.comfyui_ops import clone_comfyui
 from ..utils.environment_cleanup import mark_environment_complete
+from ..utils.pytorch import extract_pip_show_package_version
 
 if TYPE_CHECKING:
     from comfygit_core.core.workspace import Workspace
@@ -32,7 +32,7 @@ class EnvironmentFactory:
         python_version: str = "3.12",
         comfyui_version: str | None = None,
         torch_backend: str = "auto",
-        progress: "EnvironmentCreateProgress | None" = None,
+        progress: EnvironmentCreateProgress | None = None,
     ) -> Environment:
         """Create a new environment.
 
@@ -283,7 +283,7 @@ class EnvironmentFactory:
             env.uv_manager.add_requirements_with_sources(comfyui_reqs, frozen=True)
 
         logger.info("Installing dependencies...")
-        env.uv_manager.sync_project(verbose=True)
+        env.uv_manager.sync_project(verbose=True, all_groups=True)
 
         _complete("install_dependencies")
 
@@ -482,6 +482,8 @@ class EnvironmentFactory:
         system_node_requirements: list[str] | None = None,
     ) -> dict:
         """Create the initial pyproject.toml."""
+        import os
+
         from ..constants import PYPROJECT_SCHEMA_VERSION
 
         config = {
@@ -509,5 +511,16 @@ class EnvironmentFactory:
             config["dependency-groups"] = {
                 "system-nodes": list(system_node_requirements)
             }
+
+        # Dev mode: redirect comfygit-core to local editable path
+        dev_core_path = os.environ.get("COMFYGIT_DEV_CORE_PATH")
+        if dev_core_path and system_node_requirements:
+            if any("comfygit-core" in req for req in system_node_requirements):
+                config.setdefault("tool", {}).setdefault("uv", {}).setdefault("sources", {})
+                config["tool"]["uv"]["sources"]["comfygit-core"] = {
+                    "path": dev_core_path,
+                    "editable": True
+                }
+                logger.info(f"Dev mode: comfygit-core → {dev_core_path}")
 
         return config
