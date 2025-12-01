@@ -1,54 +1,72 @@
+import json
+import os
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
-import json
-import os
 
-from ..models.workspace_config import WorkspaceConfig, ModelDirectory, APICredentials
 from comfygit_core.models.exceptions import ComfyDockError
+
 from ..logging.logging_config import get_logger
+from ..models.workspace_config import APICredentials, ModelDirectory, WorkspaceConfig
 
 logger = get_logger(__name__)
 
 
 class WorkspaceConfigRepository:
 
-    def __init__(self, config_file: Path):
+    def __init__(self, config_file: Path, default_models_path: Path | None = None):
         self.config_file_path = config_file
-        
+        self._default_models_path = default_models_path
+
     @cached_property
     def config_file(self) -> WorkspaceConfig:
-        data = self.load()
-        if data is None:
-            raise ComfyDockError("No workspace config found")
-        return data
+        return self._load_or_fail()
 
-    def load(self) -> WorkspaceConfig:
-        result = None
+    def _load_or_fail(self) -> WorkspaceConfig:
+        """Load config from file, raising on any error.
+
+        Unlike the old load() which silently recreated config on errors,
+        this method fails loudly to aid debugging.
+        """
+        if not self.config_file_path.exists():
+            raise ComfyDockError(
+                f"Workspace config not found: {self.config_file_path}\n"
+                f"Run 'comfygit init' to create a workspace."
+            )
+
         try:
             with self.config_file_path.open("r") as f:
-                result = WorkspaceConfig.from_dict(json.load(f))
-        except Exception as e:
-            logger.warning(f"Failed to load workspace config: {e}")
-            
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ComfyDockError(
+                f"Failed to load workspace config: invalid JSON at {self.config_file_path}\n"
+                f"Error: {e}\n"
+                f"The config file may be corrupted. Check the file contents."
+            ) from e
+
+        try:
+            result = WorkspaceConfig.from_dict(data)
+        except (KeyError, TypeError) as e:
+            raise ComfyDockError(
+                f"Failed to load workspace config: missing or invalid fields\n"
+                f"Error: {e}\n"
+                f"The config file may be from an incompatible version."
+            ) from e
+
         logger.debug(f"Loaded workspace config: {result}")
-            
-        if result is None:
-            logger.info("No workspace config found, creating a new one")
-            result = WorkspaceConfig(
-                version=1,
-                active_environment="",
-                created_at=str(datetime.now().isoformat()),
-                global_model_directory=None
-            )
-            self.save(result)
         return result
 
+    def load(self) -> WorkspaceConfig:
+        """Load config - delegates to _load_or_fail for backwards compatibility."""
+        return self._load_or_fail()
+
     def save(self, data: WorkspaceConfig):
-        # First serialize to JSON
-        with self.config_file_path.open("w") as f:
-            data_dict = WorkspaceConfig.to_dict(data)
+        """Save config atomically (write to temp, then rename)."""
+        data_dict = WorkspaceConfig.to_dict(data)
+        temp_path = self.config_file_path.with_suffix(".tmp")
+        with temp_path.open("w") as f:
             json.dump(data_dict, f, indent=2)
+        temp_path.replace(self.config_file_path)  # Atomic on POSIX
 
     def set_models_directory(self, path: Path):
         logger.info(f"Setting models directory to {path}")
@@ -63,14 +81,19 @@ class WorkspaceConfigRepository:
         logger.debug(f"Updated data: {data}, saving...")
         self.save(data)
         logger.info(f"Models directory set to {path}")
-        
+
     def get_models_directory(self) -> Path:
-        """Get path to tracked model directory."""
+        """Get path to tracked model directory.
+
+        Returns configured path, or falls back to default workspace models path.
+        """
         data = self.config_file
-        if data.global_model_directory is None:
-            raise ComfyDockError("No models directory set")
-        return Path(data.global_model_directory.path)
-    
+        if data.global_model_directory is not None:
+            return Path(data.global_model_directory.path)
+        if self._default_models_path is not None:
+            return self._default_models_path
+        raise ComfyDockError("No models directory set and no default available")
+
     def update_models_sync_time(self):
         data = self.config_file
         if data.global_model_directory is None:

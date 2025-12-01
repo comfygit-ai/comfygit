@@ -1,11 +1,6 @@
 """ComfyDock workspace - manages multiple environments within a validated workspace."""
 
 import json
-import os
-import platform
-import shutil
-import stat
-import time
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -35,7 +30,7 @@ from ..utils.environment_cleanup import (
 from .environment import Environment
 
 if TYPE_CHECKING:
-    from ..models.protocols import ImportCallbacks
+    from ..models.protocols import EnvironmentCreateProgress, ImportCallbacks
 
 logger = get_logger(__name__)
 
@@ -117,6 +112,11 @@ class WorkspacePaths:
         """Base directory for per-environment output directories."""
         return self.root / "output"
 
+    @property
+    def system_nodes(self) -> Path:
+        """Directory for workspace-level system nodes (infrastructure custom nodes)."""
+        return self.metadata / "system_nodes"
+
     def exists(self) -> bool:
         return self.root.exists() and self.metadata.exists()
 
@@ -128,6 +128,7 @@ class WorkspacePaths:
         self.models.mkdir(parents=True, exist_ok=True)
         self.input.mkdir(parents=True, exist_ok=True)
         self.output.mkdir(parents=True, exist_ok=True)
+        self.system_nodes.mkdir(parents=True, exist_ok=True)
 
 class Workspace:
     """Manages ComfyDock workspace and all environments within it.
@@ -151,7 +152,10 @@ class Workspace:
 
     @cached_property
     def workspace_config_manager(self) -> WorkspaceConfigRepository:
-        return WorkspaceConfigRepository(self.paths.workspace_file)
+        return WorkspaceConfigRepository(
+            self.paths.workspace_file,
+            default_models_path=self.paths.models
+        )
 
     @cached_property
     def registry_data_manager(self) -> RegistryDataManager:
@@ -279,6 +283,7 @@ class Workspace:
         comfyui_version: str | None = None,
         template_path: Path | None = None,
         torch_backend: str = "auto",
+        progress: "EnvironmentCreateProgress | None" = None,
     ) -> Environment:
         """Create a new environment.
 
@@ -288,6 +293,7 @@ class Workspace:
             comfyui_version: ComfyUI version
             template_path: Optional template to copy from
             torch_backend: PyTorch backend (auto, cpu, cu118, cu121, etc.)
+            progress: Optional progress callback for tracking creation phases
 
         Returns:
             Environment
@@ -315,6 +321,7 @@ class Workspace:
                 python_version=python_version,
                 comfyui_version=comfyui_version,
                 torch_backend=torch_backend,
+                progress=progress,
             )
 
             # TODO: Apply template if provided

@@ -156,6 +156,7 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     init_parser.add_argument("path", type=Path, nargs="?", help="Workspace directory (default: ~/comfygit)")
     init_parser.add_argument("--models-dir", type=Path, help="Path to existing models directory to index")
     init_parser.add_argument("--yes", "-y", action="store_true", help="Use all defaults, no interactive prompts")
+    init_parser.add_argument("--bare", action="store_true", help="Create workspace without system nodes (comfygit-manager)")
     init_parser.set_defaults(func=global_cmds.init)
 
     # list - List all environments
@@ -287,6 +288,45 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     completion_status_parser = completion_subparsers.add_parser("status", help="Show tab completion installation status")
     completion_status_parser.set_defaults(func=completion_cmds.status)
 
+    # Orchestrator management subcommands
+    orch_parser = subparsers.add_parser(
+        "orch",
+        aliases=["orchestrator"],
+        help="Monitor and control orchestrator"
+    )
+    orch_subparsers = orch_parser.add_subparsers(
+        dest="orch_command",
+        help="Orchestrator commands"
+    )
+
+    # orch status
+    orch_status_parser = orch_subparsers.add_parser("status", help="Show orchestrator status")
+    orch_status_parser.add_argument("--json", action="store_true", help="Output as JSON")
+    orch_status_parser.set_defaults(func=global_cmds.orch_status)
+
+    # orch restart
+    orch_restart_parser = orch_subparsers.add_parser("restart", help="Restart ComfyUI")
+    orch_restart_parser.add_argument("--wait", action="store_true", help="Wait for restart to complete")
+    orch_restart_parser.set_defaults(func=global_cmds.orch_restart)
+
+    # orch kill
+    orch_kill_parser = orch_subparsers.add_parser("kill", help="Shutdown orchestrator")
+    orch_kill_parser.add_argument("--force", action="store_true", help="Force kill (bypass command queue)")
+    orch_kill_parser.set_defaults(func=global_cmds.orch_kill)
+
+    # orch clean
+    orch_clean_parser = orch_subparsers.add_parser("clean", help="Clean orchestrator state")
+    orch_clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted")
+    orch_clean_parser.add_argument("--force", action="store_true", help="Skip confirmation")
+    orch_clean_parser.add_argument("--kill", action="store_true", help="Also kill orchestrator process")
+    orch_clean_parser.set_defaults(func=global_cmds.orch_clean)
+
+    # orch logs
+    orch_logs_parser = orch_subparsers.add_parser("logs", help="Show orchestrator logs")
+    orch_logs_parser.add_argument("-f", "--follow", action="store_true", help="Follow logs in real-time")
+    orch_logs_parser.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to show (default: 50)")
+    orch_logs_parser.set_defaults(func=global_cmds.orch_logs)
+
 
 def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     """Add environment-specific commands."""
@@ -341,6 +381,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     manifest_parser = subparsers.add_parser("manifest", help="Show environment manifest (pyproject.toml)")
     manifest_parser.add_argument("--pretty", action="store_true", help="Output as YAML instead of TOML")
     manifest_parser.add_argument("--section", type=str, help="Show specific section (e.g., tool.comfygit.nodes)")
+    manifest_parser.add_argument("--ide", nargs="?", const="auto", metavar="CMD", help="Open in editor (uses $EDITOR if no command given)")
     manifest_parser.set_defaults(func=env_cmds.manifest)
 
     # repair - Repair environment drift (manual edits or git operations)
@@ -402,6 +443,16 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     merge_parser = subparsers.add_parser("merge", help="Merge branch into current")
     merge_parser.add_argument("branch", help="Branch to merge")
     merge_parser.add_argument("-m", "--message", help="Merge commit message")
+    merge_parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Preview changes without applying (read-only diff with conflict detection)"
+    )
+    merge_parser.add_argument(
+        "--auto-resolve",
+        choices=["mine", "theirs"],
+        help="Auto-resolve conflicts: 'mine' keeps local, 'theirs' takes incoming"
+    )
     merge_parser.set_defaults(func=env_cmds.merge)
 
     # revert - Revert commits
@@ -429,6 +480,16 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         "--force",
         action="store_true",
         help="Discard uncommitted changes and force pull"
+    )
+    pull_parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Preview changes without applying (read-only fetch and diff)"
+    )
+    pull_parser.add_argument(
+        "--auto-resolve",
+        choices=["mine", "theirs"],
+        help="Auto-resolve conflicts: 'mine' keeps local, 'theirs' takes incoming"
     )
     pull_parser.set_defaults(func=env_cmds.pull)
 

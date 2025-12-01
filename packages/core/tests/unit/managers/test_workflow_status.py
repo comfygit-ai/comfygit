@@ -228,3 +228,148 @@ class TestWorkflowAnalysisStatusDownloadIntents:
         )
 
         assert analysis.download_intents_count == 2
+
+
+class TestIssueSummaryConsistency:
+    """Test that issue_summary is consistent with has_issues.
+
+    The key invariant: if has_issues is True, issue_summary must NOT be "No issues".
+    """
+
+    def test_issue_summary_with_uninstalled_nodes(self):
+        """issue_summary should include uninstalled nodes when they exist.
+
+        This tests the semantic bug where has_issues=True (due to uninstalled nodes)
+        but issue_summary="No issues" (because it only checked resolution failures).
+        """
+        from comfygit_core.models.workflow import (
+            WorkflowDependencies,
+            ResolutionResult,
+        )
+
+        analysis = WorkflowAnalysisStatus(
+            name="wf1",
+            sync_state="synced",
+            dependencies=WorkflowDependencies(workflow_name="wf1"),
+            resolution=ResolutionResult(workflow_name="wf1"),  # No resolution issues
+            uninstalled_nodes=["comfyui-custom-node", "comfyui-another-node"]  # But has uninstalled!
+        )
+
+        # has_issues should be True due to uninstalled_nodes
+        assert analysis.has_issues is True, "has_issues should be True when uninstalled_nodes exist"
+
+        # issue_summary should NOT say "No issues" when has_issues is True
+        assert analysis.issue_summary != "No issues", (
+            "issue_summary should reflect uninstalled_nodes, not return 'No issues'"
+        )
+        assert "2 packages to install" in analysis.issue_summary
+
+    def test_issue_summary_with_download_intents(self):
+        """issue_summary should include download intents when they exist."""
+        from comfygit_core.models.workflow import (
+            WorkflowDependencies,
+            ResolutionResult,
+            ResolvedModel,
+            WorkflowNodeWidgetRef,
+        )
+        from pathlib import Path
+
+        model_ref = WorkflowNodeWidgetRef(
+            node_id="4",
+            node_type="CheckpointLoaderSimple",
+            widget_index=0,
+            widget_value="model.safetensors"
+        )
+
+        download_intent = ResolvedModel(
+            workflow="wf1",
+            reference=model_ref,
+            match_type="download_intent",
+            model_source="https://example.com/model.safetensors",
+            target_path=Path("checkpoints/model.safetensors")
+        )
+
+        analysis = WorkflowAnalysisStatus(
+            name="wf1",
+            sync_state="synced",
+            dependencies=WorkflowDependencies(workflow_name="wf1"),
+            resolution=ResolutionResult(
+                workflow_name="wf1",
+                models_resolved=[download_intent]
+            )
+        )
+
+        # has_issues should be True due to download_intent
+        assert analysis.has_issues is True, "has_issues should be True with download intents"
+
+        # issue_summary should NOT say "No issues"
+        assert analysis.issue_summary != "No issues", (
+            "issue_summary should reflect download intents, not return 'No issues'"
+        )
+        assert "1 pending download" in analysis.issue_summary
+
+    def test_issue_summary_no_issues_when_actually_no_issues(self):
+        """issue_summary should return 'No issues' only when has_issues is False."""
+        from comfygit_core.models.workflow import (
+            WorkflowDependencies,
+            ResolutionResult,
+        )
+
+        analysis = WorkflowAnalysisStatus(
+            name="wf1",
+            sync_state="synced",
+            dependencies=WorkflowDependencies(workflow_name="wf1"),
+            resolution=ResolutionResult(workflow_name="wf1")
+        )
+
+        # Both should agree
+        assert analysis.has_issues is False
+        assert analysis.issue_summary == "No issues"
+
+    def test_issue_summary_with_combined_issues(self):
+        """issue_summary should include all issue types."""
+        from comfygit_core.models.workflow import (
+            WorkflowDependencies,
+            ResolutionResult,
+            ResolvedModel,
+            WorkflowNodeWidgetRef,
+            WorkflowNode,
+        )
+        from pathlib import Path
+
+        model_ref = WorkflowNodeWidgetRef(
+            node_id="4",
+            node_type="CheckpointLoaderSimple",
+            widget_index=0,
+            widget_value="model.safetensors"
+        )
+
+        download_intent = ResolvedModel(
+            workflow="wf1",
+            reference=model_ref,
+            match_type="download_intent",
+            model_source="https://example.com/model.safetensors",
+            target_path=Path("checkpoints/model.safetensors")
+        )
+
+        unresolved_node = WorkflowNode(id="5", type="UnknownCustomNode")
+
+        analysis = WorkflowAnalysisStatus(
+            name="wf1",
+            sync_state="synced",
+            dependencies=WorkflowDependencies(workflow_name="wf1"),
+            resolution=ResolutionResult(
+                workflow_name="wf1",
+                models_resolved=[download_intent],
+                nodes_unresolved=[unresolved_node]
+            ),
+            uninstalled_nodes=["comfyui-custom-node"]
+        )
+
+        assert analysis.has_issues is True
+        summary = analysis.issue_summary
+
+        # Should include all issue types
+        assert "1 missing node" in summary, f"Expected missing node in: {summary}"
+        assert "1 package" in summary, f"Expected packages to install in: {summary}"
+        assert "1 pending download" in summary, f"Expected pending download in: {summary}"

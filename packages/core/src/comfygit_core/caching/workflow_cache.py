@@ -33,8 +33,9 @@ logger = get_logger(__name__)
 # Breaking changes requiring version bump:
 # - Database: Add/remove/rename columns
 # - Resolution: Change node ID format (e.g., subgraph scoping), WorkflowNodeWidgetRef structure, etc.
+# - Model index: Hash algorithm changes (blake3 -> xxhash)
 # Migration: Wipes cache and rebuilds (cache is ephemeral)
-SCHEMA_VERSION = 4  # Bumped for models_sync_time column (cache invalidation on model index changes)
+SCHEMA_VERSION = 5  # Invalidate after model hash algorithm change (blake3 -> xxhash)
 
 
 class CachedWorkflowAnalysis:
@@ -180,7 +181,7 @@ class WorkflowCacheRepository:
         """Get cached workflow analysis + resolution with smart invalidation.
 
         Uses multi-phase lookup:
-        1. Session cache (instant)
+        1. Session cache (instant, includes mtime for auto-invalidation)
         2. Workflow mtime + size match (fast)
         3. Pyproject mtime fast-reject (instant)
         4. Resolution context hash check (moderate)
@@ -198,16 +199,7 @@ class WorkflowCacheRepository:
         import time
         start_time = time.perf_counter()
 
-        # TODO will not work for workflows in subdirectories
-        session_key = f"{env_name}:{workflow_name}"
-
-        # Phase 1: Check session cache
-        if session_key in self._session_cache:
-            elapsed = (time.perf_counter() - start_time) * 1000
-            logger.debug(f"[CACHE] Session HIT for '{workflow_name}' ({elapsed:.2f}ms)")
-            return self._session_cache[session_key]
-
-        # Get workflow file stats
+        # Get workflow file stats (needed for session key and later phases)
         try:
             stat = workflow_path.stat()
             mtime = stat.st_mtime
@@ -215,6 +207,16 @@ class WorkflowCacheRepository:
         except OSError as e:
             logger.warning(f"Failed to stat workflow file {workflow_path}: {e}")
             return None
+
+        # Phase 1: Check session cache (with mtime in key for auto-invalidation)
+        # This ensures session cache automatically invalidates when file changes,
+        # critical for long-running services where Environment instances persist
+        session_key = f"{env_name}:{workflow_name}:{mtime}"
+
+        if session_key in self._session_cache:
+            elapsed = (time.perf_counter() - start_time) * 1000
+            logger.debug(f"[CACHE] Session HIT for '{workflow_name}' ({elapsed:.2f}ms)")
+            return self._session_cache[session_key]
 
         # Phase 2: Fast path - mtime + size match
         query_start = time.perf_counter()
@@ -232,9 +234,10 @@ class WorkflowCacheRepository:
         if results:
             cached_row = results[0]
             logger.debug(f"[CACHE] DB query (mtime+size) HIT for '{workflow_name}' ({query_elapsed:.2f}ms)")
-        else:
-            logger.debug(f"[CACHE] DB query (mtime+size) MISS for '{workflow_name}' ({query_elapsed:.2f}ms)")
-            # Phase 3: Content hash fallback
+
+            # Verify content hash matches (prevents stale cache from race conditions)
+            # This catches the case where another process stored a resolution
+            # computed against different content but with the same mtime
             hash_start = time.perf_counter()
             try:
                 current_hash = compute_workflow_hash(workflow_path)
@@ -242,22 +245,20 @@ class WorkflowCacheRepository:
                 logger.warning(f"Failed to compute workflow hash for {workflow_path}: {e}")
                 return None
             hash_elapsed = (time.perf_counter() - hash_start) * 1000
-            logger.debug(f"[CACHE] Hash computation took {hash_elapsed:.2f}ms")
 
-            query_start = time.perf_counter()
-            query = """
-                SELECT workflow_hash, dependencies_json, resolution_json,
-                       resolution_context_hash, pyproject_mtime, models_sync_time, comfygit_version
-                FROM workflow_cache
-                WHERE environment_name = ? AND workflow_name = ?
-                  AND workflow_hash = ?
-            """
-            results = self.sqlite.execute_query(query, (env_name, workflow_name, current_hash))
-            query_elapsed = (time.perf_counter() - query_start) * 1000
+            if current_hash != cached_row['workflow_hash']:
+                logger.debug(
+                    f"[CACHE] mtime+size matched but hash differs for '{workflow_name}' "
+                    f"(cached={cached_row['workflow_hash']}, current={current_hash}, {hash_elapsed:.2f}ms) - treating as MISS"
+                )
+                # Content changed - cache is stale
+                return None
 
-            if results:
-                cached_row = results[0]
-                logger.debug(f"[CACHE] DB query (content hash) HIT for '{workflow_name}' ({query_elapsed:.2f}ms)")
+            logger.debug(f"[CACHE] Hash verification passed for '{workflow_name}' ({hash_elapsed:.2f}ms)")
+        else:
+            logger.debug(f"[CACHE] DB query (mtime+size) MISS for '{workflow_name}' ({query_elapsed:.2f}ms)")
+            # mtime+size miss = file metadata changed, so cache is definitely stale
+            # No need to check content hash - if mtime changed, the resolution is outdated
 
         if not cached_row:
             elapsed = (time.perf_counter() - start_time) * 1000
@@ -458,8 +459,8 @@ class WorkflowCacheRepository:
              dependencies_json, resolution_json, cached_at)
         )
 
-        # Update session cache
-        session_key = f"{env_name}:{workflow_name}"
+        # Update session cache (with mtime in key for auto-invalidation)
+        session_key = f"{env_name}:{workflow_name}:{workflow_mtime}"
         self._session_cache[session_key] = CachedWorkflowAnalysis(
             dependencies=dependencies,
             resolution=resolution,
@@ -480,9 +481,12 @@ class WorkflowCacheRepository:
             query = "DELETE FROM workflow_cache WHERE environment_name = ? AND workflow_name = ?"
             self.sqlite.execute_write(query, (env_name, workflow_name))
 
-            # Clear from session cache
-            session_key = f"{env_name}:{workflow_name}"
-            self._session_cache.pop(session_key, None)
+            # Clear from session cache - need to clear all mtime variants
+            # Session keys now include mtime: "env:workflow:mtime"
+            prefix = f"{env_name}:{workflow_name}:"
+            keys_to_remove = [k for k in self._session_cache if k.startswith(prefix)]
+            for key in keys_to_remove:
+                del self._session_cache[key]
 
             logger.debug(f"Invalidated cache for workflow '{workflow_name}'")
         else:
@@ -532,11 +536,7 @@ class WorkflowCacheRepository:
     def _deserialize_dependencies(self, dependencies_json: str) -> WorkflowDependencies:
         """Deserialize JSON string to WorkflowDependencies.
 
-        Args:
-            dependencies_json: JSON string
-
-        Returns:
-            WorkflowDependencies object
+        Uses **kwargs to auto-forward new fields without explicit mapping.
         """
         from ..models.workflow import WorkflowNode, WorkflowNodeWidgetRef
 
@@ -547,8 +547,14 @@ class WorkflowCacheRepository:
         non_builtin_nodes = [WorkflowNode(**node) for node in deps_dict.get('non_builtin_nodes', [])]
         found_models = [WorkflowNodeWidgetRef(**ref) for ref in deps_dict.get('found_models', [])]
 
+        # Auto-forward all other fields, override nested objects
+        simple_fields = {
+            k: v for k, v in deps_dict.items()
+            if k not in ('builtin_nodes', 'non_builtin_nodes', 'found_models')
+        }
+
         return WorkflowDependencies(
-            workflow_name=deps_dict['workflow_name'],
+            **simple_fields,
             builtin_nodes=builtin_nodes,
             non_builtin_nodes=non_builtin_nodes,
             found_models=found_models
@@ -620,26 +626,32 @@ class WorkflowCacheRepository:
                 **{**node_dict, 'package_data': reconstruct_package_data(pkg_data)}
             )
 
-        # Reconstruct ResolvedModel with nested ModelWithLocation
+        # Reconstruct ResolvedModel with nested objects
+        # Uses **kwargs to auto-forward new fields without explicit mapping
         def reconstruct_resolved_model(model_dict: dict) -> ResolvedModel:
+            # Fields requiring special handling (nested objects, Path conversion)
             reference = WorkflowNodeWidgetRef(**model_dict['reference'])
+
             resolved_model = None
             if model_dict.get('resolved_model'):
                 resolved_model = ModelWithLocation(**model_dict['resolved_model'])
+
             target_path = None
             if model_dict.get('target_path'):
                 target_path = Path(model_dict['target_path'])
 
+            # Auto-forward all other fields via **kwargs
+            # Exclude fields we're handling explicitly to avoid duplicate kwargs
+            simple_fields = {
+                k: v for k, v in model_dict.items()
+                if k not in ('reference', 'resolved_model', 'target_path')
+            }
+
             return ResolvedModel(
-                workflow=model_dict['workflow'],
+                **simple_fields,
                 reference=reference,
                 resolved_model=resolved_model,
-                model_source=model_dict.get('model_source'),
-                is_optional=model_dict.get('is_optional', False),
-                match_type=model_dict.get('match_type'),
-                match_confidence=model_dict.get('match_confidence', 1.0),
                 target_path=target_path,
-                needs_path_sync=model_dict.get('needs_path_sync', False)
             )
 
         # Reconstruct nested dataclasses
@@ -659,8 +671,18 @@ class WorkflowCacheRepository:
 
         download_results = [DownloadResult(**dl) for dl in res_dict.get('download_results', [])]
 
+        # Auto-forward any new fields, override nested objects
+        simple_fields = {
+            k: v for k, v in res_dict.items()
+            if k not in (
+                'nodes_resolved', 'nodes_unresolved', 'nodes_ambiguous',
+                'models_resolved', 'models_unresolved', 'models_ambiguous',
+                'download_results'
+            )
+        }
+
         return ResolutionResult(
-            workflow_name=res_dict['workflow_name'],
+            **simple_fields,
             nodes_resolved=nodes_resolved,
             nodes_unresolved=nodes_unresolved,
             nodes_ambiguous=nodes_ambiguous,

@@ -574,9 +574,22 @@ class WorkflowManager:
 
         # Phase 1: Restore workflows that exist in .cec
         if self.cec_workflows.exists():
-            # Copy every workflow from .cec to ComfyUI
+            # Get uncommitted workflows if we need to preserve them
+            uncommitted_workflows = set()
+            if preserve_uncommitted:
+                status = self.get_workflow_sync_status()
+                uncommitted_workflows = set(status.new + status.modified)
+
+            # Copy workflows from .cec to ComfyUI (skip uncommitted if preserving)
             for workflow_file in self.cec_workflows.glob("*.json"):
                 name = workflow_file.stem
+
+                # Skip if this workflow has uncommitted changes and we're preserving
+                if preserve_uncommitted and name in uncommitted_workflows:
+                    results[name] = "preserved"
+                    logger.debug(f"Preserved uncommitted changes to workflow '{name}'")
+                    continue
+
                 if self.restore_from_cec(name):
                     results[name] = "restored"
                 else:
@@ -612,7 +625,6 @@ class WorkflowManager:
         self,
         name: str,
         sync_state: str,
-        workflows_config: dict | None = None,
         installed_nodes: set[str] | None = None
     ) -> WorkflowAnalysisStatus:
         """Analyze a single workflow for dependencies and resolution status.
@@ -622,37 +634,20 @@ class WorkflowManager:
         Args:
             name: Workflow name
             sync_state: Sync state ("new", "modified", "deleted", "synced")
-            workflows_config: Pre-loaded workflows config (avoids re-reading pyproject)
             installed_nodes: Pre-loaded set of installed node IDs (avoids re-reading pyproject)
 
         Returns:
             WorkflowAnalysisStatus with complete dependency and resolution info
         """
-        # Phase 1 & 2: Analyze and resolve (both cached!)
+        # Analyze and resolve workflow (cached)
         dependencies, resolution = self.analyze_and_resolve_workflow(name)
 
-        # Phase 3: Calculate uninstalled nodes (for CLI display)
-        # Load pyproject data if not provided
-        if workflows_config is None:
-            workflows_config = self.pyproject.workflows.get_all_with_resolutions()
+        # Calculate uninstalled nodes from current resolution
         if installed_nodes is None:
             installed_nodes = set(self.pyproject.nodes.get_existing().keys())
 
-        # Check if workflow has an entry in pyproject.toml
-        workflow_config = workflows_config.get(name, {})
-        pyproject_nodes = set(workflow_config.get('nodes', []))
-
-        # For NEW workflows not yet in pyproject, use resolution result
-        # For workflows already in pyproject (modified, synced, or new from git), use pyproject
-        if sync_state == "new" and not pyproject_nodes:
-            # Use resolved nodes from current analysis (not yet committed)
-            workflow_needs = set(r.package_id for r in resolution.nodes_resolved if r.package_id)
-        else:
-            # Use pyproject for all other cases
-            workflow_needs = pyproject_nodes
-
-        # Calculate uninstalled = needed - installed
-        uninstalled_nodes = list(workflow_needs - installed_nodes)
+        resolved_packages = set(r.package_id for r in resolution.nodes_resolved if r.package_id)
+        uninstalled_nodes = list(resolved_packages - installed_nodes)
 
         return WorkflowAnalysisStatus(
             name=name,
@@ -671,24 +666,13 @@ class WorkflowManager:
         Returns:
             DetailedWorkflowStatus with sync status and analysis for each workflow
         """
-        # Step 1: Get file sync status (fast)
         sync_status = self.get_workflow_sync_status()
-
-        # Step 2: Pre-load pyproject data once for all workflows
-        workflows_config = self.pyproject.workflows.get_all_with_resolutions()
         installed_nodes = set(self.pyproject.nodes.get_existing().keys())
 
-        # Step 3: Analyze all workflows (reusing pyproject data)
-        all_workflow_names = (
-            sync_status.new +
-            sync_status.modified +
-            sync_status.synced
-        )
-
+        all_workflow_names = sync_status.new + sync_status.modified + sync_status.synced
         analyzed: list[WorkflowAnalysisStatus] = []
 
         for name in all_workflow_names:
-            # Determine sync state
             if name in sync_status.new:
                 state = "new"
             elif name in sync_status.modified:
@@ -697,16 +681,10 @@ class WorkflowManager:
                 state = "synced"
 
             try:
-                analysis = self.analyze_single_workflow_status(
-                    name,
-                    state,
-                    workflows_config=workflows_config,
-                    installed_nodes=installed_nodes
-                )
+                analysis = self.analyze_single_workflow_status(name, state, installed_nodes)
                 analyzed.append(analysis)
             except Exception as e:
                 logger.error(f"Failed to analyze workflow {name}: {e}")
-                # Continue with other workflows
 
         return DetailedWorkflowStatus(
             sync_status=sync_status,
@@ -944,6 +922,13 @@ class WorkflowManager:
                         resolved_model,
                         workflow
                     )
+
+                # Check category mismatch (functional issue - model in wrong directory)
+                if resolved_model.resolved_model:
+                    has_mismatch, expected, actual = self._check_category_mismatch(resolved_model)
+                    resolved_model.has_category_mismatch = has_mismatch
+                    resolved_model.expected_categories = expected
+                    resolved_model.actual_category = actual
 
                 logger.debug(f"Resolved model: {resolved_model}")
                 models_resolved.append(resolved_model)
@@ -1366,20 +1351,16 @@ class WorkflowManager:
         # Write all models to workflow
         self.pyproject.workflows.set_workflow_models(workflow_name, manifest_models, config=config)
 
-        # Clean up deleted workflows from pyproject.toml
-        # This handles both:
-        # 1. Committed workflows that were deleted (in .cec, in pyproject, not in ComfyUI)
-        # 2. Resolved-but-not-committed workflows (in pyproject, not in .cec, not in ComfyUI)
-        # Read from in-memory config instead of loading from disk
+        # Clean up orphaned workflows from pyproject.toml
+        # This handles workflows deleted from ComfyUI (whether committed or never-committed)
         workflows_in_pyproject = set(config.get('tool', {}).get('comfygit', {}).get('workflows', {}).keys())
         workflows_in_comfyui = set()
         if self.comfyui_workflows.exists():
-            for workflow_file in self.comfyui_workflows.glob("*.json"):
-                workflows_in_comfyui.add(workflow_file.stem)
+            workflows_in_comfyui = {f.stem for f in self.comfyui_workflows.glob("*.json")}
 
-        workflows_to_remove = workflows_in_pyproject - workflows_in_comfyui
-        if workflows_to_remove:
-            removed_count = self.pyproject.workflows.remove_workflows(list(workflows_to_remove), config=config)
+        orphaned_workflows = workflows_in_pyproject - workflows_in_comfyui
+        if orphaned_workflows:
+            removed_count = self.pyproject.workflows.remove_workflows(list(orphaned_workflows), config=config)
             if removed_count > 0:
                 logger.info(f"Cleaned up {removed_count} deleted workflow(s) from pyproject.toml")
 
@@ -1570,6 +1551,62 @@ class WorkflowManager:
 
         # Return True if paths differ and current path is invalid or has different hash
         return current_path != expected_path
+
+    def _check_category_mismatch(
+        self,
+        resolved: ResolvedModel,
+    ) -> tuple[bool, list[str], str | None]:
+        """Check if model is in wrong category directory for its loader node.
+
+        This is a functional issue (not cosmetic like path sync) - ComfyUI cannot
+        load a model that's in the wrong directory for the node type.
+
+        When a model exists in multiple locations (e.g., copied from checkpoints/
+        to loras/), this checks if ANY location satisfies the requirement.
+        Only flags mismatch if NO location is in an expected directory.
+
+        Args:
+            resolved: ResolvedModel with reference and resolved_model
+
+        Returns:
+            Tuple of (has_mismatch, expected_categories, actual_category)
+        """
+        ref = resolved.reference
+        model = resolved.resolved_model
+
+        # Skip if no resolved model (nothing to check)
+        if not model:
+            return (False, [], None)
+
+        # Skip custom nodes - we don't know what paths they scan
+        if not self.model_resolver.model_config.is_model_loader_node(ref.node_type):
+            return (False, [], None)
+
+        # Get expected directories for this node type
+        expected_dirs = self.model_resolver.model_config.get_directories_for_node(ref.node_type)
+        if not expected_dirs:
+            return (False, [], None)
+
+        # Extract actual category from resolved model path (first path component)
+        path_parts = model.relative_path.replace('\\', '/').split('/')
+        actual_category = path_parts[0] if path_parts else None
+
+        # If resolved location is in expected directory, no mismatch
+        if actual_category in expected_dirs:
+            return (False, expected_dirs, actual_category)
+
+        # Resolved location is wrong, but check if model exists in ANY valid location
+        # This handles the case where user copied (not moved) the model
+        all_locations = self.model_repository.get_locations(model.hash)
+        for location in all_locations:
+            loc_path_parts = location['relative_path'].replace('\\', '/').split('/')
+            loc_category = loc_path_parts[0] if loc_path_parts else None
+            if loc_category in expected_dirs:
+                # Model exists in a valid location - no functional mismatch
+                return (False, expected_dirs, actual_category)
+
+        # No location in expected directory - this is a real mismatch
+        return (True, expected_dirs, actual_category)
 
     def _strip_base_directory_for_node(self, node_type: str, relative_path: str) -> str:
         """Strip base directory prefix from path for BUILTIN ComfyUI node loaders.

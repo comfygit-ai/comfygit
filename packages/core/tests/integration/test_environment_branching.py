@@ -371,6 +371,37 @@ class TestEnvironmentMerge:
         assert "Merge" in history[0]["message"]  # [0] gets newest (newest-first order)
 
 
+class TestMergeWithDirtyUvLock:
+    """Test that merge succeeds when only uv.lock is dirty.
+
+    BUG: After branch switch, uv.sync_project() regenerates uv.lock, creating
+    phantom "uncommitted changes" that block subsequent merges. The merge should
+    handle this gracefully since uv.lock gets regenerated anyway after merge.
+    """
+
+    def test_merge_succeeds_when_only_uvlock_dirty(self, test_env):
+        """Merge should succeed even if uv.lock was modified by branch switch."""
+        # ARRANGE: Create feature branch with commit
+        test_env.git_manager.commit_all("v1: initial")
+
+        test_env.create_branch("feature")
+        test_env.switch_branch("feature")
+        (test_env.cec_path / "feature.txt").write_text("feature")
+        test_env.git_manager.commit_all("v2: feature")
+
+        # Switch back to main - this may regenerate uv.lock
+        test_env.switch_branch("main")
+
+        # Intentionally do NOT commit uv.lock changes - this is the bug scenario
+        # The test should pass because merge should handle this gracefully
+
+        # ACT: Merge feature - should NOT fail due to dirty uv.lock
+        test_env.merge_branch("feature")
+
+        # ASSERT: feature.txt now on main (merge succeeded)
+        assert (test_env.cec_path / "feature.txt").exists()
+
+
 class TestEnvironmentRevert:
     """Test Environment.revert_commit() - undo commits."""
 

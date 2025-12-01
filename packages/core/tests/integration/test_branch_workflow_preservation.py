@@ -73,8 +73,7 @@ class TestCheckoutBranchPreservesUncommittedWorkflows:
         assert "test_workflow" in status.workflow.sync_status.new
 
         # ACT: Create new branch (simulates 'cg checkout -b feature')
-        test_env.create_branch("feature", start_point="HEAD")
-        test_env.switch_branch("feature")
+        test_env.create_and_switch_branch("feature", start_point="HEAD")
 
         # ASSERT: Workflow still exists in ComfyUI
         assert comfyui_workflow.exists(), "BUG: Workflow should be preserved during checkout -b"
@@ -97,8 +96,7 @@ class TestCheckoutBranchPreservesUncommittedWorkflows:
         save_workflow_to_comfyui(test_env, "workflow2", workflow2)
 
         # ACT: Create new branch
-        test_env.create_branch("feature")
-        test_env.switch_branch("feature")
+        test_env.create_and_switch_branch("feature")
 
         # ASSERT: Both workflows preserved
         wf1_path = test_env.comfyui_path / "user" / "default" / "workflows" / "workflow1.json"
@@ -407,8 +405,7 @@ class TestEdgeCases:
         save_workflow_to_comfyui(test_env, "uncommitted", create_simple_workflow())
 
         # ACT: Create branch from v1
-        test_env.create_branch("from-v1", start_point=v1_hash)
-        test_env.switch_branch("from-v1")
+        test_env.create_and_switch_branch("from-v1", start_point=v1_hash)
 
         # ASSERT: Uncommitted workflow preserved
         wf_path = test_env.comfyui_path / "user" / "default" / "workflows" / "uncommitted.json"

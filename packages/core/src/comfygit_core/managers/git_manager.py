@@ -447,13 +447,20 @@ __pycache__/
     # Pull/Push/Remote Operations
     # =============================================================================
 
-    def pull(self, remote: str = "origin", branch: str | None = None, ff_only: bool = False) -> dict:
+    def pull(
+        self,
+        remote: str = "origin",
+        branch: str | None = None,
+        ff_only: bool = False,
+        strategy_option: str | None = None,
+    ) -> dict:
         """Pull from remote (fetch + merge).
 
         Args:
             remote: Remote name (default: origin)
             branch: Branch to pull (default: current branch)
             ff_only: Only allow fast-forward merges (default: False)
+            strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
         Returns:
             Dict with keys: 'fetch_output', 'merge_output', 'branch'
@@ -466,7 +473,9 @@ __pycache__/
 
         logger.info(f"Pulling {remote}/{branch or 'current branch'}")
 
-        result = git_pull(self.repo_path, remote, branch, ff_only=ff_only)
+        result = git_pull(
+            self.repo_path, remote, branch, ff_only=ff_only, strategy_option=strategy_option
+        )
 
         return result
 
@@ -485,7 +494,7 @@ __pycache__/
             ValueError: If no remote or detached HEAD
             OSError: If push fails
         """
-        from ..utils.git import git_push, git_current_branch
+        from ..utils.git import git_current_branch, git_push
 
         # Get current branch if not specified
         if not branch:
@@ -547,6 +556,68 @@ __pycache__/
 
         url = git_remote_get_url(self.repo_path, name)
         return bool(url)
+
+    def fetch(self, remote: str = "origin") -> None:
+        """Fetch from remote.
+
+        Args:
+            remote: Remote name (default: origin)
+
+        Raises:
+            ValueError: If remote doesn't exist
+            OSError: If fetch fails
+        """
+        from ..utils.git import git_fetch
+
+        logger.info(f"Fetching from {remote}")
+        git_fetch(self.repo_path, remote)
+
+    def set_remote_url(self, name: str, url: str, is_push: bool = False) -> None:
+        """Set URL for a git remote.
+
+        Args:
+            name: Remote name
+            url: New URL
+            is_push: If True, update push URL; otherwise update fetch URL
+
+        Raises:
+            ValueError: If remote doesn't exist
+            OSError: If update fails
+        """
+        from ..utils.git import git_remote_set_url
+
+        logger.info(f"Setting {'push' if is_push else 'fetch'} URL for '{name}': {url}")
+        git_remote_set_url(self.repo_path, name, url, push=is_push)
+
+    def get_sync_status(self, remote: str = "origin", branch: str | None = None) -> dict:
+        """Get ahead/behind status for a remote branch.
+
+        Args:
+            remote: Remote name (default: origin)
+            branch: Branch name (default: current branch)
+
+        Returns:
+            Dict with keys: 'ahead', 'behind' (commit counts)
+        """
+        from ..utils.git import git_get_current_branch, git_remote_get_url, git_rev_list_count
+
+        # Check if remote exists
+        if not git_remote_get_url(self.repo_path, remote):
+            return {"ahead": 0, "behind": 0}
+
+        # Get current branch if not specified
+        if not branch:
+            branch = git_get_current_branch(self.repo_path)
+            if not branch:
+                return {"ahead": 0, "behind": 0}
+
+        # Compare HEAD to remote/branch
+        # git rev-list --left-right --count origin/main...HEAD
+        # Returns: "behind\tahead" (commits on left, commits on right)
+        remote_ref = f"{remote}/{branch}"
+        behind, ahead = git_rev_list_count(self.repo_path, remote_ref, "HEAD")
+
+        return {"ahead": ahead, "behind": behind}
 
     # =============================================================================
     # Branch Management
@@ -619,12 +690,18 @@ __pycache__/
 
         return git_get_current_branch(self.repo_path)
 
-    def merge_branch(self, branch: str, message: str | None = None) -> None:
+    def merge_branch(
+        self,
+        branch: str,
+        message: str | None = None,
+        strategy_option: str | None = None,
+    ) -> None:
         """Merge branch into current branch.
 
         Args:
             branch: Branch name to merge
             message: Optional merge commit message
+            strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
         Raises:
             OSError: If branch doesn't exist or merge fails (conflicts, etc.)
@@ -633,7 +710,7 @@ __pycache__/
         from ..utils.git import git_merge_branch
 
         logger.info(f"Merging branch '{branch}' into current branch")
-        git_merge_branch(self.repo_path, branch, message)
+        git_merge_branch(self.repo_path, branch, message, strategy_option)
 
     def reset_to(self, ref: str = "HEAD", mode: str = "hard") -> None:
         """Reset current branch to ref.

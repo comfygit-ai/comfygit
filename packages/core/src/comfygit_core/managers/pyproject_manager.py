@@ -813,7 +813,9 @@ class NodeHandler(BaseHandler):
                 version=node_data.get('version'),
                 source=node_data.get('source', 'unknown'),
                 download_url=node_data.get('download_url'),
-                dependency_sources=node_data.get('dependency_sources')
+                dependency_sources=node_data.get('dependency_sources'),
+                branch=node_data.get('branch'),
+                pinned_commit=node_data.get('pinned_commit'),
             )
 
         return result
@@ -1183,6 +1185,55 @@ class WorkflowHandler(BaseHandler):
             logger.info(f"Removed {removed_count} workflow section(s) from pyproject.toml")
 
         return removed_count
+
+    def cleanup_node_references(self, node_identifier: str, node_name: str | None = None) -> int:
+        """Remove references to a node from all workflow nodes lists.
+
+        Called when a node is removed to clean up orphaned references in workflows.
+
+        Args:
+            node_identifier: Primary identifier (registry ID or package name)
+            node_name: Optional alternate name to also remove (for case where
+                       identifier differs from directory name)
+
+        Returns:
+            Number of workflows updated
+        """
+        config = self.load()
+        workflows = config.get('tool', {}).get('comfygit', {}).get('workflows', {})
+
+        if not workflows:
+            return 0
+
+        # Build set of identifiers to remove (case-insensitive matching)
+        identifiers_to_remove = {node_identifier.lower()}
+        if node_name and node_name.lower() != node_identifier.lower():
+            identifiers_to_remove.add(node_name.lower())
+
+        updated_count = 0
+        for workflow_name, workflow_data in workflows.items():
+            nodes_list = workflow_data.get('nodes', [])
+            if not nodes_list:
+                continue
+
+            # Filter out removed node (case-insensitive)
+            updated_nodes = [n for n in nodes_list if n.lower() not in identifiers_to_remove]
+
+            if len(updated_nodes) != len(nodes_list):
+                # Nodes were removed - update the workflow
+                if updated_nodes:
+                    workflow_data['nodes'] = sorted(updated_nodes)
+                else:
+                    # No nodes left - remove the key entirely
+                    del workflow_data['nodes']
+                updated_count += 1
+                logger.debug(f"Removed node reference '{node_identifier}' from workflow '{workflow_name}'")
+
+        if updated_count > 0:
+            self.save(config)
+            logger.info(f"Cleaned up node references from {updated_count} workflow(s)")
+
+        return updated_count
 
 
 class ModelHandler(BaseHandler):

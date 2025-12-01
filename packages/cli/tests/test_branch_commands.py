@@ -65,7 +65,7 @@ class TestCheckoutCommand:
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_checkout_with_create_branch(self, mock_workspace):
-        """Should call env.create_branch() and env.switch_branch() when -b is used."""
+        """Should call env.create_and_switch_branch() when -b is used."""
         mock_env = MagicMock()
         mock_workspace.return_value.get_active_environment.return_value = mock_env
         mock_env.name = "test-env"
@@ -82,9 +82,8 @@ class TestCheckoutCommand:
         with patch('builtins.print'):
             cmd.checkout(args)
 
-        # Verify both calls
-        mock_env.create_branch.assert_called_once_with("feature", start_point="main")
-        mock_env.switch_branch.assert_called_once_with("feature")
+        # Verify atomic create-and-switch operation
+        mock_env.create_and_switch_branch.assert_called_once_with("feature", start_point="main")
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_checkout_with_force(self, mock_workspace):
@@ -128,13 +127,8 @@ class TestCheckoutCommand:
         with patch('builtins.print'):
             cmd.checkout(args)
 
-        # Should create branch from HEAD (None or "HEAD" as start_point)
-        mock_env.create_branch.assert_called_once()
-        call_args = mock_env.create_branch.call_args
-        assert call_args[0][0] == "feature"
-        # start_point should be None (which core library interprets as HEAD)
-        assert call_args[1]["start_point"] is None or call_args[1]["start_point"] == "HEAD"
-        mock_env.switch_branch.assert_called_once_with("feature")
+        # Should create branch from HEAD via atomic operation
+        mock_env.create_and_switch_branch.assert_called_once_with("feature", start_point="HEAD")
 
 
 class TestBranchCommand:
@@ -387,13 +381,20 @@ class TestMergeCommand:
         args = Namespace(
             branch="feature",
             message=None,
-            target_env=None
+            target_env=None,
+            preview=False,
+            auto_resolve=None,
         )
+
+        # Mock preview_merge to return no conflicts
+        mock_env.preview_merge.return_value = MagicMock(has_conflicts=False)
 
         with patch('builtins.print'):
             cmd.merge(args)
 
-        mock_env.merge_branch.assert_called_once_with("feature", message=None)
+        mock_env.merge_branch.assert_called_once_with(
+            "feature", message=None, strategy_option=None
+        )
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_merge_with_message(self, mock_workspace):
@@ -407,13 +408,20 @@ class TestMergeCommand:
         args = Namespace(
             branch="feature",
             message="Custom merge message",
-            target_env=None
+            target_env=None,
+            preview=False,
+            auto_resolve=None,
         )
+
+        # Mock preview_merge to return no conflicts
+        mock_env.preview_merge.return_value = MagicMock(has_conflicts=False)
 
         with patch('builtins.print'):
             cmd.merge(args)
 
-        mock_env.merge_branch.assert_called_once_with("feature", message="Custom merge message")
+        mock_env.merge_branch.assert_called_once_with(
+            "feature", message="Custom merge message", strategy_option=None
+        )
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_merge_fails_in_detached_head(self, mock_workspace):

@@ -7,6 +7,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..analyzers.ref_diff_analyzer import RefDiffAnalyzer
 from ..analyzers.status_scanner import StatusScanner
 from ..factories.uv_factory import create_uv_for_environment
 from ..logging.logging_config import get_logger
@@ -16,10 +17,12 @@ from ..managers.git_manager import GitManager
 from ..managers.model_symlink_manager import ModelSymlinkManager
 from ..managers.node_manager import NodeManager
 from ..managers.pyproject_manager import PyprojectManager
+from ..managers.system_node_symlink_manager import SystemNodeSymlinkManager
 from ..managers.user_content_symlink_manager import UserContentSymlinkManager
 from ..managers.uv_project_manager import UVProjectManager
 from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
+from ..models.ref_diff import RefDiff
 from ..models.shared import (
     ModelSourceResult,
     ModelSourceStatus,
@@ -45,6 +48,7 @@ if TYPE_CHECKING:
     )
 
     from ..caching.workflow_cache import WorkflowCacheRepository
+    from ..models.merge_plan import MergeResult, MergeValidation
     from ..models.workflow import (
         BatchDownloadCallbacks,
         DetailedWorkflowStatus,
@@ -153,6 +157,14 @@ class Environment:
         )
 
     @cached_property
+    def system_node_manager(self) -> SystemNodeSymlinkManager:
+        """Get system node symlink manager for workspace-level infrastructure nodes."""
+        return SystemNodeSymlinkManager(
+            self.comfyui_path,
+            self.workspace_paths.system_nodes,
+        )
+
+    @cached_property
     def workflow_cache(self) -> WorkflowCacheRepository:
         """Get workflow cache repository."""
         from ..caching.workflow_cache import WorkflowCacheRepository
@@ -243,7 +255,8 @@ class Environment:
         node_callbacks: NodeInstallCallbacks | None = None,
         remove_extra_nodes: bool = True,
         sync_callbacks: SyncCallbacks | None = None,
-        verbose: bool = False
+        verbose: bool = False,
+        preserve_workflows: bool = False
     ) -> SyncResult:
         """Apply changes: sync packages, nodes, workflows, and models with environment.
 
@@ -254,6 +267,9 @@ class Environment:
             node_callbacks: Optional callbacks for node installation progress
             remove_extra_nodes: If True, remove extra nodes. If False, only warn (default: True)
             verbose: If True, show uv output in real-time during dependency installation
+            preserve_workflows: If True, preserve uncommitted workflows during restore.
+                               Use True for runtime restarts (exit code 42) to keep user edits.
+                               Use False (default) for git operations and repairs.
 
         Returns:
             SyncResult with details of what was synced
@@ -282,6 +298,22 @@ class Environment:
             result.errors.append(f"Package sync failed: {e}")
             result.success = False
 
+        # Handle version mismatches by removing nodes with wrong versions
+        # They will be reinstalled by sync_nodes_to_filesystem
+        if not dry_run:
+            import shutil
+            try:
+                # Get current status to find version mismatches
+                current_status = self.status()
+                for mismatch in current_status.comparison.version_mismatches:
+                    node_name = mismatch['name']
+                    node_path = self.custom_nodes_path / node_name
+                    if node_path.exists():
+                        logger.info(f"Removing node with wrong version: {node_name} ({mismatch['actual']} → {mismatch['expected']})")
+                        shutil.rmtree(node_path)
+            except Exception as e:
+                logger.warning(f"Could not check/fix version mismatches: {e}")
+
         # Sync custom nodes to filesystem
         try:
             # Pass remove_extra flag (default True for aggressive repair behavior)
@@ -296,7 +328,8 @@ class Environment:
             result.success = False
 
         # Restore workflows from .cec/ to ComfyUI (for git pull workflow)
-        if not dry_run:
+        if not dry_run and not preserve_workflows:
+            logger.debug("Restoring workflows from .cec/")
             try:
                 self.workflow_manager.restore_all_from_cec()
                 logger.info("Restored workflows from .cec/")
@@ -412,6 +445,52 @@ class Environment:
 
         return result
 
+    # =====================================================
+    # Pull/Merge Preview
+    # =====================================================
+
+    def preview_pull(
+        self,
+        remote: str = "origin",
+        branch: str | None = None,
+    ) -> RefDiff:
+        """Preview what changes a pull operation would bring.
+
+        Fetches from remote and compares to show what nodes, models,
+        workflows, and dependencies would change.
+
+        Args:
+            remote: Remote name (default: origin)
+            branch: Branch to pull (default: current branch)
+
+        Returns:
+            RefDiff showing all changes
+        """
+        from ..utils.git import git_fetch, git_get_current_branch
+
+        # Fetch to update remote refs
+        git_fetch(self.cec_path, remote)
+
+        # Determine target ref
+        current_branch = branch or git_get_current_branch(self.cec_path)
+        target_ref = f"{remote}/{current_branch}"
+
+        # Analyze diff
+        analyzer = RefDiffAnalyzer(self.cec_path)
+        return analyzer.analyze(base_ref="HEAD", target_ref=target_ref)
+
+    def preview_merge(self, branch: str) -> RefDiff:
+        """Preview what changes merging a branch would bring.
+
+        Args:
+            branch: Branch to merge
+
+        Returns:
+            RefDiff showing all changes and conflicts
+        """
+        analyzer = RefDiffAnalyzer(self.cec_path)
+        return analyzer.analyze(base_ref="HEAD", target_ref=branch, detect_conflicts=True)
+
     def pull_and_repair(
         self,
         remote: str = "origin",
@@ -419,6 +498,7 @@ class Environment:
         model_strategy: str = "all",
         model_callbacks: BatchDownloadCallbacks | None = None,
         node_callbacks: NodeInstallCallbacks | None = None,
+        strategy_option: str | None = None,
     ) -> dict:
         """Pull from remote and auto-repair environment (atomic operation).
 
@@ -431,6 +511,7 @@ class Environment:
             model_strategy: Model download strategy ("all", "required", "skip")
             model_callbacks: Optional callbacks for model download progress
             node_callbacks: Optional callbacks for node installation progress
+            strategy_option: Optional git merge strategy (e.g., "ours" or "theirs")
 
         Returns:
             Dict with pull results and sync_result
@@ -443,7 +524,11 @@ class Environment:
         from ..models.exceptions import CDEnvironmentError
         from ..utils.git import git_reset_hard, git_rev_parse
 
-        # Check for uncommitted changes
+        # Clean up regenerated uv.lock before checking for real uncommitted changes
+        # (uv.lock gets regenerated after branch switch and would block the pull)
+        self._cleanup_uvlock_for_git_operation()
+
+        # Check for uncommitted changes (now excluding uv.lock)
         if self.git_manager.has_uncommitted_changes():
             raise CDEnvironmentError(
                 "Cannot pull with uncommitted changes.\n"
@@ -464,7 +549,7 @@ class Environment:
         try:
             # Pull (fetch + merge)
             logger.info("Pulling from remote...")
-            pull_result = self.git_manager.pull(remote, branch)
+            pull_result = self.git_manager.pull(remote, branch, strategy_option=strategy_option)
 
             # Auto-repair (restores workflows, installs nodes, downloads models)
             logger.info("Syncing environment after pull...")
@@ -589,6 +674,22 @@ class Environment:
         """
         self.git_orchestrator.delete_branch(name, force)
 
+    def create_and_switch_branch(self, name: str, start_point: str = "HEAD") -> None:
+        """Create new branch and switch to it (git checkout -b semantics).
+
+        This is the atomic equivalent of 'git checkout -b'. It creates a branch
+        from start_point and switches to it in one operation, preserving any
+        uncommitted workflow changes.
+
+        Args:
+            name: Branch name to create
+            start_point: Commit to branch from (default: HEAD)
+
+        Raises:
+            OSError: If branch already exists or git operations fail
+        """
+        self.git_orchestrator.create_and_switch_branch(name, start_point)
+
     def switch_branch(self, branch: str, create: bool = False) -> None:
         """Switch to branch and sync environment.
 
@@ -617,14 +718,123 @@ class Environment:
         """
         return self.git_manager.get_current_branch()
 
-    def merge_branch(self, branch: str, message: str | None = None) -> None:
+    def merge_branch(
+        self,
+        branch: str,
+        message: str | None = None,
+        strategy_option: str | None = None,
+    ) -> None:
         """Merge branch into current branch and sync environment.
 
         Args:
             branch: Branch to merge
             message: Custom merge commit message
+            strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
         """
-        self.git_orchestrator.merge_branch(branch, message)
+        self.git_orchestrator.merge_branch(branch, message, strategy_option)
+
+    def validate_merge(
+        self,
+        branch: str,
+        workflow_resolutions: dict,
+    ) -> MergeValidation:
+        """Validate merge compatibility before execution.
+
+        Checks for node version conflicts that would occur if the merge
+        proceeded with the given workflow resolutions.
+
+        Args:
+            branch: Branch to merge
+            workflow_resolutions: Dict mapping workflow names to "take_base" or "take_target"
+
+        Returns:
+            MergeValidation with is_compatible flag and any conflicts
+        """
+        import tomllib
+
+        from ..merging.merge_validator import MergeValidator
+        from ..utils.git import git_show
+
+        # Load configs from both branches
+        pyproject_path = Path("pyproject.toml")
+        base_content = git_show(self.cec_path, "HEAD", pyproject_path)
+        target_content = git_show(self.cec_path, branch, pyproject_path)
+
+        base_config = tomllib.loads(base_content) if base_content else {}
+        target_config = tomllib.loads(target_content) if target_content else {}
+
+        validator = MergeValidator()
+        return validator.validate(base_config, target_config, workflow_resolutions)
+
+    def execute_atomic_merge(
+        self,
+        branch: str,
+        workflow_resolutions: dict,
+    ) -> MergeResult:
+        """Execute merge with atomic semantics and semantic pyproject merging.
+
+        This method:
+        1. Starts git merge without committing
+        2. Resolves workflow files per user choices (--ours/--theirs)
+        3. Builds merged pyproject.toml using semantic rules
+        4. Commits the merge
+        5. Syncs environment (nodes, deps, workflows)
+
+        If any step fails, rolls back to pre-merge state.
+
+        Args:
+            branch: Branch to merge
+            workflow_resolutions: Dict mapping workflow names to "take_base" or "take_target"
+
+        Returns:
+            MergeResult with success status and details
+        """
+        import tomllib
+
+        from ..merging.atomic_executor import AtomicMergeExecutor
+        from ..merging.merge_validator import MergeValidator
+        from ..models.merge_plan import MergePlan
+        from ..utils.git import git_show
+
+        # Load configs to compute final workflow set
+        pyproject_path = Path("pyproject.toml")
+        base_content = git_show(self.cec_path, "HEAD", pyproject_path)
+        target_content = git_show(self.cec_path, branch, pyproject_path)
+
+        base_config = tomllib.loads(base_content) if base_content else {}
+        target_config = tomllib.loads(target_content) if target_content else {}
+
+        # Compute final workflow set
+        validator = MergeValidator()
+        validation = validator.validate(base_config, target_config, workflow_resolutions)
+
+        # Build merge plan
+        plan = MergePlan(
+            target_branch=branch,
+            base_ref="HEAD",
+            workflow_resolutions=workflow_resolutions,
+            final_workflow_set=validation.merged_workflow_set,
+            node_conflicts=validation.conflicts,
+            is_compatible=validation.is_compatible,
+        )
+
+        # Remove uv.lock if it would block the merge
+        self.git_orchestrator._cleanup_uvlock_before_git_operation()
+
+        # Execute atomic merge
+        executor = AtomicMergeExecutor(
+            repo_path=self.cec_path,
+            pyproject_manager=self.pyproject,
+        )
+
+        result = executor.execute(plan)
+
+        # If merge succeeded, sync environment
+        if result.success:
+            old_nodes = self.pyproject.nodes.get_existing()
+            self.git_orchestrator._sync_environment_after_git(old_nodes)
+
+        return result
 
     def revert_commit(self, commit: str) -> None:
         """Revert a commit by creating new commit that undoes it.
@@ -651,7 +861,7 @@ class Environment:
         Returns:
             Status dictionary
         """
-        logger.info(f"Configuring model symlink for environment '{self.name}'")
+        logger.debug(f"Configuring model symlink for environment '{self.name}'")
         try:
             self.model_symlink_manager.create_symlink()
             return {
@@ -1090,13 +1300,22 @@ class Environment:
                 # Apply resolution results to pyproject (in-memory mutations)
                 self.workflow_manager.apply_resolution(wf_analysis.resolution, config=config)
 
-        # Clean up deleted workflows from pyproject.toml
-        if workflow_status.sync_status.deleted:
-            logger.info("Cleaning up deleted workflows from pyproject.toml...")
-            removed_count = self.pyproject.workflows.remove_workflows(
-                workflow_status.sync_status.deleted,
-                config=config
-            )
+        # Clean up orphaned workflows from pyproject.toml
+        # This handles BOTH:
+        # 1. Committed workflows deleted from ComfyUI (detected by sync_status.deleted)
+        # 2. Resolved-but-never-committed workflows deleted from ComfyUI (only in pyproject)
+        workflows_in_pyproject = set(
+            config.get('tool', {}).get('comfygit', {}).get('workflows', {}).keys()
+        )
+        workflows_in_comfyui = set()
+        comfyui_workflows_dir = self.comfyui_path / "user" / "default" / "workflows"
+        if comfyui_workflows_dir.exists():
+            workflows_in_comfyui = {f.stem for f in comfyui_workflows_dir.glob("*.json")}
+
+        orphaned_workflows = list(workflows_in_pyproject - workflows_in_comfyui)
+        if orphaned_workflows:
+            logger.info(f"Cleaning up {len(orphaned_workflows)} orphaned workflow(s) from pyproject.toml...")
+            removed_count = self.pyproject.workflows.remove_workflows(orphaned_workflows, config=config)
             logger.debug(f"Removed {removed_count} workflow section(s)")
 
             # Clean up orphaned models (must run AFTER workflow sections are removed)
@@ -1127,6 +1346,18 @@ class Environment:
             ModelSourceResult with success status and model details
         """
         return self.model_manager.add_model_source(identifier, url)
+
+    def remove_model_source(self, identifier: str, url: str) -> ModelSourceResult:
+        """Remove a download source URL from a model.
+
+        Args:
+            identifier: Model hash or filename
+            url: Download URL to remove
+
+        Returns:
+            ModelSourceResult with success status and model details
+        """
+        return self.model_manager.remove_model_source(identifier, url)
 
     def get_models_without_sources(self) -> list[ModelSourceStatus]:
         """Get all models in pyproject that don't have download sources.
@@ -1323,9 +1554,85 @@ class Environment:
             if callbacks:
                 callbacks.on_models_without_sources(models_without_sources)
 
+        # Auto-populate git info for dev nodes before export
+        self._auto_populate_dev_node_git_info(callbacks)
+
         # Create export
         manager = ExportImportManager(self.cec_path, self.comfyui_path)
         return manager.create_export(output_path, self.pyproject)
+
+    def _auto_populate_dev_node_git_info(
+        self,
+        callbacks: ExportCallbacks | None = None
+    ) -> None:
+        """Auto-populate git info (repository/branch/pinned_commit) for dev nodes.
+
+        Called during export to capture git state for dev nodes that have git remotes.
+        This enables teammates to clone from the same repository.
+
+        Dev nodes without git remotes will trigger a callback notification but
+        will still be exported (they just can't be shared).
+
+        System nodes (like comfygit-manager) are skipped - they should not be exported.
+        """
+        from ..analyzers.node_git_analyzer import get_node_git_info
+        from ..constants import SYSTEM_CUSTOM_NODES
+
+        nodes = self.pyproject.nodes.get_existing()
+        config = self.pyproject.load()
+        modified = False
+
+        for identifier, node_info in nodes.items():
+            if node_info.source != 'development':
+                continue
+
+            # Skip system nodes - they should not be exported
+            if node_info.name in SYSTEM_CUSTOM_NODES:
+                logger.debug(f"Skipping system node '{node_info.name}' in export git capture")
+                continue
+
+            node_path = self.custom_nodes_path / node_info.name
+            if not node_path.exists():
+                continue
+
+            # Get git info from the node's directory
+            git_info = get_node_git_info(node_path)
+
+            if git_info is None:
+                # Not a git repo - notify callback
+                if callbacks and hasattr(callbacks, 'on_dev_node_no_git'):
+                    callbacks.on_dev_node_no_git(node_info.name)
+                continue
+
+            if not git_info.remote_url:
+                # Git repo but no remote - notify callback
+                if callbacks and hasattr(callbacks, 'on_dev_node_no_git'):
+                    callbacks.on_dev_node_no_git(node_info.name)
+                continue
+
+            # Update node info with git data
+            node_data = config['tool']['comfygit']['nodes'].get(identifier, {})
+            update_needed = False
+
+            if git_info.remote_url and node_data.get('repository') != git_info.remote_url:
+                node_data['repository'] = git_info.remote_url
+                update_needed = True
+
+            if git_info.branch and node_data.get('branch') != git_info.branch:
+                node_data['branch'] = git_info.branch
+                update_needed = True
+
+            if git_info.commit and node_data.get('pinned_commit') != git_info.commit:
+                node_data['pinned_commit'] = git_info.commit
+                update_needed = True
+
+            if update_needed:
+                config['tool']['comfygit']['nodes'][identifier] = node_data
+                modified = True
+                logger.info(f"Captured git info for dev node '{node_info.name}'")
+
+        if modified:
+            self.pyproject.save(config)
 
     def finalize_import(
         self,
@@ -1454,6 +1761,33 @@ class Environment:
         if output_dir.exists() and not is_link(output_dir):
             shutil.rmtree(output_dir)
             logger.debug("Removed ComfyUI's default output directory during import")
+
+        # Create symlinks for user content and system nodes
+        self.user_content_manager.create_directories()
+        self.user_content_manager.create_symlinks()
+
+        # Create default ComfyUI user settings (skip templates panel on first launch)
+        user_settings_dir = self.comfyui_path / "user" / "default"
+        user_settings_dir.mkdir(parents=True, exist_ok=True)
+        settings_file = user_settings_dir / "comfy.settings.json"
+        if not settings_file.exists():
+            settings_file.write_text('{"Comfy.TutorialCompleted": true}')
+            logger.debug("Created default user settings (skip templates panel)")
+
+        linked_nodes = self.system_node_manager.create_symlinks()
+        if linked_nodes:
+            logger.info(f"Linked system nodes: {', '.join(linked_nodes)}")
+
+        # Update system-nodes dependency group from LOCAL workspace's system nodes
+        # (replaces any imported deps with local versions)
+        local_requirements = self.system_node_manager.get_all_requirements()
+        if local_requirements:
+            config = self.pyproject.load()
+            if "dependency-groups" not in config:
+                config["dependency-groups"] = {}
+            config["dependency-groups"]["system-nodes"] = list(local_requirements)
+            self.pyproject.save(config)
+            logger.info(f"Updated system-nodes deps: {', '.join(local_requirements)}")
 
         # Phase 1.5: Create venv and optionally install PyTorch with specific backend
         # Read Python version from .python-version file
@@ -1666,3 +2000,35 @@ class Environment:
             logger.info("Committed import changes")
 
         logger.info("Import finalization completed successfully")
+
+    def _cleanup_uvlock_for_git_operation(self) -> None:
+        """Remove uv.lock if it would block a git operation.
+
+        After branch switch, uv.sync_project() regenerates uv.lock which can
+        differ from the committed version. This creates phantom "dirty" state
+        that blocks merge/pull operations. Since uv.lock gets regenerated
+        after every git operation anyway, we can safely remove it before
+        merge/pull to prevent blocking.
+        """
+        from ..utils.git import _git, get_uncommitted_changes
+
+        uvlock_path = self.cec_path / "uv.lock"
+        if not uvlock_path.exists():
+            return
+
+        # Check if uv.lock is modified (staged or unstaged)
+        changes = get_uncommitted_changes(self.cec_path)
+        if "uv.lock" in changes:
+            logger.debug("Removing regenerated uv.lock before git operation")
+            uvlock_path.unlink()
+            return
+
+        # Check for untracked uv.lock
+        result = _git(
+            ["ls-files", "--others", "--exclude-standard", "uv.lock"],
+            self.cec_path,
+            check=False
+        )
+        if result.stdout.strip() == "uv.lock":
+            logger.debug("Removing untracked uv.lock before git operation")
+            uvlock_path.unlink()

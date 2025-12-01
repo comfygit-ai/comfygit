@@ -329,7 +329,7 @@ class TestWorkflowDeletionCleanup:
         builder.add_model("ma.safetensors", "checkpoints")
         builder.add_model("mb.safetensors", "checkpoints")
         builder.add_model("mc.safetensors", "checkpoints")
-        builder.add_model("md.safetensors", "checkpoints")
+        builder.add_model("md.safetensors", "loras")  # Use loras category for the lora model
         models = builder.index_all()
 
         # Create workflows A, B, C
@@ -353,13 +353,13 @@ class TestWorkflowDeletionCleanup:
         wf_b_modified = (
             WorkflowBuilder()
             .add_checkpoint_loader("mb.safetensors")
-            .add_lora_loader("md.safetensors")  # Add model D to B
+            .add_lora_loader("md.safetensors")  # md.safetensors is now a lora
             .build()
         )
         simulate_comfyui_save_workflow(test_env, "wf_b", wf_b_modified)
 
-        # Add D
-        wf_d = WorkflowBuilder().add_checkpoint_loader("md.safetensors").build()
+        # Add D (uses md.safetensors as a lora since that's what we created)
+        wf_d = WorkflowBuilder().add_lora_loader("md.safetensors").build()
         simulate_comfyui_save_workflow(test_env, "wf_d", wf_d)
 
         workflow_status = test_env.workflow_manager.get_workflow_status()
@@ -384,3 +384,79 @@ class TestWorkflowDeletionCleanup:
         # Models B, C, D should remain (we just verify count > 0 since models are shared)
         assert len(models_section) >= 2, \
             f"Should have at least 2 models remaining (B, C, and possibly D)"
+
+    def test_resolved_but_never_committed_workflow_cleanup(self, test_env, test_workspace):
+        """Test that resolved-but-never-committed workflows are cleaned up on commit.
+
+        Edge case scenario:
+        1. Create workflow 'temp_wf' in ComfyUI
+        2. Run 'resolve' on it (adds to pyproject.toml but NOT to .cec)
+        3. Delete workflow file in ComfyUI (without ever committing)
+        4. Commit (with or without other workflows)
+        5. Expected: 'temp_wf' section should be removed from pyproject.toml
+        6. Bug: Section remains as orphan since it was never in .cec
+
+        Root cause: sync_status.deleted only detects workflows in .cec but not ComfyUI.
+        Workflows that are only in pyproject.toml become orphans.
+        """
+        # ARRANGE: Create models for both workflows
+        builder = ModelIndexBuilder(test_workspace)
+        builder.add_model("model1.safetensors", "checkpoints", size_mb=4)
+        builder.add_model("model2.safetensors", "checkpoints", size_mb=4)
+        models = builder.index_all()
+
+        # Create and COMMIT workflow 'committed_wf' (this one will stay)
+        committed_wf = WorkflowBuilder().add_checkpoint_loader("model1.safetensors").build()
+        simulate_comfyui_save_workflow(test_env, "committed_wf", committed_wf)
+        workflow_status = test_env.workflow_manager.get_workflow_status()
+        test_env.execute_commit(workflow_status, message="Add committed workflow")
+
+        # Verify committed_wf is now in .cec
+        assert (test_env.cec_path / "workflows" / "committed_wf.json").exists()
+
+        # Create 'temp_wf' and RESOLVE it (adds to pyproject) but DO NOT commit
+        temp_wf = WorkflowBuilder().add_checkpoint_loader("model2.safetensors").build()
+        simulate_comfyui_save_workflow(test_env, "temp_wf", temp_wf)
+
+        # Resolve temp_wf - this adds it to pyproject.toml
+        deps, resolution = test_env.workflow_manager.analyze_and_resolve_workflow("temp_wf")
+        test_env.workflow_manager.apply_resolution(resolution)
+
+        # Verify temp_wf is in pyproject but NOT in .cec
+        config = test_env.pyproject.load()
+        workflows = config.get("tool", {}).get("comfygit", {}).get("workflows", {})
+        assert "temp_wf" in workflows, "temp_wf should be in pyproject after resolve"
+        assert not (test_env.cec_path / "workflows" / "temp_wf.json").exists(), \
+            "temp_wf should NOT be in .cec (never committed)"
+
+        # Get the model hash for temp_wf to verify cleanup
+        temp_wf_models = workflows.get("temp_wf", {}).get("models", [])
+        temp_model_hash = temp_wf_models[0]["hash"] if temp_wf_models else None
+
+        # ACT: Delete temp_wf from ComfyUI (simulate user deleting it)
+        (test_env.comfyui_path / "user" / "default" / "workflows" / "temp_wf.json").unlink()
+
+        # Commit - this should clean up the orphaned temp_wf from pyproject
+        workflow_status = test_env.workflow_manager.get_workflow_status()
+
+        # Verify temp_wf is NOT in deleted list (since it was never in .cec)
+        assert "temp_wf" not in workflow_status.sync_status.deleted, \
+            "temp_wf should not be detected as deleted (never in .cec)"
+
+        test_env.execute_commit(workflow_status, message="Commit after deleting temp_wf")
+
+        # ASSERT: temp_wf should be cleaned from pyproject.toml
+        config = test_env.pyproject.load()
+        workflows = config.get("tool", {}).get("comfygit", {}).get("workflows", {})
+
+        assert "temp_wf" not in workflows, \
+            "BUG: Resolved-but-never-committed workflow 'temp_wf' should be removed from pyproject"
+
+        assert "committed_wf" in workflows, \
+            "committed_wf should remain in pyproject"
+
+        # Verify orphaned model is also cleaned up
+        models_section = config.get("tool", {}).get("comfygit", {}).get("models", {})
+        if temp_model_hash:
+            assert temp_model_hash not in models_section, \
+                "BUG: Model from deleted workflow should be cleaned up"

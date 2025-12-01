@@ -181,6 +181,37 @@ class EnvironmentGitOrchestrator:
         self.git.delete_branch(name, force)
         logger.info(f"Deleted branch '{name}'")
 
+    def create_and_switch_branch(self, name: str, start_point: str = "HEAD") -> None:
+        """Create new branch and switch to it (git checkout -b semantics).
+
+        This is the atomic equivalent of 'git checkout -b'. It creates a branch
+        from start_point and switches to it in one operation, preserving any
+        uncommitted workflow changes. No conflict checking is performed since
+        the new branch is guaranteed to have the same tree as the start_point.
+
+        Args:
+            name: Branch name to create
+            start_point: Commit to branch from (default: HEAD)
+
+        Raises:
+            OSError: If branch already exists or git operations fail
+        """
+        # Create the branch
+        self.git.create_branch(name, start_point)
+        logger.info(f"Created branch '{name}' at {start_point}")
+
+        # Snapshot old state
+        old_nodes = self.pyproject.nodes.get_existing()
+
+        # Switch to the new branch
+        self.git.switch_branch(name, create=False)
+
+        # Sync environment with uncommitted workflows preserved
+        # No conflict checking needed - branch was just created from current state
+        self._sync_environment_after_git(old_nodes, preserve_uncommitted=True)
+
+        logger.info(f"Switched to new branch '{name}'")
+
     def switch_branch(self, branch: str, create: bool = False) -> None:
         """Switch to branch and sync environment.
 
@@ -228,15 +259,25 @@ class EnvironmentGitOrchestrator:
 
         logger.info(f"Switched to branch '{branch}'")
 
-    def merge_branch(self, branch: str, message: str | None = None) -> None:
+    def merge_branch(
+        self,
+        branch: str,
+        message: str | None = None,
+        strategy_option: str | None = None,
+    ) -> None:
         """Merge branch into current branch and sync environment.
 
         Args:
             branch: Branch to merge
             message: Custom merge commit message
+            strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
         """
         old_nodes = self.pyproject.nodes.get_existing()
-        self.git.merge_branch(branch, message)
+
+        # Remove uv.lock if it's blocking the merge - it gets regenerated after anyway
+        self._cleanup_uvlock_before_git_operation()
+
+        self.git.merge_branch(branch, message, strategy_option)
         self._sync_environment_after_git(old_nodes)
         logger.info(f"Merged branch '{branch}'")
 
@@ -445,3 +486,32 @@ class EnvironmentGitOrchestrator:
         except Exception as e:
             logger.warning(f"Could not check target branch workflows: {e}")
             return True
+
+    def _cleanup_uvlock_before_git_operation(self) -> None:
+        """Remove uv.lock if it would block a git operation.
+
+        After branch switch, uv.sync_project() regenerates uv.lock which can
+        differ from the committed version. This creates phantom "dirty" state
+        that blocks merge/pull operations. Since uv.lock gets regenerated
+        after every git operation anyway (via _sync_environment_after_git),
+        we can safely remove it before merge/pull to prevent blocking.
+        """
+        uvlock_path = self.git.repo_path / "uv.lock"
+        if uvlock_path.exists():
+            # Check if uv.lock is untracked or modified
+            from ..utils.git import get_uncommitted_changes
+            changes = get_uncommitted_changes(self.git.repo_path)
+            if "uv.lock" in changes:
+                logger.debug("Removing regenerated uv.lock before git operation")
+                uvlock_path.unlink()
+            else:
+                # Check for untracked uv.lock
+                from ..utils.git import _git
+                result = _git(
+                    ["ls-files", "--others", "--exclude-standard", "uv.lock"],
+                    self.git.repo_path,
+                    check=False
+                )
+                if result.stdout.strip() == "uv.lock":
+                    logger.debug("Removing untracked uv.lock before git operation")
+                    uvlock_path.unlink()

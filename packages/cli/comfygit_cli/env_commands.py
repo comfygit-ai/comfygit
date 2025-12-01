@@ -88,6 +88,90 @@ class EnvironmentCommands:
             sys.exit(1)
         return active
 
+    def _format_size(self, size_bytes: int) -> str:
+        """Format bytes as human-readable size."""
+        for unit in ("B", "KB", "MB", "GB"):
+            if abs(size_bytes) < 1024:
+                return f"{size_bytes:.1f} {unit}"
+            size_bytes /= 1024  # type: ignore[assignment]
+        return f"{size_bytes:.1f} TB"
+
+    def _display_diff_preview(self, diff: Any) -> None:
+        """Display a RefDiff to the user."""
+        from comfygit_core.models.ref_diff import RefDiff
+
+        if not isinstance(diff, RefDiff):
+            return
+
+        summary = diff.summary()
+        print(f"\nChanges from {diff.target_ref}:")
+        print("-" * 40)
+
+        # Nodes
+        if diff.node_changes:
+            print("\nNodes:")
+            for node_change in diff.node_changes:
+                symbol = {"added": "+", "removed": "-", "version_changed": "~"}[
+                    node_change.change_type
+                ]
+                conflict_mark = " (CONFLICT)" if node_change.conflict else ""
+                version_info = ""
+                if node_change.change_type == "version_changed":
+                    version_info = f" ({node_change.base_version} -> {node_change.target_version})"
+                print(f"  {symbol} {node_change.name}{version_info}{conflict_mark}")
+
+        # Models
+        if diff.model_changes:
+            print("\nModels:")
+            for model_change in diff.model_changes:
+                symbol = "+" if model_change.change_type == "added" else "-"
+                size_str = self._format_size(model_change.size)
+                print(f"  {symbol} {model_change.filename} ({size_str})")
+
+        # Workflows
+        if diff.workflow_changes:
+            print("\nWorkflows:")
+            for wf_change in diff.workflow_changes:
+                symbol = {"added": "+", "deleted": "-", "modified": "~"}[
+                    wf_change.change_type
+                ]
+                conflict_mark = " (CONFLICT)" if wf_change.conflict else ""
+                print(f"  {symbol} {wf_change.name}.json{conflict_mark}")
+
+        # Dependencies
+        deps = diff.dependency_changes
+        if deps.has_changes:
+            print("\nDependencies:")
+            for dep in deps.added:
+                print(f"  + {dep.get('name', 'unknown')}")
+            for dep in deps.removed:
+                print(f"  - {dep.get('name', 'unknown')}")
+            for dep in deps.updated:
+                print(f"  ~ {dep.get('name', 'unknown')} ({dep.get('old', '?')} -> {dep.get('new', '?')})")
+
+        # Summary
+        print()
+        summary_parts = []
+        if summary["nodes_added"] or summary["nodes_removed"]:
+            summary_parts.append(
+                f"{summary['nodes_added']} nodes added, {summary['nodes_removed']} removed"
+            )
+        if summary["models_added"]:
+            summary_parts.append(
+                f"{summary['models_added']} models to download ({self._format_size(summary['models_added_size'])})"
+            )
+        if summary["workflows_added"] or summary["workflows_modified"] or summary["workflows_deleted"]:
+            summary_parts.append(
+                f"{summary['workflows_added']} workflows added, {summary['workflows_modified']} modified, {summary['workflows_deleted']} deleted"
+            )
+        if summary["conflicts"]:
+            summary_parts.append(f"{summary['conflicts']} conflicts to resolve")
+
+        if summary_parts:
+            print("Summary:")
+            for part in summary_parts:
+                print(f"  {part}")
+
     # === Commands that operate ON environments ===
 
     @with_env_logging("env create")
@@ -189,26 +273,44 @@ class EnvironmentCommands:
     @with_env_logging("env run")
     def run(self, args: argparse.Namespace) -> None:
         """Run ComfyUI in the specified environment."""
+        RESTART_EXIT_CODE = 42
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
+        no_sync = getattr(args, 'no_sync', False)
 
-        # Get branch info
         current_branch = env.get_current_branch()
         branch_display = f" (on {current_branch})" if current_branch else " (detached HEAD)"
 
-        print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
-        if comfyui_args:
-            print(f"   Arguments: {' '.join(comfyui_args)}")
+        while True:
+            # Sync before running (unless --no-sync)
+            if not no_sync:
+                print(f"🔄 Syncing environment: {env.name}")
+                env.sync(preserve_workflows=True, remove_extra_nodes=False)
 
-        # Run ComfyUI
-        result = env.run(comfyui_args)
+            print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
+            if comfyui_args:
+                print(f"   Arguments: {' '.join(comfyui_args)}")
 
-        # Exit with ComfyUI's exit code
-        sys.exit(result.returncode)
+            result = env.run(comfyui_args)
+
+            if result.returncode == RESTART_EXIT_CODE:
+                print("\n🔄 Restart requested, syncing dependencies...\n")
+                no_sync = False  # Ensure sync runs on restart
+                continue
+
+            sys.exit(result.returncode)
 
     def manifest(self, args: argparse.Namespace) -> None:
         """Show environment manifest (pyproject.toml configuration)."""
         env = self._get_env(args)
+
+        # Handle --ide flag: open in editor and exit
+        if hasattr(args, 'ide') and args.ide:
+            import os
+            import subprocess
+            editor = args.ide if args.ide != "auto" else os.environ.get("EDITOR", "code")
+            subprocess.run([editor, str(env.pyproject.path)])
+            return
 
         import tomlkit
         import yaml
@@ -317,23 +419,32 @@ class EnvironmentCommands:
                 }
 
             # Show workflows with inline issue details
+            verbose = args.verbose
             for name in status.workflow.sync_status.synced:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Show warning if has issues OR path sync needed
+                    # Check if workflow has missing models (from direct repo query, not cache)
+                    missing_for_wf = [m for m in status.missing_models if name in m.workflow_names]
+                    # Show warning if has issues OR path sync needed OR missing models
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (synced)")
-                        self._print_workflow_issues(wf)
+                        self._print_workflow_issues(wf, verbose)
+                    elif missing_for_wf:
+                        print(f"  ⚠️  {name} (synced, {len(missing_for_wf)} missing models)")
                     else:
                         print(f"  ✓ {name}")
 
             for name in status.workflow.sync_status.new:
                 if name in all_workflows:
                     wf = all_workflows[name]['analysis']
-                    # Show warning if has issues OR path sync needed
+                    # Check if workflow has missing models (from direct repo query, not cache)
+                    missing_for_wf = [m for m in status.missing_models if name in m.workflow_names]
+                    # Show warning if has issues OR path sync needed OR missing models
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (new)")
-                        self._print_workflow_issues(wf)
+                        self._print_workflow_issues(wf, verbose)
+                    elif missing_for_wf:
+                        print(f"  ⚠️  {name} (new, {len(missing_for_wf)} missing models)")
                     else:
                         print(f"  🆕 {name} (new, ready to commit)")
 
@@ -346,7 +457,7 @@ class EnvironmentCommands:
                     # Show warning if has issues OR path sync needed
                     if wf.has_issues or wf.has_path_sync_issues:
                         print(f"  ⚠️  {name} (modified)")
-                        self._print_workflow_issues(wf)
+                        self._print_workflow_issues(wf, verbose)
                     elif missing_for_wf:
                         print(f"  ⬇️  {name} (modified, missing models)")
                         print(f"      {len(missing_for_wf)} model(s) need downloading")
@@ -365,16 +476,24 @@ class EnvironmentCommands:
 
             if status.comparison.extra_nodes:
                 print(f"  • {len(status.comparison.extra_nodes)} untracked nodes on filesystem:")
-                for node_name in status.comparison.extra_nodes[:5]:
+                limit = None if args.verbose else 5
+                nodes_to_show = status.comparison.extra_nodes if limit is None else status.comparison.extra_nodes[:limit]
+                for node_name in nodes_to_show:
                     print(f"    - {node_name}")
-                if len(status.comparison.extra_nodes) > 5:
-                    print(f"    ... and {len(status.comparison.extra_nodes) - 5} more")
+                if limit and len(status.comparison.extra_nodes) > limit:
+                    print(f"    ... and {len(status.comparison.extra_nodes) - limit} more")
 
             if status.comparison.version_mismatches:
                 print(f"  • {len(status.comparison.version_mismatches)} version mismatches")
 
             if not status.comparison.packages_in_sync:
                 print("  • Python packages out of sync")
+
+        # Disabled nodes (informational, not a warning)
+        if status.comparison.disabled_nodes:
+            print("\n📴 Disabled nodes:")
+            for node_name in status.comparison.disabled_nodes:
+                print(f"  • {node_name}")
 
         # Git changes
         if status.git.has_changes:
@@ -386,19 +505,23 @@ class EnvironmentCommands:
 
             if has_specific_changes:
                 print("\n📦 Uncommitted changes:")
+                limit = None if args.verbose else 3
+
                 if status.git.nodes_added:
-                    for node in status.git.nodes_added[:3]:
+                    nodes_to_show = status.git.nodes_added if limit is None else status.git.nodes_added[:limit]
+                    for node in nodes_to_show:
                         name = node['name'] if isinstance(node, dict) else node
                         print(f"  • Added node: {name}")
-                    if len(status.git.nodes_added) > 3:
-                        print(f"  • ... and {len(status.git.nodes_added) - 3} more nodes")
+                    if limit and len(status.git.nodes_added) > limit:
+                        print(f"  • ... and {len(status.git.nodes_added) - limit} more nodes")
 
                 if status.git.nodes_removed:
-                    for node in status.git.nodes_removed[:3]:
+                    nodes_to_show = status.git.nodes_removed if limit is None else status.git.nodes_removed[:limit]
+                    for node in nodes_to_show:
                         name = node['name'] if isinstance(node, dict) else node
                         print(f"  • Removed node: {name}")
-                    if len(status.git.nodes_removed) > 3:
-                        print(f"  • ... and {len(status.git.nodes_removed) - 3} more nodes")
+                    if limit and len(status.git.nodes_removed) > limit:
+                        print(f"  • ... and {len(status.git.nodes_removed) - limit} more nodes")
 
                 if status.git.workflow_changes:
                     count = len(status.git.workflow_changes)
@@ -415,21 +538,12 @@ class EnvironmentCommands:
                 else:
                     print("  • Configuration updated")
 
-        # Dev node drift (requirements changed)
-        dev_drift = env.check_development_node_drift()
-        if dev_drift:
-            print("\n🔧 Dev node updates available:")
-            for node_name in list(dev_drift.keys())[:3]:
-                print(f"  • {node_name}")
-            if len(dev_drift) > 3:
-                print(f"  • ... and {len(dev_drift) - 3} more")
-
         # Suggested actions - smart and contextual
-        self._show_smart_suggestions(status, dev_drift)
+        self._show_smart_suggestions(status)
 
     # Removed: _has_uninstalled_packages - this logic is now in core's WorkflowAnalysisStatus
 
-    def _print_workflow_issues(self, wf_analysis: WorkflowAnalysisStatus) -> None:
+    def _print_workflow_issues(self, wf_analysis: WorkflowAnalysisStatus, verbose: bool = False) -> None:
         """Print compact workflow issues summary using model properties only."""
         # Build compact summary using WorkflowAnalysisStatus properties (no pyproject access!)
         parts = []
@@ -437,6 +551,10 @@ class EnvironmentCommands:
         # Path sync warnings (FIRST - most actionable fix)
         if wf_analysis.models_needing_path_sync_count > 0:
             parts.append(f"{wf_analysis.models_needing_path_sync_count} model paths need syncing")
+
+        # Category mismatch (blocking - model in wrong directory for loader)
+        if wf_analysis.models_with_category_mismatch_count > 0:
+            parts.append(f"{wf_analysis.models_with_category_mismatch_count} models in wrong directory")
 
         # Use the uninstalled_count property (populated by core)
         if wf_analysis.uninstalled_count > 0:
@@ -459,7 +577,20 @@ class EnvironmentCommands:
         if parts:
             print(f"      {', '.join(parts)}")
 
-    def _show_smart_suggestions(self, status: EnvironmentStatus, dev_drift) -> None:
+        # Detailed category mismatch info (always show brief, verbose shows full details)
+        if wf_analysis.has_category_mismatch_issues:
+            for model in wf_analysis.resolution.models_resolved:
+                if model.has_category_mismatch:
+                    expected = model.expected_categories[0] if model.expected_categories else "unknown"
+                    if verbose:
+                        print(f"        ↳ {model.name}")
+                        print(f"          Node: {model.reference.node_type} expects {expected}/")
+                        print(f"          Actual: {model.actual_category}/")
+                        print(f"          Fix: Move file to models/{expected}/ or re-download")
+                    else:
+                        print(f"        ↳ {model.name}: in {model.actual_category}/, needs {expected}/")
+
+    def _show_smart_suggestions(self, status: EnvironmentStatus) -> None:
         """Show contextual suggestions based on current state."""
         suggestions = []
 
@@ -541,6 +672,25 @@ class EnvironmentCommands:
                 print(f"  {s}")
             return
 
+        # Category mismatch (blocking - model in wrong directory for loader)
+        workflows_with_category_mismatch = [
+            w for w in status.workflow.analyzed_workflows
+            if w.has_category_mismatch_issues
+        ]
+
+        if workflows_with_category_mismatch:
+            suggestions.append("Models in wrong directory (move files manually):")
+            for wf in workflows_with_category_mismatch[:2]:
+                for m in wf.resolution.models_resolved:
+                    if m.has_category_mismatch:
+                        expected = m.expected_categories[0] if m.expected_categories else "unknown"
+                        suggestions.append(f"  {m.actual_category}/{m.name} → {expected}/")
+
+            print("\n💡 Next:")
+            for s in suggestions:
+                print(f"  {s}")
+            return
+
         # Path sync warnings (prioritize - quick fix!)
         workflows_needing_sync = [
             w for w in status.workflow.analyzed_workflows
@@ -592,11 +742,6 @@ class EnvironmentCommands:
         elif status.git.has_changes:
             # Uncommitted pyproject changes without workflow issues
             suggestions.append("Commit changes: cg commit -m \"<message>\"")
-
-        # Dev node updates
-        if dev_drift:
-            for node_name in list(dev_drift.keys())[:1]:
-                suggestions.append(f"Update dev node: cg node update {node_name}")
 
         # Show suggestions if any
         if suggestions:
@@ -1517,12 +1662,10 @@ class EnvironmentCommands:
 
         try:
             if args.branch:
-                # Create new branch and switch
-                # If ref is None, create_branch defaults to HEAD
+                # Create new branch and switch (git checkout -b semantics)
                 start_point = args.ref if args.ref is not None else "HEAD"
                 print(f"Creating and switching to branch '{args.branch}'...")
-                env.create_branch(args.branch, start_point=start_point)
-                env.switch_branch(args.branch)
+                env.create_and_switch_branch(args.branch, start_point=start_point)
                 print(f"✓ Switched to new branch '{args.branch}'")
             else:
                 # Just checkout ref - ref is required when not using -b
@@ -1642,7 +1785,7 @@ class EnvironmentCommands:
 
     @with_env_logging("env merge")
     def merge(self, args: argparse.Namespace, logger=None) -> None:
-        """Merge branch into current."""
+        """Merge branch into current with atomic conflict resolution."""
         env = self._get_env(args)
 
         try:
@@ -1651,8 +1794,83 @@ class EnvironmentCommands:
                 print("✗ Cannot merge while in detached HEAD state")
                 sys.exit(1)
 
-            print(f"Merging '{args.branch}' into '{current}'...")
-            env.merge_branch(args.branch, message=args.message)
+            # Phase 1: Preview
+            diff = env.preview_merge(args.branch)
+
+            if not diff.has_changes:
+                if diff.is_already_merged:
+                    print(f"\n✓ '{args.branch}' is already merged into '{current}'.")
+                elif diff.is_fast_forward:
+                    print(f"\n✓ '{args.branch}' has commits but no ComfyGit changes.")
+                    print("   Merge will bring in commits without affecting nodes/models/workflows.")
+                else:
+                    print(f"\n✓ No ComfyGit configuration changes to merge from '{args.branch}'.")
+                return
+
+            # Preview mode - read-only, just show what would change
+            if getattr(args, "preview", False):
+                self._display_diff_preview(diff)
+                if diff.has_conflicts:
+                    print("\n⚠️  Conflicts will occur. Review before merging.")
+                return
+
+            self._display_diff_preview(diff)
+
+            # Phase 2: Collect resolutions if conflicts exist
+            resolutions: dict = {}
+            strategy_option: str | None = None
+            auto_resolve = getattr(args, "auto_resolve", None)
+            strategy = getattr(args, "strategy", None)
+
+            if strategy:
+                # Global strategy flag - use for all conflicts
+                strategy_option = strategy
+            elif auto_resolve:
+                # Auto-resolve flag
+                from .strategies.conflict_resolver import AutoConflictResolver
+                resolver = AutoConflictResolver(auto_resolve)
+                resolutions = resolver.resolve_all(diff)
+                strategy_option = "theirs" if auto_resolve == "theirs" else "ours"
+            elif diff.has_conflicts:
+                # Interactive conflict resolution - ONLY workflow conflicts shown
+                from .strategies.conflict_resolver import InteractiveConflictResolver
+
+                print(f"\n⚠️  Conflicts detected:")
+                resolver = InteractiveConflictResolver()
+                resolutions = resolver.resolve_all(diff)
+
+                # All conflicts must be resolved - no skip option
+                if not resolutions and diff.has_conflicts:
+                    print("\n✗ No conflicts were resolved. Merge aborted.")
+                    sys.exit(1)
+
+                # Determine strategy from resolutions
+                unique_resolutions = set(resolutions.values())
+                if unique_resolutions == {"take_target"}:
+                    strategy_option = "theirs"
+                elif unique_resolutions == {"take_base"}:
+                    strategy_option = "ours"
+                # Mixed: no global strategy, rely on per-file resolution
+
+            # Phase 3: Execute merge
+            print(f"\nMerging '{args.branch}' into '{current}'...")
+
+            # Use atomic merge when we have per-file resolutions (mixed mine/theirs)
+            # Otherwise use standard merge with global strategy
+            if resolutions and strategy_option is None:
+                # Mixed resolutions - use atomic executor for per-file resolution
+                result = env.execute_atomic_merge(args.branch, resolutions)
+                if not result.success:
+                    print(f"✗ Merge failed: {result.error}", file=sys.stderr)
+                    sys.exit(1)
+            else:
+                # Global strategy or no resolutions - use standard merge
+                env.merge_branch(
+                    args.branch,
+                    message=getattr(args, "message", None),
+                    strategy_option=strategy_option,
+                )
+
             print(f"✓ Merged '{args.branch}' into '{current}'")
         except Exception as e:
             if logger:
@@ -1763,6 +1981,41 @@ class EnvironmentCommands:
         """Pull from remote and repair environment."""
         env = self._get_env(args)
 
+        # Check remote exists
+        if not env.git_manager.has_remote(args.remote):
+            print(f"✗ Remote '{args.remote}' not configured")
+            print()
+            print("💡 Set up a remote first:")
+            print(f"   cg remote add {args.remote} <url>")
+            sys.exit(1)
+
+        # Preview mode - read-only, just show what would change
+        if getattr(args, "preview", False):
+            try:
+                print(f"Fetching from {args.remote}...")
+                diff = env.preview_pull(remote=args.remote)
+
+                if not diff.has_changes:
+                    if diff.is_already_merged:
+                        print("\n✓ Already up to date.")
+                    elif diff.is_fast_forward:
+                        print(f"\n✓ Remote has commits but no ComfyGit changes.")
+                        print("   Pull will bring in commits without affecting nodes/models/workflows.")
+                    else:
+                        print("\n✓ No ComfyGit configuration changes to pull.")
+                    return
+
+                self._display_diff_preview(diff)
+
+                if diff.has_conflicts:
+                    print("\n⚠️  Conflicts will occur. Resolve before pulling.")
+                return  # Preview is read-only, don't continue to actual pull
+            except Exception as e:
+                if logger:
+                    logger.error(f"Preview failed: {e}", exc_info=True)
+                print(f"✗ Preview failed: {e}", file=sys.stderr)
+                sys.exit(1)
+
         # Check for uncommitted changes first
         if env.has_committable_changes() and not getattr(args, 'force', False):
             print("⚠️  You have uncommitted changes")
@@ -1773,15 +2026,44 @@ class EnvironmentCommands:
             print("  • Force: cg pull origin --force")
             sys.exit(1)
 
-        # Check remote exists
-        if not env.git_manager.has_remote(args.remote):
-            print(f"✗ Remote '{args.remote}' not configured")
-            print()
-            print("💡 Set up a remote first:")
-            print(f"   cg remote add {args.remote} <url>")
-            sys.exit(1)
-
         try:
+            # Determine merge strategy
+            strategy_option: str | None = None
+            auto_resolve = getattr(args, "auto_resolve", None)
+
+            if auto_resolve:
+                # Use git -X strategy based on auto-resolve choice
+                strategy_option = "theirs" if auto_resolve == "theirs" else "ours"
+            else:
+                # Check for conflicts before pull
+                print(f"Checking for conflicts with {args.remote}...")
+                diff = env.preview_pull(remote=args.remote)
+                if diff.has_conflicts:
+                    # Interactive conflict resolution
+                    from .strategies.conflict_resolver import InteractiveConflictResolver
+
+                    current = env.get_current_branch() or "HEAD"
+                    print(f"\n⚠️  Conflicts detected between '{current}' and '{args.remote}':")
+                    self._display_diff_preview(diff)
+
+                    resolver = InteractiveConflictResolver()
+                    resolutions = resolver.resolve_all(diff)
+
+                    # Check if any conflicts were skipped
+                    skipped = [k for k, v in resolutions.items() if v == "skip"]
+                    if skipped:
+                        print(f"\n⚠️  {len(skipped)} conflict(s) will be skipped.")
+                        print("   You may need to resolve them manually after pull.")
+
+                    # Determine strategy from resolutions
+                    non_skip = [v for v in resolutions.values() if v != "skip"]
+                    unique_resolutions = set(non_skip)
+                    if unique_resolutions == {"take_target"}:
+                        strategy_option = "theirs"
+                    elif unique_resolutions == {"take_base"}:
+                        strategy_option = "ours"
+                    # Mixed or empty: no strategy, git decides
+
             print(f"📥 Pulling from {args.remote}...")
 
             # Create callbacks for node and model progress (reuse repair command patterns)
@@ -1789,10 +2071,10 @@ class EnvironmentCommands:
             from .utils.progress import create_progress_callback
 
             # Node installation callbacks
-            def on_node_start(node_id, idx, total):
-                print(f"  [{idx}/{total}] Installing {node_id}...", end=" ", flush=True)
+            def on_node_start(_node_id: str, idx: int, total: int) -> None:
+                print(f"  [{idx}/{total}] Installing {_node_id}...", end=" ", flush=True)
 
-            def on_node_complete(node_id, success, error):
+            def on_node_complete(_node_id: str, success: bool, error: str | None) -> None:
                 if success:
                     print("✓")
                 else:
@@ -1804,10 +2086,10 @@ class EnvironmentCommands:
             )
 
             # Model download callbacks
-            def on_file_start(filename, idx, total):
+            def on_file_start(filename: str, idx: int, total: int) -> None:
                 print(f"   [{idx}/{total}] Downloading {filename}...")
 
-            def on_file_complete(filename, success, error):
+            def on_file_complete(filename: str, success: bool, error: str | None) -> None:
                 print()  # New line after progress bar
                 if success:
                     print(f"   ✓ {filename}")
@@ -1825,7 +2107,8 @@ class EnvironmentCommands:
                 remote=args.remote,
                 model_strategy=getattr(args, 'models', 'all'),
                 model_callbacks=model_callbacks,
-                node_callbacks=node_callbacks
+                node_callbacks=node_callbacks,
+                strategy_option=strategy_option,
             )
 
             # Extract sync result for summary
@@ -2321,6 +2604,9 @@ class EnvironmentCommands:
         # Display final results - check issues first
         uninstalled = env.get_uninstalled_nodes(workflow_name=args.name)
 
+        # Check for category mismatch (blocking issue that resolve can't fix)
+        category_mismatches = [m for m in result.models_resolved if m.has_category_mismatch]
+
         if result.has_issues or uninstalled:
             print("\n⚠️  Partial resolution - issues remain:")
 
@@ -2339,9 +2625,17 @@ class EnvironmentCommands:
                 print(f"  ✗ {len(result.models_ambiguous)} ambiguous models")
             if uninstalled:
                 print(f"  ✗ {len(uninstalled)} packages need installation")
+            if category_mismatches:
+                print(f"  ✗ {len(category_mismatches)} models in wrong directory")
 
             print("\n💡 Next:")
-            print(f"  Re-run: cg workflow resolve \"{args.name}\"")
+            if category_mismatches:
+                print("  Models in wrong directory (move files manually):")
+                for m in category_mismatches:
+                    expected = m.expected_categories[0] if m.expected_categories else "unknown"
+                    print(f"    {m.actual_category}/{m.name} → {expected}/")
+            else:
+                print(f"  Re-run: cg workflow resolve \"{args.name}\"")
             print("  Or commit with issues: cg commit -m \"...\" --allow-issues")
 
         elif result.models_resolved or result.nodes_resolved:
@@ -2374,12 +2668,34 @@ class EnvironmentCommands:
                 print(f"  Try again: cg workflow resolve \"{args.name}\"")
                 print("  Or commit anyway: cg commit -m \"...\" --allow-issues")
             else:
-                print("\n✅ Resolution complete!")
-                if result.models_resolved:
-                    print(f"  • Resolved {len(result.models_resolved)} models")
-                if result.nodes_resolved:
-                    print(f"  • Resolved {len(result.nodes_resolved)} nodes")
-                print("\n💡 Next:")
-                print(f"  Commit workflows: cg commit -m \"Resolved {args.name}\"")
+                # Check for category mismatch even in "success" case
+                if category_mismatches:
+                    print("\n⚠️  Resolution complete but models in wrong directory:")
+                    if result.models_resolved:
+                        print(f"  ✓ Resolved {len(result.models_resolved)} models")
+                    if result.nodes_resolved:
+                        print(f"  ✓ Resolved {len(result.nodes_resolved)} nodes")
+                    print(f"  ✗ {len(category_mismatches)} models in wrong directory")
+                    print("\n💡 Next (move files manually):")
+                    for m in category_mismatches:
+                        expected = m.expected_categories[0] if m.expected_categories else "unknown"
+                        print(f"    {m.actual_category}/{m.name} → {expected}/")
+                else:
+                    print("\n✅ Resolution complete!")
+                    if result.models_resolved:
+                        print(f"  • Resolved {len(result.models_resolved)} models")
+                    if result.nodes_resolved:
+                        print(f"  • Resolved {len(result.nodes_resolved)} nodes")
+                    print("\n💡 Next:")
+                    print(f"  Commit workflows: cg commit -m \"Resolved {args.name}\"")
         else:
-            print("✓ No changes needed - all dependencies already resolved")
+            # No changes case - still check for category mismatch
+            if category_mismatches:
+                print("\n⚠️  No resolution changes but models in wrong directory:")
+                print(f"  ✗ {len(category_mismatches)} models in wrong directory")
+                print("\n💡 Next (move files manually):")
+                for m in category_mismatches:
+                    expected = m.expected_categories[0] if m.expected_categories else "unknown"
+                    print(f"    {m.actual_category}/{m.name} → {expected}/")
+            else:
+                print("✓ No changes needed - all dependencies already resolved")

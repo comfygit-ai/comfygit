@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import xxhash
 from blake3 import blake3
 
 from ..logging.logging_config import get_logger
@@ -14,7 +15,8 @@ from ..infrastructure.sqlite_manager import SQLiteManager
 logger = get_logger(__name__)
 
 # Database schema version
-SCHEMA_VERSION = 9
+# v10: Switch from blake3 to xxhash for short hash (7x faster)
+SCHEMA_VERSION = 10
 
 # Models table: One entry per unique model file (by hash)
 CREATE_MODELS_TABLE = """
@@ -558,6 +560,30 @@ class ModelRepository:
 
         logger.debug(f"Added source for {model_hash[:8]}...: {source_type} - {source_url}")
 
+    def remove_source(self, model_hash: str, source_url: str) -> bool:
+        """Remove a download source for a model.
+
+        Args:
+            model_hash: Hash of the model
+            source_url: URL of the source to remove
+
+        Returns:
+            True if source was removed, False if source didn't exist
+        """
+        query = """
+        DELETE FROM model_sources
+        WHERE model_hash = ? AND source_url = ?
+        """
+
+        rows_affected = self.sqlite.execute_write(query, (model_hash, source_url))
+
+        if rows_affected > 0:
+            logger.debug(f"Removed source for {model_hash[:8]}...: {source_url}")
+            return True
+        else:
+            logger.debug(f"Source not found for {model_hash[:8]}...: {source_url}")
+            return False
+
     def get_stats(self, base_directory: Path | None = "USE_CURRENT") -> dict[str, int]:
         """Get index statistics, optionally filtered by directory.
 
@@ -634,10 +660,10 @@ class ModelRepository:
         logger.debug(f"Updated SHA256 for {hash[:8]}...: {sha256_hash[:8]}...")
 
     def calculate_short_hash(self, file_path: Path) -> str:
-        """Calculate fast short hash by sampling file chunks.
+        """Calculate fast short hash by sampling file chunks using xxhash.
 
         Samples 5MB each from start, middle, and end of file plus file size.
-        Provides excellent duplicate detection with ~200ms vs 30-60s for full hash.
+        Uses xxhash for ~7x faster hashing compared to blake3.
 
         Args:
             file_path: Path to model file
@@ -653,7 +679,7 @@ class ModelRepository:
                 raise ComfyDockError(f"File does not exist or is not a regular file: {file_path}")
 
             file_size = file_path.stat().st_size
-            hasher = blake3()
+            hasher = xxhash.xxh3_128()
 
             # Include file size as discriminator
             hasher.update(str(file_size).encode())

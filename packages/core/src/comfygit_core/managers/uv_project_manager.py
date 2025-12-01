@@ -209,8 +209,10 @@ class UVProjectManager:
                 self._add_url_sources_with_markers(package, urls_with_markers, group)
 
             logger.info("Successfully added all requirements")
+        except UVCommandError:
+            raise  # Preserve original error with stderr
         except Exception as e:
-            raise UVCommandError(f"Failed to add requirements: {e}")
+            raise UVCommandError(f"Failed to add requirements: {e}") from e
         finally:
             if tmp_path and tmp_path.exists():
                 tmp_path.unlink()

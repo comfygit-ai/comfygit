@@ -172,7 +172,10 @@ class ModelResolver:
     def _try_context_resolution(self, context: ModelResolutionContext, widget_ref: WorkflowNodeWidgetRef) -> ResolvedModel | None:
         """Check if this ref was previously resolved using context lookup.
 
-        Now supports download intent detection via full ManifestWorkflowModel objects.
+        Handles:
+        - Download intents (status=unresolved with sources) - returns download_intent
+        - Optional unresolved (criticality=optional) - returns resolved with is_optional=True
+        - Resolved models with hash - looks up in repository, returns None if deleted
         """
         workflow_name = context.workflow_name
 
@@ -218,25 +221,14 @@ class ModelResolver:
             resolved_model = self.model_repository.get_model(manifest_model.hash)
 
             if not resolved_model:
-                # Model was previously resolved but doesn't exist locally
-                # Check global models table for download sources (fallback path)
-                global_model = context.global_models.get(manifest_model.hash)
-                if global_model and global_model.sources:
-                    # Create download intent from global models table
-                    from pathlib import Path
-                    logger.info(f"Creating download intent for {manifest_model.filename} from global models table")
-                    return ResolvedModel(
-                        workflow=workflow_name,
-                        reference=widget_ref,
-                        match_type="download_intent",
-                        resolved_model=None,
-                        model_source=global_model.sources[0],
-                        target_path=Path(global_model.relative_path) if global_model.relative_path else None,
-                        is_optional=False,
-                        match_confidence=1.0,
-                    )
-
-                logger.warning(f"Model {manifest_model.hash} in previous resolutions but not found in repository or global models")
+                # Model was previously resolved but no longer exists in repository
+                # Return None so it goes to models_unresolved
+                # cleanup_orphans() will remove stale entry from global table during apply_resolution()
+                logger.warning(
+                    f"Model {manifest_model.hash[:8]}... ({manifest_model.filename}) "
+                    f"marked as resolved but not found in model repository. "
+                    f"Will be treated as unresolved."
+                )
                 return None
 
             return ResolvedModel(

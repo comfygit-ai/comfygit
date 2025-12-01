@@ -21,6 +21,8 @@ class TestStatusPathSyncDisplay:
         # ARRANGE: Create a mock workflow analysis with path sync issues
         mock_analysis = Mock(spec=WorkflowAnalysisStatus)
         mock_analysis.models_needing_path_sync_count = 2
+        mock_analysis.models_with_category_mismatch_count = 0
+        mock_analysis.has_category_mismatch_issues = False
         mock_analysis.uninstalled_count = 0
         mock_analysis.resolution = Mock(spec=ResolutionResult)
         mock_analysis.resolution.nodes_unresolved = []
@@ -41,6 +43,8 @@ class TestStatusPathSyncDisplay:
         # ARRANGE: Create mock with both path sync and other issues
         mock_analysis = Mock(spec=WorkflowAnalysisStatus)
         mock_analysis.models_needing_path_sync_count = 1
+        mock_analysis.models_with_category_mismatch_count = 0
+        mock_analysis.has_category_mismatch_issues = False
         mock_analysis.uninstalled_count = 2
         mock_analysis.resolution = Mock(spec=ResolutionResult)
         mock_analysis.resolution.nodes_unresolved = []
@@ -68,6 +72,8 @@ class TestStatusPathSyncDisplay:
         # ARRANGE: Create mock with no path sync issues
         mock_analysis = Mock(spec=WorkflowAnalysisStatus)
         mock_analysis.models_needing_path_sync_count = 0
+        mock_analysis.models_with_category_mismatch_count = 0
+        mock_analysis.has_category_mismatch_issues = False
         mock_analysis.uninstalled_count = 0
         mock_analysis.resolution = Mock(spec=ResolutionResult)
         mock_analysis.resolution.nodes_unresolved = []

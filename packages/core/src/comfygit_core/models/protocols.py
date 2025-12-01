@@ -1,7 +1,7 @@
 """Resolution strategy protocols for dependency injection."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from .workflow import (
     ModelResolutionContext,
@@ -11,6 +11,7 @@ from .workflow import (
 )
 
 if TYPE_CHECKING:
+    from ..models.ref_diff import DependencyConflict, NodeConflict, WorkflowConflict
     from ..models.workflow import ResolvedNodePackage
 
 class NodeResolutionStrategy(Protocol):
@@ -244,5 +245,86 @@ class ExportCallbacks(Protocol):
 
         Args:
             models: List of ModelWithoutSourceInfo instances
+        """
+        ...
+
+
+class EnvironmentCreateProgress(Protocol):
+    """Protocol for environment creation progress updates.
+
+    Provides callbacks for tracking environment creation phases,
+    enabling UI progress bars and status messages.
+    """
+
+    def on_phase(self, phase: str, description: str, progress_pct: int) -> None:
+        """Called when entering a new creation phase.
+
+        Args:
+            phase: Phase identifier (e.g., "clone_comfyui", "install_pytorch")
+            description: Human-readable phase description for UI display
+            progress_pct: Overall progress percentage (0-100)
+        """
+        ...
+
+    def on_phase_complete(self, phase: str, success: bool, error: str | None = None) -> None:
+        """Called when a phase completes.
+
+        Args:
+            phase: Phase identifier that completed
+            success: Whether the phase succeeded
+            error: Error message if failed (None if succeeded)
+        """
+        ...
+
+
+class ConflictResolver(Protocol):
+    """Protocol for resolving merge conflicts interactively.
+
+    Used during pull/merge operations to handle conflicts detected
+    by RefDiffAnalyzer before the git merge occurs.
+    """
+
+    def resolve_workflow(
+        self, conflict: WorkflowConflict
+    ) -> Literal["take_base", "take_target", "skip"]:
+        """Resolve a workflow file conflict.
+
+        Args:
+            conflict: Workflow conflict with base/target hashes
+
+        Returns:
+            "take_base" to keep local version
+            "take_target" to take incoming version
+            "skip" to leave unresolved
+        """
+        ...
+
+    def resolve_node(
+        self, conflict: NodeConflict
+    ) -> Literal["take_base", "take_target", "skip"]:
+        """Resolve a node version conflict.
+
+        Args:
+            conflict: Node conflict with version info
+
+        Returns:
+            "take_base" to keep local version
+            "take_target" to take incoming version
+            "skip" to leave unresolved
+        """
+        ...
+
+    def resolve_dependency(
+        self, conflict: DependencyConflict
+    ) -> Literal["take_base", "take_target", "skip"]:
+        """Resolve a dependency version conflict.
+
+        Args:
+            conflict: Dependency conflict with version specs
+
+        Returns:
+            "take_base" to keep local version
+            "take_target" to take incoming version
+            "skip" to leave unresolved
         """
         ...

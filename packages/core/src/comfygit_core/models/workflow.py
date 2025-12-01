@@ -685,6 +685,11 @@ class ResolvedModel:
     target_path: Path | None = None  # Where user intends to download model to (for download_intent match_type)
     needs_path_sync: bool = False  # True if workflow path differs from resolved path
 
+    # Category mismatch detection (model in wrong directory for loader node)
+    has_category_mismatch: bool = False  # True if model is in wrong directory for node type
+    expected_categories: list[str] = field(default_factory=list)  # e.g., ["loras"]
+    actual_category: str | None = None  # e.g., "checkpoints"
+
     @property
     def name(self) -> str:
         return self.reference.widget_value
@@ -808,22 +813,37 @@ class WorkflowAnalysisStatus:
     def has_issues(self) -> bool:
         """Check if workflow has unresolved issues or pending download intents.
 
+        Includes:
+        - Unresolved/ambiguous nodes and models
+        - Pending download intents
+        - Category mismatches (model in wrong directory for loader)
+
         Note: Path sync issues are NOT included here as they're auto-fixable
         and don't prevent commits. They're tracked separately via has_path_sync_issues.
         """
         has_download_intents = any(
             m.match_type == "download_intent" for m in self.resolution.models_resolved
         )
+        has_category_mismatch = any(
+            m.has_category_mismatch for m in self.resolution.models_resolved
+        )
         return (
             self.resolution.has_issues
             or bool(self.uninstalled_nodes)
             or has_download_intents
+            or has_category_mismatch
         )
 
     @property
     def issue_summary(self) -> str:
-        """Human-readable summary of issues."""
+        """Human-readable summary of all issues that make has_issues=True.
+
+        Invariant: if has_issues is True, this must NOT return "No issues".
+        Note: path sync issues are intentionally excluded (auto-fixable, not in has_issues).
+        """
         parts = []
+
+        # Resolution blocking issues
         if self.resolution.models_ambiguous:
             parts.append(f"{len(self.resolution.models_ambiguous)} ambiguous models")
         if self.resolution.models_unresolved:
@@ -832,6 +852,19 @@ class WorkflowAnalysisStatus:
             parts.append(f"{len(self.resolution.nodes_unresolved)} missing nodes")
         if self.resolution.nodes_ambiguous:
             parts.append(f"{len(self.resolution.nodes_ambiguous)} ambiguous nodes")
+
+        # Actionable issues (these also trigger has_issues=True)
+        if self.uninstalled_nodes:
+            parts.append(f"{len(self.uninstalled_nodes)} packages to install")
+        if self.download_intents_count > 0:
+            parts.append(f"{self.download_intents_count} pending downloads")
+
+        # Category mismatch (model in wrong directory for loader)
+        category_mismatch_count = sum(
+            1 for m in self.resolution.models_resolved if m.has_category_mismatch
+        )
+        if category_mismatch_count > 0:
+            parts.append(f"{category_mismatch_count} models in wrong directory")
 
         return ", ".join(parts) if parts else "No issues"
 
@@ -874,6 +907,16 @@ class WorkflowAnalysisStatus:
     def has_path_sync_issues(self) -> bool:
         """Check if workflow has model paths that need syncing."""
         return self.models_needing_path_sync_count > 0
+
+    @property
+    def models_with_category_mismatch_count(self) -> int:
+        """Number of models in wrong category directory for their loader."""
+        return sum(1 for m in self.resolution.models_resolved if m.has_category_mismatch)
+
+    @property
+    def has_category_mismatch_issues(self) -> bool:
+        """Check if workflow has models in wrong category directories."""
+        return self.models_with_category_mismatch_count > 0
 
 
 @dataclass

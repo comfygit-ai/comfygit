@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from comfygit_core.constants import CUSTOM_NODES_BLACKLIST
+from comfygit_core.constants import CUSTOM_NODES_BLACKLIST, SYSTEM_CUSTOM_NODES
 
 from ..logging.logging_config import get_logger
 from ..models.environment import (
@@ -107,28 +107,45 @@ class StatusScanner:
             logger.debug("custom_nodes directory not found")
             return nodes
 
-        # Skip these directories
-        skip_dirs = CUSTOM_NODES_BLACKLIST
+        # Skip these directories (blacklist + system nodes)
+        skip_dirs = CUSTOM_NODES_BLACKLIST | SYSTEM_CUSTOM_NODES
 
         # TODO: Support .comfygit_ignore
         for node_dir in custom_nodes_path.iterdir():
             if not node_dir.is_dir() or node_dir.name in skip_dirs:
                 continue
 
-            # Skip hidden directories and disabled nodes
-            if node_dir.name.startswith(".") or node_dir.name.endswith(".disabled"):
+            # Skip hidden directories
+            if node_dir.name.startswith("."):
+                continue
+
+            # Skip timestamped backup disabled nodes (e.g., MyNode.1700000000.disabled)
+            # These are internal implementation details
+            if node_dir.name.endswith(".disabled"):
+                parts = node_dir.name[:-9].split(".")  # Remove .disabled suffix
+                if len(parts) > 1 and parts[-1].isdigit():
+                    continue  # Skip timestamped backups
+
+            # Determine if disabled and extract base name
+            is_disabled = node_dir.name.endswith(".disabled")
+            base_name = node_dir.name[:-9] if is_disabled else node_dir.name
+
+            # Skip if we already have an enabled version (enabled takes precedence)
+            if base_name in nodes and not nodes[base_name].disabled:
                 continue
 
             try:
                 node_state = self._scan_single_node(node_dir)
-                nodes[node_dir.name] = node_state
+                node_state.name = base_name  # Use normalized name
+                node_state.disabled = is_disabled
+                nodes[base_name] = node_state
             except Exception as e:
                 logger.debug(f"Error scanning node {node_dir.name}: {e}")
                 # Still record it as present but with minimal info
-                nodes[node_dir.name] = NodeState(
-                    name=node_dir.name,
+                nodes[base_name] = NodeState(
+                    name=base_name,
                     path=node_dir,
-                    disabled=node_dir.name.endswith(".disabled"),
+                    disabled=is_disabled,
                 )
 
         return nodes
@@ -287,6 +304,8 @@ class StatusScanner:
     ) -> EnvironmentComparison:
         """Compare current and expected environment states.
 
+        Dev nodes are reported separately (informational only, not sync errors).
+
         Args:
             current: Current environment state
             expected: Expected environment state
@@ -300,8 +319,33 @@ class StatusScanner:
         current_nodes = set(current.custom_nodes.keys())
         expected_nodes = set(expected.custom_nodes.keys())
 
-        comparison.missing_nodes = list(expected_nodes - current_nodes)
-        comparison.extra_nodes = list(current_nodes - expected_nodes)
+        # Identify disabled nodes (in both current and expected, but disabled on disk)
+        disabled_nodes = []
+        for name in current_nodes & expected_nodes:
+            if current.custom_nodes[name].disabled:
+                disabled_nodes.append(name)
+        comparison.disabled_nodes = disabled_nodes
+
+        # Compute basic missing/extra first
+        raw_missing_nodes = list(expected_nodes - current_nodes)
+        raw_extra_nodes = list(current_nodes - expected_nodes)
+
+        # Separate dev nodes from regular nodes for proper reporting
+        # Missing dev nodes go to dev_nodes_missing, not missing_nodes
+        for name in raw_missing_nodes[:]:  # Iterate copy to allow removal
+            if name in expected.custom_nodes and expected.custom_nodes[name].source == 'development':
+                comparison.dev_nodes_missing.append(name)
+                raw_missing_nodes.remove(name)
+
+        # Extra nodes with git repos go to dev_nodes_untracked, not extra_nodes
+        for name in raw_extra_nodes[:]:  # Iterate copy to allow removal
+            node_path = self._comfyui_path / 'custom_nodes' / name
+            if (node_path / '.git').exists():
+                comparison.dev_nodes_untracked.append(name)
+                raw_extra_nodes.remove(name)
+
+        comparison.missing_nodes = raw_missing_nodes
+        comparison.extra_nodes = raw_extra_nodes
 
         # Check version mismatches (skip development nodes)
         for name in current_nodes & expected_nodes:
@@ -322,16 +366,10 @@ class StatusScanner:
                 )
 
         # Detect potential dev node renames (simple heuristic)
-        if comparison.missing_nodes and comparison.extra_nodes:
-            missing_dev = any(
-                expected.custom_nodes[n].source == 'development'
-                for n in comparison.missing_nodes
-                if n in expected.custom_nodes
-            )
-            extra_git = any(
-                (self._comfyui_path / 'custom_nodes' / n / '.git').exists()
-                for n in comparison.extra_nodes
-            )
+        # Note: Now we check dev_nodes_missing instead of missing_nodes for dev nodes
+        if (comparison.missing_nodes or comparison.dev_nodes_missing) and (comparison.extra_nodes or comparison.dev_nodes_untracked):
+            missing_dev = bool(comparison.dev_nodes_missing)
+            extra_git = bool(comparison.dev_nodes_untracked)
             comparison.potential_dev_rename = missing_dev and extra_git
 
         # Package comparison is handled separately since it requires UV

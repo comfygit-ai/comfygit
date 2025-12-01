@@ -55,6 +55,7 @@ class EnvironmentComparison:
 
     missing_nodes: list[str] = field(default_factory=list)
     extra_nodes: list[str] = field(default_factory=list)
+    disabled_nodes: list[str] = field(default_factory=list)
     version_mismatches: list[dict] = field(
         default_factory=list
     )  # {name, expected, actual}
@@ -62,9 +63,16 @@ class EnvironmentComparison:
     package_sync_message: str = ""
     potential_dev_rename: bool = False
 
+    # Dev node status (informational only, not errors)
+    dev_nodes_untracked: list[str] = field(default_factory=list)  # Git repos in custom_nodes but not tracked
+    dev_nodes_missing: list[str] = field(default_factory=list)    # Tracked dev nodes not on filesystem
+
     @property
     def is_synced(self) -> bool:
-        """Check if environment is fully synced."""
+        """Check if environment is fully synced.
+
+        Note: Dev node discrepancies are informational only and don't affect sync status.
+        """
         return (
             not self.missing_nodes
             and not self.extra_nodes

@@ -6,10 +6,10 @@ repo_name: comfyhub-org/comfygit
 edit_uri: edit/main/docs/comfygit-docs/docs/
 
 nav:
-  - Home: index.md
+  - Introduction: index.md
   - Getting Started:
     - Installation: getting-started/installation.md
-    - Quickstart: getting-started/quickstart.md
+    - Features: getting-started/features.md
     - Core Concepts: getting-started/concepts.md
   - User Guide:
     - Workspaces: user-guide/workspaces.md

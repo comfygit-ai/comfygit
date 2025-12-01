@@ -123,12 +123,14 @@ For development nodes:
 Run 'cg status' to review changes
 ```
 
-!!! tip "When to update development nodes"
-    Run `cg node update <dev-node>` when you:
+!!! tip "Development nodes are self-managed"
+    Dev nodes are fully managed by you, the developer:
 
-    - Change `requirements.txt` in your dev node
-    - Want ComfyGit to sync dependencies to your environment
-    - See "Dev node updates available" in `cg status`
+    - **Dependencies**: Install manually with `uv pip install` or `pip install`
+    - **Git state**: Push/pull using standard git commands
+    - **Requirements.txt**: ComfyGit doesn't track or sync dev node requirements
+
+    ComfyGit only tracks the bare minimum (name, repository URL) to help teammates clone your dev nodes.
 
 ## Removing nodes
 
@@ -293,26 +295,16 @@ Environment: my-project ✓
   ✓ comfyui-impact-pack @ abc1234
   ✓ comfyui-controlnet-aux @ def6789
   ⚠ comfyui-old-node @ ghi0123 (update available)
-
-🔧 Dev node updates available:
-  • my-custom-node
 ```
 
 ### Status indicators
 
 - **✓ Green checkmark** - Node installed and up to date
 - **⚠ Warning** - Update available or issue detected
-- **Dev node updates** - Development node `requirements.txt` changed since last sync
 
-### Syncing development node changes
-
-When you see "Dev node updates available":
-
-```bash
-cg node update my-custom-node
-```
-
-This re-syncs the node's dependencies to your environment.
+!!! note "Dev nodes don't show update status"
+    Development nodes are self-managed by you. ComfyGit doesn't track their
+    requirements or suggest updates - you manage your own git state and dependencies.
 
 ## Node types explained
 

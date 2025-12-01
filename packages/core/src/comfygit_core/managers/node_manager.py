@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..constants import SYSTEM_CUSTOM_NODES
 from ..logging.logging_config import get_logger
 from ..managers.pyproject_manager import PyprojectManager
 from ..managers.uv_project_manager import UVProjectManager
@@ -22,7 +23,7 @@ from ..services.node_lookup_service import NodeLookupService
 from ..strategies.confirmation import AutoConfirmStrategy, ConfirmationStrategy
 from ..utils.conflict_parser import extract_conflicting_packages
 from ..utils.dependency_parser import parse_dependency_string
-from ..utils.git import is_github_url, normalize_github_url
+from ..utils.git import git_clone, is_github_url, normalize_github_url
 from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
@@ -230,7 +231,16 @@ class NodeManager:
             CDNodeNotFoundError: If node not found
             CDNodeConflictError: If node has dependency conflicts
             CDEnvironmentError: If node with same name already exists
+            ValueError: If trying to add a system node
         """
+        # Reject system nodes - they are managed at workspace level
+        base_name = identifier.split('@')[0] if '@' in identifier else identifier
+        if base_name in SYSTEM_CUSTOM_NODES:
+            raise ValueError(
+                f"'{base_name}' is a system node and cannot be tracked in pyproject.toml. "
+                f"System nodes are managed at workspace level."
+            )
+
         logger.info(f"Adding node: {identifier}")
 
         # Handle development nodes
@@ -480,7 +490,8 @@ class NodeManager:
             if found:
                 actual_identifier, removed_node = found
             else:
-                raise CDNodeNotFoundError(f"Node '{identifier}' not found in environment")
+                # Check if untracked node exists on filesystem
+                return self._remove_untracked_node(identifier)
 
         # At this point both must be set
         assert actual_identifier is not None
@@ -518,6 +529,9 @@ class NodeManager:
         if not removed:
             raise CDNodeNotFoundError(f"Node '{identifier}' not found in environment")
 
+        # Clean up workflow references to this node
+        self.pyproject.workflows.cleanup_node_references(actual_identifier, removed_node.name)
+
         # Clean up orphaned UV sources for registry/git nodes
         if not is_development:
             removed_sources = removed_node.dependency_sources or []
@@ -532,6 +546,52 @@ class NodeManager:
             identifier=actual_identifier,
             name=removed_node.name,
             source=removed_node.source,
+            filesystem_action=filesystem_action
+        )
+
+    def _remove_untracked_node(self, node_name: str) -> NodeRemovalResult:
+        """Remove an untracked node from filesystem only.
+
+        Called when remove_node() can't find a tracked node but filesystem has it.
+        Handles both regular directories and .disabled directories.
+
+        Args:
+            node_name: Name of the node directory
+
+        Returns:
+            NodeRemovalResult with details
+
+        Raises:
+            CDNodeNotFoundError: If node not found on filesystem either
+        """
+        node_path = self.custom_nodes_path / node_name
+        disabled_path = self.custom_nodes_path / f"{node_name}.disabled"
+
+        removed = False
+        filesystem_action = "none"
+
+        if node_path.exists() and node_path.is_dir():
+            shutil.rmtree(node_path)
+            removed = True
+            filesystem_action = "deleted"
+            logger.info(f"Removed untracked node directory: {node_name}")
+
+        if disabled_path.exists() and disabled_path.is_dir():
+            shutil.rmtree(disabled_path)
+            removed = True
+            filesystem_action = "deleted"
+            logger.info(f"Removed disabled node directory: {node_name}.disabled")
+
+        if not removed:
+            raise CDNodeNotFoundError(f"Node '{node_name}' not found in environment")
+
+        # Clean up any orphaned workflow references
+        self.pyproject.workflows.cleanup_node_references(node_name)
+
+        return NodeRemovalResult(
+            identifier=node_name,
+            name=node_name,
+            source="untracked",
             filesystem_action=filesystem_action
         )
 
@@ -572,11 +632,13 @@ class NodeManager:
         if remove_extra:
             # ComfyUI's built-in files that should not be removed
             COMFYUI_BUILTINS = {'example_node.py.example', 'websocket_image_save.py', '__pycache__'}
+            # Combine with system nodes that should never be removed
+            SKIP_DIRS = COMFYUI_BUILTINS | SYSTEM_CUSTOM_NODES
 
             # Remove ALL untracked nodes (user confirmed deletion in repair preview)
             for node_name in untracked:
-                # Skip ComfyUI built-in example files
-                if node_name in COMFYUI_BUILTINS:
+                # Skip ComfyUI built-ins and system nodes
+                if node_name in SKIP_DIRS:
                     continue
 
                 node_path = self.custom_nodes_path / node_name
@@ -588,10 +650,12 @@ class NodeManager:
                 logger.warning(f"Untracked node found: {node_name}")
                 logger.warning(f"  Run 'comfygit node add {node_name} --dev' to track it")
 
-        # Install missing registry/git nodes
+        # Install missing registry/git nodes (skip if .disabled version exists)
         nodes_to_install = [
             node_info for node_info in expected_nodes.values()
-            if node_info.source != 'development' and not (self.custom_nodes_path / node_info.name).exists()
+            if node_info.source != 'development'
+            and not (self.custom_nodes_path / node_info.name).exists()
+            and not (self.custom_nodes_path / f"{node_info.name}.disabled").exists()
         ]
 
         if callbacks and callbacks.on_batch_start and nodes_to_install:
@@ -626,45 +690,115 @@ class NodeManager:
         if callbacks and callbacks.on_batch_complete and nodes_to_install:
             callbacks.on_batch_complete(success_count, len(nodes_to_install))
 
+        # Handle missing dev nodes with repository (clone from git)
+        self._sync_dev_nodes_from_git(expected_nodes, existing_nodes, callbacks)
+
         logger.info("Finished syncing custom nodes")
+
+    def _sync_dev_nodes_from_git(self, expected_nodes: dict, existing_nodes: dict, callbacks=None):
+        """Clone missing dev nodes that have repository URLs.
+
+        Dev nodes with repository are cloned if missing locally.
+        Dev nodes without repository trigger a warning callback.
+        Dev nodes that already exist locally are skipped (local state is authoritative).
+        System nodes are always skipped - they're managed at workspace level.
+
+        Args:
+            expected_nodes: Dict of identifier -> NodeInfo from pyproject.toml
+            existing_nodes: Dict of node_name -> Path for nodes on filesystem
+            callbacks: Optional callbacks for progress feedback
+        """
+        for identifier, node_info in expected_nodes.items():
+            if node_info.source != 'development':
+                continue
+
+            # Skip system nodes - they're managed at workspace level
+            if node_info.name in SYSTEM_CUSTOM_NODES:
+                logger.debug(f"Skipping system node '{node_info.name}' in git sync")
+                continue
+
+            node_path = self.custom_nodes_path / node_info.name
+
+            # Skip if already exists locally (local state is authoritative)
+            if node_path.exists():
+                logger.debug(f"Dev node '{node_info.name}' exists locally, skipping")
+                continue
+
+            # No repository - can't clone, warn via callback
+            if not node_info.repository:
+                logger.warning(f"Dev node '{node_info.name}' missing and has no repository")
+                if callbacks and hasattr(callbacks, 'on_dev_node_missing_repository'):
+                    callbacks.on_dev_node_missing_repository(node_info.name)
+                continue
+
+            # Clone from repository
+            success = self._install_dev_node_from_git(node_info)
+            if success and callbacks and hasattr(callbacks, 'on_dev_node_cloned'):
+                callbacks.on_dev_node_cloned(node_info.name, node_info.repository)
+
+    def _install_dev_node_from_git(self, node_info: NodeInfo) -> bool:
+        """Clone dev node from git reference.
+
+        Args:
+            node_info: NodeInfo with repository and optional branch/pinned_commit
+
+        Returns:
+            True if successfully cloned, False otherwise
+        """
+        node_path = self.custom_nodes_path / node_info.name
+
+        # Determine ref: branch takes priority over pinned_commit
+        ref = node_info.branch or node_info.pinned_commit
+
+        logger.info(f"Cloning dev node '{node_info.name}' from {node_info.repository}")
+        if ref:
+            logger.info(f"  Using ref: {ref}")
+
+        try:
+            # Full clone (depth=0) for dev nodes since developers will push changes
+            git_clone(
+                url=node_info.repository,
+                target_path=node_path,
+                depth=0,
+                ref=ref
+            )
+            logger.info(f"Successfully cloned dev node: {node_info.name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to clone dev node '{node_info.name}': {e}")
+            return False
 
     def reconcile_nodes_for_rollback(self, old_nodes: dict[str, NodeInfo], new_nodes: dict[str, NodeInfo]):
         """Reconcile filesystem nodes after rollback with full context.
+
+        Dev nodes are SKIPPED entirely - ComfyGit never touches their filesystem state.
+        This ensures developer's local work is preserved during any git operation.
 
         Args:
             old_nodes: Nodes that were in pyproject before rollback
             new_nodes: Nodes that are in pyproject after rollback
         """
         import shutil
-        import time
 
         # Nodes that were removed (in old, not in new)
         removed_node_names = set(old_nodes.keys()) - set(new_nodes.keys())
 
         for identifier in removed_node_names:
             old_node_info = old_nodes[identifier]
+
+            # SKIP dev nodes entirely - never touch their filesystem state
+            if old_node_info.source == 'development':
+                logger.debug(f"Skipping dev node '{old_node_info.name}' during reconciliation")
+                continue
+
             node_path = self.custom_nodes_path / old_node_info.name
 
             if not node_path.exists():
                 continue  # Already gone
 
-            # We KNOW what type it was from old_nodes - no guessing needed!
-            if old_node_info.source == 'development':
-                # Dev node - preserve with .disabled suffix
-                disabled_path = self.custom_nodes_path / f"{old_node_info.name}.disabled"
-
-                # Handle existing .disabled directory (backup with timestamp)
-                if disabled_path.exists():
-                    backup_path = self.custom_nodes_path / f"{old_node_info.name}.{int(time.time())}.disabled"
-                    shutil.move(disabled_path, backup_path)
-                    logger.info(f"Backed up old .disabled to {backup_path.name}")
-
-                shutil.move(node_path, disabled_path)
-                logger.info(f"Disabled dev node '{old_node_info.name}' (rollback)")
-            else:
-                # Registry/git node - delete it (cached globally, can reinstall)
-                shutil.rmtree(node_path)
-                logger.info(f"Removed '{old_node_info.name}' (rollback, cached)")
+            # Registry/git node - delete it (cached globally, can reinstall)
+            shutil.rmtree(node_path)
+            logger.info(f"Removed '{old_node_info.name}' (rollback, cached)")
 
         # Nodes that were added (in new, not in old)
         added_node_identifiers = set(new_nodes.keys()) - set(old_nodes.keys())

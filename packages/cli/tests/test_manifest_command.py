@@ -125,7 +125,8 @@ class TestManifest:
         args = Namespace(
             target_env=None,
             pretty=False,
-            section='nonexistent.section'
+            section='nonexistent.section',
+            ide=None
         )
 
         with pytest.raises(SystemExit) as exc_info:
@@ -134,3 +135,54 @@ class TestManifest:
 
         # Should exit with error
         assert exc_info.value.code == 1
+
+    @patch('subprocess.run')
+    @patch('comfygit_cli.env_commands.get_workspace_or_exit')
+    def test_manifest_ide_opens_editor(self, mock_workspace, mock_run):
+        """Should open pyproject.toml in specified editor."""
+        from pathlib import Path
+
+        mock_env = MagicMock()
+        mock_workspace.return_value.get_active_environment.return_value = mock_env
+        mock_env.name = "test-env"
+        mock_env.pyproject.path = Path("/fake/path/.cec/pyproject.toml")
+
+        cmd = EnvironmentCommands()
+        args = Namespace(
+            target_env=None,
+            pretty=False,
+            section=None,
+            ide="code"
+        )
+
+        cmd.manifest(args)
+
+        # Should call subprocess.run with editor and path
+        mock_run.assert_called_once_with(["code", "/fake/path/.cec/pyproject.toml"])
+        # Should not load config (early return)
+        mock_env.pyproject.load.assert_not_called()
+
+    @patch('subprocess.run')
+    @patch.dict('os.environ', {'EDITOR': 'vim'})
+    @patch('comfygit_cli.env_commands.get_workspace_or_exit')
+    def test_manifest_ide_auto_uses_editor_env(self, mock_workspace, mock_run):
+        """Should use $EDITOR when --ide is given without argument."""
+        from pathlib import Path
+
+        mock_env = MagicMock()
+        mock_workspace.return_value.get_active_environment.return_value = mock_env
+        mock_env.name = "test-env"
+        mock_env.pyproject.path = Path("/fake/path/.cec/pyproject.toml")
+
+        cmd = EnvironmentCommands()
+        args = Namespace(
+            target_env=None,
+            pretty=False,
+            section=None,
+            ide="auto"
+        )
+
+        cmd.manifest(args)
+
+        # Should use vim from $EDITOR
+        mock_run.assert_called_once_with(["vim", "/fake/path/.cec/pyproject.toml"])

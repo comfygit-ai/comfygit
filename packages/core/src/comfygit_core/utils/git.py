@@ -720,6 +720,7 @@ def git_merge(
     ref: str,
     ff_only: bool = False,
     timeout: int = 30,
+    strategy_option: str | None = None,
 ) -> str:
     """Merge a ref into current branch.
 
@@ -728,6 +729,7 @@ def git_merge(
         ref: Ref to merge (e.g., "origin/main")
         ff_only: Only allow fast-forward merges (default: False)
         timeout: Command timeout in seconds
+        strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
     Returns:
         Merge output
@@ -739,6 +741,8 @@ def git_merge(
     cmd = ["merge"]
     if ff_only:
         cmd.append("--ff-only")
+    if strategy_option:
+        cmd.extend(["-X", strategy_option])
     cmd.append(ref)
 
     try:
@@ -783,6 +787,7 @@ def git_pull(
     branch: str | None = None,
     ff_only: bool = False,
     timeout: int = 30,
+    strategy_option: str | None = None,
 ) -> dict:
     """Fetch and merge from remote (pull operation).
 
@@ -792,6 +797,7 @@ def git_pull(
         branch: Branch name (default: auto-detect current branch)
         ff_only: Only allow fast-forward merges (default: False)
         timeout: Command timeout in seconds
+        strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
     Returns:
         Dict with keys: 'fetch_output', 'merge_output', 'branch'
@@ -809,7 +815,7 @@ def git_pull(
 
     # Then merge
     merge_ref = f"{remote}/{branch}"
-    merge_output = git_merge(repo_path, merge_ref, ff_only, timeout)
+    merge_output = git_merge(repo_path, merge_ref, ff_only, timeout, strategy_option)
 
     return {
         'fetch_output': fetch_output,
@@ -956,6 +962,59 @@ def git_remote_remove(repo_path: Path, name: str) -> None:
         raise ValueError(f"Remote '{name}' not found")
 
     _git(["remote", "remove", name], repo_path)
+
+
+def git_remote_set_url(repo_path: Path, name: str, url: str, push: bool = False) -> None:
+    """Set URL for a git remote.
+
+    Args:
+        repo_path: Path to git repository
+        name: Remote name
+        url: New URL
+        push: If True, update push URL; otherwise update fetch URL
+
+    Raises:
+        ValueError: If remote doesn't exist
+        OSError: If update fails
+    """
+    # Check if remote exists
+    existing_url = git_remote_get_url(repo_path, name)
+    if not existing_url:
+        raise ValueError(f"Remote '{name}' not found")
+
+    cmd = ["remote", "set-url"]
+    if push:
+        cmd.append("--push")
+    cmd.extend([name, url])
+
+    _git(cmd, repo_path)
+
+
+def git_rev_list_count(repo_path: Path, left_ref: str, right_ref: str) -> tuple[int, int]:
+    """Count commits ahead and behind between two refs.
+
+    Uses symmetric difference (left...right) to count commits unique to each ref.
+
+    Args:
+        repo_path: Path to git repository
+        left_ref: Left reference (e.g., "origin/main")
+        right_ref: Right reference (e.g., "HEAD")
+
+    Returns:
+        Tuple of (left_only, right_only) counts - commits unique to each side
+    """
+    result = _git(
+        ["rev-list", "--left-right", "--count", f"{left_ref}...{right_ref}"],
+        repo_path,
+        check=False
+    )
+    if result.returncode != 0:
+        return (0, 0)
+
+    parts = result.stdout.strip().split('\t')
+    if len(parts) == 2:
+        return (int(parts[0]), int(parts[1]))
+    return (0, 0)
 
 
 def git_remote_list(repo_path: Path) -> list[tuple[str, str, str]]:
@@ -1105,13 +1164,19 @@ def git_get_current_branch(repo_path: Path) -> str | None:
     return branch
 
 
-def git_merge_branch(repo_path: Path, branch: str, message: str | None = None) -> None:
+def git_merge_branch(
+    repo_path: Path,
+    branch: str,
+    message: str | None = None,
+    strategy_option: str | None = None,
+) -> None:
     """Merge branch into current branch (wrapper around git_merge with message support).
 
     Args:
         repo_path: Path to git repository
         branch: Branch name to merge
         message: Optional merge commit message
+        strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
 
     Raises:
         OSError: If branch doesn't exist or merge fails (conflicts, etc.)
@@ -1120,6 +1185,8 @@ def git_merge_branch(repo_path: Path, branch: str, message: str | None = None) -
     cmd = ["merge", branch]
     if message:
         cmd.extend(["-m", message])
+    if strategy_option:
+        cmd.extend(["-X", strategy_option])
 
     _git(
         cmd,
