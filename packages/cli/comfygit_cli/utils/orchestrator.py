@@ -3,6 +3,7 @@
 import json
 import os
 import signal
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -20,6 +21,26 @@ def read_orchestrator_pid(metadata_dir: Path) -> Optional[int]:
         return None
 
 
+def _is_process_running(pid: int) -> bool:
+    """Check if a process is running (cross-platform)."""
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        SYNCHRONIZE = 0x00100000
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = kernel32.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return False
+    else:
+        try:
+            os.kill(pid, 0)  # Signal 0 checks if process exists
+            return True
+        except ProcessLookupError:
+            return False
+
+
 def is_orchestrator_running(metadata_dir: Path) -> tuple[bool, Optional[int]]:
     """Check if orchestrator is running.
 
@@ -30,10 +51,9 @@ def is_orchestrator_running(metadata_dir: Path) -> tuple[bool, Optional[int]]:
     if not pid:
         return (False, None)
 
-    try:
-        os.kill(pid, 0)  # Signal 0 checks if process exists
+    if _is_process_running(pid):
         return (True, pid)
-    except ProcessLookupError:
+    else:
         return (False, pid)  # PID file exists but process is dead
 
 
@@ -69,36 +89,65 @@ def safe_write_command(metadata_dir: Path, command: dict) -> None:
             temp_file.unlink()
 
 
+def _kill_process(pid: int, force: bool = False) -> bool:
+    """Kill a process (cross-platform).
+
+    Args:
+        pid: Process ID to kill
+        force: If True, force kill immediately
+
+    Returns:
+        True if kill signal sent, False if process not found
+    """
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_TERMINATE = 0x0001
+        handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+        if handle:
+            result = kernel32.TerminateProcess(handle, 1)
+            kernel32.CloseHandle(handle)
+            return bool(result)
+        return False
+    else:
+        try:
+            if force:
+                os.kill(pid, signal.SIGKILL)
+            else:
+                os.kill(pid, signal.SIGTERM)
+            return True
+        except ProcessLookupError:
+            return False
+
+
 def kill_orchestrator_process(pid: int, force: bool = False) -> bool:
     """Kill orchestrator process.
 
     Args:
         pid: Process ID to kill
-        force: If True, send SIGKILL immediately
+        force: If True, kill immediately without graceful shutdown
 
     Returns:
         True if process was killed, False if already dead
     """
-    try:
-        if force:
-            os.kill(pid, signal.SIGKILL)
-        else:
-            os.kill(pid, signal.SIGTERM)
-
-            # Wait for graceful shutdown (3s)
-            for _ in range(30):
-                time.sleep(0.1)
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    return True  # Process died
-
-            # Still alive, force kill
-            os.kill(pid, signal.SIGKILL)
-
-        return True
-    except ProcessLookupError:
+    if not _is_process_running(pid):
         return False  # Already dead
+
+    if force:
+        return _kill_process(pid, force=True)
+
+    # Try graceful shutdown first
+    _kill_process(pid, force=False)
+
+    # Wait for graceful shutdown (3s)
+    for _ in range(30):
+        time.sleep(0.1)
+        if not _is_process_running(pid):
+            return True  # Process died
+
+    # Still alive, force kill
+    _kill_process(pid, force=True)
+    return True
 
 
 def cleanup_orchestrator_state(metadata_dir: Path, preserve_config: bool = True) -> list[str]:
