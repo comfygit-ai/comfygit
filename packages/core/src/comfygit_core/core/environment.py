@@ -1667,6 +1667,9 @@ class Environment:
         if self.comfyui_path.exists():
             raise ValueError("Environment already has ComfyUI - cannot finalize import")
 
+        # Strip local filesystem path sources (editable dev installs from export machine)
+        self._strip_local_path_sources()
+
         # Phase 1: Clone or restore ComfyUI from cache
         comfyui_cache = ComfyUICacheManager(cache_base_path=self.workspace_paths.cache)
 
@@ -2000,6 +2003,38 @@ class Environment:
             logger.info("Committed import changes")
 
         logger.info("Import finalization completed successfully")
+
+    def _strip_local_path_sources(self) -> None:
+        """Remove uv sources with local filesystem paths (editable dev installs).
+
+        When environments are exported from dev machines, they may contain
+        [tool.uv.sources.package-name] entries with local paths like:
+            path = "/home/dev/projects/my-package"
+            editable = true
+
+        These paths don't exist on other machines and cause sync failures.
+        This method removes any source entries that use local paths.
+        """
+        config = self.pyproject.load()
+        sources = config.get("tool", {}).get("uv", {}).get("sources", {})
+
+        if not sources:
+            return
+
+        # Find sources with local paths (not URLs)
+        to_remove = []
+        for pkg_name, source_config in sources.items():
+            if isinstance(source_config, dict) and "path" in source_config:
+                path_value = source_config["path"]
+                # Local paths don't start with http:// or https://
+                if isinstance(path_value, str) and not path_value.startswith(("http://", "https://")):
+                    to_remove.append(pkg_name)
+                    logger.info(f"Stripping local path source: {pkg_name} -> {path_value}")
+
+        if to_remove:
+            for pkg_name in to_remove:
+                del sources[pkg_name]
+            self.pyproject.save(config)
 
     def _cleanup_uvlock_for_git_operation(self) -> None:
         """Remove uv.lock if it would block a git operation.
