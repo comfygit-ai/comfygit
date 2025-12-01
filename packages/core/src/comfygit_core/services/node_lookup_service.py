@@ -21,6 +21,42 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _is_valid_git_ref(version: str | None) -> bool:
+    """Check if a version string is a valid git ref (tag, branch, or commit hash).
+
+    Semver versions like "1.11.1" are NOT valid git refs unless prefixed with 'v'.
+    Git refs include:
+    - Tags: v1.0.0, release-1.0
+    - Branches: main, master, dev, feature/foo
+    - Commit hashes: 40 hex characters
+
+    Args:
+        version: Version string to check
+
+    Returns:
+        True if version looks like a valid git ref, False otherwise
+    """
+    if not version:
+        return False
+
+    # Commit hash: 40 hex characters
+    if len(version) == 40 and all(c in '0123456789abcdef' for c in version.lower()):
+        return True
+
+    # Git-style tag: starts with 'v' followed by number
+    if version.startswith('v') and len(version) > 1 and version[1].isdigit():
+        return True
+
+    # Branch names or other refs: contain letters but don't look like pure semver
+    # Pure semver: digits and dots only (e.g., "1.11.1")
+    is_pure_semver = all(c.isdigit() or c == '.' for c in version)
+    if is_pure_semver:
+        return False
+
+    # Everything else (branch names like "main", "dev", "feature/foo") is valid
+    return True
+
+
 class NodeLookupService:
     """Pure stateless service for finding nodes and analyzing their requirements.
 
@@ -102,7 +138,15 @@ class NodeLookupService:
             package = self.node_mappings_repository.get_package(base_identifier)
             if package:
                 logger.debug(f"Found '{base_identifier}' in local cache")
-                return NodeInfo.from_global_package(package, version=requested_version)
+                node_info = NodeInfo.from_global_package(package, version=requested_version)
+                # Check if we got a valid download_url for the requested version
+                # If not (version not in cache or missing download_url), fall back to API
+                if node_info.download_url:
+                    return node_info
+                logger.debug(
+                    f"Cache has '{base_identifier}' but missing download_url for version "
+                    f"'{requested_version}', falling back to API..."
+                )
             else:
                 logger.debug(f"'{base_identifier}' not in local cache, trying API...")
 
@@ -204,7 +248,13 @@ class NodeLookupService:
                             )
                             # Update source to git for this installation
                             node_info.source = "git"
-                            ref = node_info.version if node_info.version else None
+                            # Only use version as ref if it's a valid git ref (not pure semver)
+                            ref = node_info.version if _is_valid_git_ref(node_info.version) else None
+                            if node_info.version and not ref:
+                                logger.info(
+                                    f"Version '{node_info.version}' is not a valid git ref, "
+                                    f"cloning default branch instead"
+                                )
                             git_clone(node_info.repository, temp_path, depth=1, ref=ref, timeout=30)
                         else:
                             logger.error(
@@ -218,7 +268,8 @@ class NodeLookupService:
                     if not node_info.repository:
                         logger.error(f"No repository URL for git node '{node_info.name}'")
                         return None
-                    ref = node_info.version if node_info.version else None
+                    # Only use version as ref if it's a valid git ref
+                    ref = node_info.version if _is_valid_git_ref(node_info.version) else None
                     git_clone(node_info.repository, temp_path, depth=1, ref=ref, timeout=30)
                 else:
                     logger.error(f"Unsupported source: '{node_info.source}'")
