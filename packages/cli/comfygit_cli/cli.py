@@ -186,6 +186,11 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     import_parser.add_argument("--use", action="store_true", help="Set imported environment as active")
+    import_parser.add_argument(
+        "--models",
+        choices=["all", "required", "skip"],
+        help="Model download strategy: all (default with --yes), required only, or skip"
+    )
     import_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts, use defaults for workspace initialization")
     import_parser.set_defaults(func=global_cmds.import_env)
 

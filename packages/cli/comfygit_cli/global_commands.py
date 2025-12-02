@@ -531,15 +531,19 @@ class GlobalCommands:
                 print("✗ Environment name required")
                 sys.exit(1)
 
-        # Ask for model download strategy
-        print("\nModel download strategy:")
-        print("  1. all      - Download all models with sources")
-        print("  2. required - Download only required models")
-        print("  3. skip     - Skip all downloads (can resolve later)")
-        strategy_choice = input("Choice (1-3) [1]: ").strip() or "1"
-
-        strategy_map = {"1": "all", "2": "required", "3": "skip"}
-        strategy = strategy_map.get(strategy_choice, "all")
+        # Determine model download strategy
+        if hasattr(args, 'models') and args.models:
+            strategy = args.models
+        elif hasattr(args, 'yes') and args.yes:
+            strategy = "all"  # Default to 'all' in non-interactive mode
+        else:
+            print("\nModel download strategy:")
+            print("  1. all      - Download all models with sources")
+            print("  2. required - Download only required models")
+            print("  3. skip     - Skip all downloads (can resolve later)")
+            strategy_choice = input("Choice (1-3) [1]: ").strip() or "1"
+            strategy_map = {"1": "all", "2": "required", "3": "skip"}
+            strategy = strategy_map.get(strategy_choice, "all")
 
         # CLI callbacks for progress updates
         class CLIImportCallbacks(ImportCallbacks):
