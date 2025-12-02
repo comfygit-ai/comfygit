@@ -4,21 +4,33 @@ from dataclasses import dataclass
 class APICredentials:
     """Secure storage for external API credentials."""
     civitai_token: str | None = None
+    runpod_api_key: str | None = None
 
     @classmethod
     def from_dict(cls, data):
         if not data:
             return None
-        return cls(civitai_token=data.get("civitai_token"))
+        return cls(
+            civitai_token=data.get("civitai_token"),
+            runpod_api_key=data.get("runpod_api_key"),
+        )
 
     def to_dict(self):
-        return {"civitai_token": self.civitai_token} if self.civitai_token else {}
+        result = {}
+        if self.civitai_token:
+            result["civitai_token"] = self.civitai_token
+        if self.runpod_api_key:
+            result["runpod_api_key"] = self.runpod_api_key
+        return result
 
     def __repr__(self):
-        """Obfuscate token in logs."""
+        """Obfuscate tokens in logs."""
+        parts = []
         if self.civitai_token:
-            return f"APICredentials(civitai_token='***{self.civitai_token[-4:]}')"
-        return "APICredentials(civitai_token=None)"
+            parts.append(f"civitai_token='***{self.civitai_token[-4:]}'")
+        if self.runpod_api_key:
+            parts.append(f"runpod_api_key='***{self.runpod_api_key[-4:]}'")
+        return f"APICredentials({', '.join(parts) if parts else ''})"
 
 @dataclass
 class ModelDirectory:
