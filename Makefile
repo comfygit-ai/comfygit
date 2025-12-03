@@ -154,18 +154,18 @@ show-versions:
 check-versions:
 	@python3 dev/scripts/check-versions.py
 
-# Bump version for coordinated release (patch or minor)
+# Bump version for coordinated release (lockstep versioning)
 bump-version:
 	@if [ -z "$(VERSION)" ]; then \
 		echo "Usage: make bump-version VERSION=0.1.0"; \
 		exit 1; \
 	fi
-	@echo "Bumping all packages to version $(VERSION)..."
+	@echo "Bumping all packages to version $(VERSION) (lockstep)..."
 	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION)"/' packages/core/pyproject.toml
 	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION)"/' packages/cli/pyproject.toml
-	@sed -i 's/comfygit-core>=[0-9]\+\.[0-9]\+\.[0-9]\+/comfygit-core>=$(VERSION)/' packages/cli/pyproject.toml
+	@sed -i 's/comfygit-core==[0-9]\+\.[0-9]\+\.[0-9]\+/comfygit-core==$(VERSION)/' packages/cli/pyproject.toml
 	@echo "✓ Updated all packages to $(VERSION)"
-	@echo "✓ Updated CLI dependency: comfygit-core>=$(VERSION)"
+	@echo "✓ Updated CLI dependency: comfygit-core==$(VERSION)"
 	@make show-versions
 
 # Bump major version for all packages

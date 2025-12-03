@@ -1,0 +1,228 @@
+name: Publish Packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "packages/core/pyproject.toml"
+      - "packages/cli/pyproject.toml"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  check-versions:
+    name: Validate & Check PyPI
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      should_publish: ${{ steps.check_pypi.outputs.should_publish }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract and validate versions
+        id: extract
+        run: |
+          CORE_VERSION=$(grep -m1 '^version' packages/core/pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
+          CLI_VERSION=$(grep -m1 '^version' packages/cli/pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
+
+          echo "Core version: $CORE_VERSION"
+          echo "CLI version: $CLI_VERSION"
+
+          if [ "$CORE_VERSION" != "$CLI_VERSION" ]; then
+            echo "::error::Version mismatch! core=$CORE_VERSION cli=$CLI_VERSION"
+            echo "Lockstep versioning requires both packages to have the same version."
+            echo "Run: make bump-version VERSION=X.Y.Z"
+            exit 1
+          fi
+
+          echo "version=$CORE_VERSION" >> $GITHUB_OUTPUT
+          echo "✓ Versions match: $CORE_VERSION"
+
+      - name: Check if version exists on PyPI
+        id: check_pypi
+        run: |
+          VERSION="${{ steps.extract.outputs.version }}"
+
+          # Check if comfygit-core version exists on PyPI
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/comfygit-core/$VERSION/json")
+
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "Version $VERSION already exists on PyPI, skipping publish"
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          else
+            echo "Version $VERSION not found on PyPI, will publish"
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+          fi
+
+  publish-core:
+    name: Publish Core to PyPI
+    needs: check-versions
+    if: needs.check-versions.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build comfygit-core
+        run: uv build --package comfygit-core --no-sources
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing automatic
+
+  wait-for-pypi:
+    name: Wait for PyPI Availability
+    needs: [check-versions, publish-core]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for comfygit-core on PyPI
+        run: |
+          VERSION="${{ needs.check-versions.outputs.version }}"
+          MAX_ATTEMPTS=20
+          SLEEP_SECONDS=15
+
+          echo "Waiting for comfygit-core $VERSION to be available on PyPI..."
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/comfygit-core/$VERSION/json")
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "✓ comfygit-core $VERSION is now available on PyPI"
+              exit 0
+            fi
+
+            echo "Attempt $i/$MAX_ATTEMPTS: Not yet available (HTTP $HTTP_STATUS), waiting ${SLEEP_SECONDS}s..."
+            sleep $SLEEP_SECONDS
+          done
+
+          echo "::error::Timeout waiting for comfygit-core $VERSION on PyPI after $((MAX_ATTEMPTS * SLEEP_SECONDS))s"
+          exit 1
+
+  publish-cli:
+    name: Publish CLI to PyPI
+    needs: [check-versions, wait-for-pypi]
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build comfygit (CLI)
+        run: uv build --package comfygit --no-sources
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing automatic
+
+  create-release:
+    name: Create GitHub Release
+    needs: [check-versions, publish-core, publish-cli]
+    if: always() && needs.publish-core.result == 'success' && needs.publish-cli.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: changelog
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          VERSION="v${{ needs.check-versions.outputs.version }}"
+
+          # Find the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found, generating changelog from recent commits"
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges | head -50)
+          else
+            echo "Generating changelog since $PREV_TAG"
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          fi
+
+          # Generate AI summary if API key is available
+          AI_SUMMARY=""
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            echo "Generating AI summary with Claude Haiku..."
+
+            # Escape commits for JSON
+            COMMITS_ESCAPED=$(echo "$COMMITS" | jq -Rs .)
+
+            # Call Anthropic API
+            RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
+              -H "Content-Type: application/json" \
+              -H "x-api-key: $ANTHROPIC_API_KEY" \
+              -H "anthropic-version: 2023-06-01" \
+              -d "{
+                \"model\": \"claude-haiku-4-20250514\",
+                \"max_tokens\": 300,
+                \"messages\": [{
+                  \"role\": \"user\",
+                  \"content\": \"You are writing release notes for ComfyGit, a git-based environment manager for ComfyUI. This release includes both comfygit-core (the library) and comfygit (the CLI). Given these git commits, write a brief 2-3 sentence summary of the key changes in this release. Be concise and focus on user-facing improvements. Do not use bullet points, just prose. Commits:\\n${COMMITS_ESCAPED}\"
+                }]
+              }" 2>/dev/null)
+
+            # Extract the summary from response
+            AI_SUMMARY=$(echo "$RESPONSE" | jq -r '.content[0].text // empty' 2>/dev/null)
+
+            if [ -n "$AI_SUMMARY" ]; then
+              echo "AI summary generated successfully"
+            else
+              echo "Failed to generate AI summary, continuing without it"
+            fi
+          else
+            echo "No ANTHROPIC_API_KEY found, skipping AI summary"
+          fi
+
+          # Build changelog body
+          {
+            echo "## Packages"
+            echo ""
+            echo "- \`comfygit-core==${{ needs.check-versions.outputs.version }}\`"
+            echo "- \`comfygit==${{ needs.check-versions.outputs.version }}\`"
+            echo ""
+            if [ -n "$AI_SUMMARY" ]; then
+              echo "## Summary"
+              echo ""
+              echo "$AI_SUMMARY"
+              echo ""
+            fi
+            echo "## What's Changed"
+            echo ""
+            echo "$COMMITS"
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG:-initial}...${VERSION}"
+          } > changelog.md
+
+          cat changelog.md
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="v${{ needs.check-versions.outputs.version }}"
+
+          # Check if release already exists
+          if gh release view "$VERSION" &>/dev/null; then
+            echo "Release $VERSION already exists, skipping"
+            exit 0
+          fi
+
+          gh release create "$VERSION" \
+            --title "Release $VERSION" \
+            --notes-file changelog.md \
+            --latest

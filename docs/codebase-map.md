@@ -41,13 +41,12 @@ Command-line interface for ComfyGit users. Provides `comfygit` and `cfd` entry p
 
 ## Version Management
 
-All packages must maintain the same major version. Use Makefile commands:
+**Lockstep versioning**: Both packages always share the exact same version number. Use Makefile commands:
 - `make show-versions` - Display all package versions
-- `make check-versions` - Validate version compatibility
-- `make bump-major VERSION=X` - Bump all packages together
-- `make bump-package PACKAGE=name VERSION=X.Y.Z` - Update individual package
+- `make check-versions` - Validate versions match (lockstep)
+- `make bump-version VERSION=X.Y.Z` - Bump all packages to new version
 
-Current workspace version: 1.0.0 (all packages aligned to major version 1.x.x)
+Publishing is automated via `.github/workflows/publish.yml` on push to main.
 
 ## Development Workflow
 
@@ -85,6 +84,6 @@ comfygit/
 
 - **Workspace-based**: All packages share dependencies through uv workspaces
 - **Library-first**: Core package is decoupled from presentation concerns
-- **Version-locked**: Upper bounds in dependencies prevent major version conflicts
+- **Lockstep versioning**: CLI pins exact core version; both always release together
 - **Single developer**: MVP-focused with simple, maintainable code philosophy
 - **Pre-customer**: Backward compatibility avoided in favor of clean refactoring

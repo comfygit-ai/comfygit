@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Check version compatibility across workspace packages."""
+"""Check version compatibility across workspace packages (lockstep versioning)."""
 
 import sys
 from pathlib import Path
 import tomllib
+
 
 def get_version(pyproject_path):
     """Extract version from pyproject.toml."""
@@ -11,13 +12,9 @@ def get_version(pyproject_path):
         data = tomllib.load(f)
         return data["project"]["version"]
 
-def parse_version(version):
-    """Parse version string into (major, minor, patch)."""
-    parts = version.split(".")
-    return tuple(int(p) for p in parts)
 
 def check_compatibility():
-    """Check if all packages have compatible versions."""
+    """Check if all packages have identical versions (lockstep)."""
     root = Path(__file__).parent.parent.parent
 
     packages = {
@@ -31,19 +28,18 @@ def check_compatibility():
             versions[name] = get_version(path)
             print(f"{name:10} {versions[name]}")
 
-    # Check major versions
-    major_versions = set()
-    for name, version in versions.items():
-        major, _, _ = parse_version(version)
-        major_versions.add(major)
-    
-    if len(major_versions) > 1:
-        print("\n⚠️  WARNING: Packages have different major versions!")
-        print("This may cause compatibility issues.")
+    # Lockstep: all versions must be exactly equal
+    unique_versions = set(versions.values())
+
+    if len(unique_versions) > 1:
+        print("\n❌ ERROR: Version mismatch detected!")
+        print("Lockstep versioning requires all packages to have the same version.")
+        print("Run: make bump-version VERSION=X.Y.Z")
         return False
-    
-    print("\n✅ All packages have compatible versions (same major version)")
+
+    print(f"\n✅ All packages at version {list(unique_versions)[0]} (lockstep)")
     return True
+
 
 if __name__ == "__main__":
     if not check_compatibility():
