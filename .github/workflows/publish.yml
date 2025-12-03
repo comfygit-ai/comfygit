@@ -159,22 +159,26 @@ jobs:
           if [ -n "$ANTHROPIC_API_KEY" ]; then
             echo "Generating AI summary with Claude Haiku..."
 
-            # Escape commits for JSON
-            COMMITS_ESCAPED=$(echo "$COMMITS" | jq -Rs .)
+            # Build the prompt
+            PROMPT="You are writing release notes for ComfyGit, a git-based environment manager for ComfyUI. This release includes both comfygit-core (the library) and comfygit (the CLI). Given these git commits, write a brief 2-3 sentence summary of the key changes in this release. Be concise and focus on user-facing improvements. Do not use bullet points, just prose. Commits:
+
+            $COMMITS"
+
+            # Build JSON payload using jq to handle escaping properly
+            JSON_PAYLOAD=$(jq -n \
+              --arg prompt "$PROMPT" \
+              '{
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 300,
+                messages: [{role: "user", content: $prompt}]
+              }')
 
             # Call Anthropic API
             RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
               -H "Content-Type: application/json" \
               -H "x-api-key: $ANTHROPIC_API_KEY" \
               -H "anthropic-version: 2023-06-01" \
-              -d "{
-                \"model\": \"claude-haiku-4-20250514\",
-                \"max_tokens\": 300,
-                \"messages\": [{
-                  \"role\": \"user\",
-                  \"content\": \"You are writing release notes for ComfyGit, a git-based environment manager for ComfyUI. This release includes both comfygit-core (the library) and comfygit (the CLI). Given these git commits, write a brief 2-3 sentence summary of the key changes in this release. Be concise and focus on user-facing improvements. Do not use bullet points, just prose. Commits:\\n${COMMITS_ESCAPED}\"
-                }]
-              }" 2>/dev/null)
+              -d "$JSON_PAYLOAD" 2>/dev/null)
 
             # Extract the summary from response
             AI_SUMMARY=$(echo "$RESPONSE" | jq -r '.content[0].text // empty' 2>/dev/null)
