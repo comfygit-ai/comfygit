@@ -9,39 +9,46 @@ ComfyGit is a monorepo workspace using uv for Python package management. It prov
 
 ## Version Management Strategy
 
-### Example Current Version Status
-- **Workspace Root**: 0.5.0
-- **comfygit-core**: 0.2.2
-- **comfygit-cli**: 0.3.3
+### Lockstep Versioning
+Both packages (comfygit-core and comfygit) **always share the same version number**. This is enforced because:
+- CLI is tightly coupled to core's types, models, and protocols
+- Simplifies user mental model ("I'm on version 0.3.2")
+- Eliminates version mismatch issues
+- CLI depends on exact core version: `comfygit-core==X.Y.Z`
 
-### Version Policy
-- **Major version (X.0.0)**: All packages move together for breaking changes
-- **Minor version (0.X.0)**: Independent feature additions per package  
-- **Patch version (0.0.X)**: Independent bug fixes per package
+### Current Version
+Both packages should always be at the same version. Check with:
+```bash
+make show-versions
+```
 
 ### Version Management Commands
-Available via Makefile:
-
 ```bash
 # Show all package versions
 make show-versions
 
-# Check version compatibility across packages
+# Bump ALL packages to new version (the standard way to release)
+make bump-version VERSION=0.4.0
+
+# Check versions match (used by CI)
 make check-versions
-
-# Bump major version for all packages (use when making breaking changes)
-make bump-major VERSION=1
-
-# Bump individual package version
-make bump-package PACKAGE=core VERSION=0.2.3
 ```
 
-### Dependency Upper Bounds
-Packages use upper bounds to prevent major version incompatibilities:
-- `packages/cli/pyproject.toml`: `comfygit-core>=0.2.2,<1.0.0`
+### Publishing (Automated)
+Publishing is handled by `.github/workflows/publish.yml`:
+1. **Triggers**: Push to main with pyproject.toml changes, or manual dispatch
+2. **Validates**: Ensures core and CLI versions match (fails fast if not)
+3. **Skips**: If version already exists on PyPI
+4. **Publishes**: Core first → waits for PyPI availability → CLI
+5. **Releases**: Creates GitHub release with AI-generated changelog
 
-### Version Compatibility Check
-The `scripts/check-versions.py` script validates that all packages share the same major version. Run via `make check-versions` before releases.
+To release a new version:
+```bash
+make bump-version VERSION=0.4.0
+git add -A && git commit -m "Bump version to 0.4.0"
+git push origin main
+# Workflow handles the rest automatically
+```
 
 ## Development Commands
 
@@ -64,17 +71,17 @@ make lint
 ```
 
 ### Version Management Workflow
-1. Use `make check-versions` before any releases
-2. For breaking changes: `make bump-major VERSION=1` 
-3. For individual updates: `make bump-package PACKAGE=name VERSION=x.y.z`
-4. Always run tests after version changes
-5. Update dependency constraints when bumping major versions
+1. Make your changes across core and/or CLI
+2. Run tests: `make test`
+3. Bump version: `make bump-version VERSION=X.Y.Z`
+4. Commit and push to main
+5. GitHub Actions handles publishing and release creation
 
 ## Important Notes
-- All packages must maintain the same major version for compatibility
-- Upper bounds prevent accidental major version conflicts
-- Use the provided scripts rather than manual version editing
-- Version compatibility is automatically validated by the check script
+- Both packages must always have the same version (lockstep)
+- Never manually edit version numbers - use `make bump-version`
+- The publish workflow validates version match and skips if already published
+- GitHub releases include AI-generated summaries (requires ANTHROPIC_API_KEY secret)
 
 ## General
 Don't make any implementation overly complex. This is a one-person dev MVP project.
