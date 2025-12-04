@@ -1,0 +1,195 @@
+"""Worker CLI command handlers.
+
+Commands for setting up and managing the worker server on GPU machines.
+"""
+
+import argparse
+import asyncio
+import json
+import secrets
+from pathlib import Path
+
+WORKER_CONFIG_PATH = Path.home() / ".config" / "comfygit" / "deploy" / "worker.json"
+
+
+def generate_api_key() -> str:
+    """Generate a new worker API key."""
+    return f"cg_wk_{secrets.token_hex(16)}"
+
+
+def load_worker_config() -> dict | None:
+    """Load worker config from disk."""
+    if not WORKER_CONFIG_PATH.exists():
+        return None
+    try:
+        return json.loads(WORKER_CONFIG_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def save_worker_config(config: dict) -> None:
+    """Save worker config to disk."""
+    WORKER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    WORKER_CONFIG_PATH.write_text(json.dumps(config, indent=2))
+
+
+def is_worker_running() -> bool:
+    """Check if worker server is running."""
+    # Simple check - look for PID file or try to connect
+    pid_file = WORKER_CONFIG_PATH.parent / "worker.pid"
+    if not pid_file.exists():
+        return False
+
+    try:
+        import os
+        import signal
+
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)  # Check if process exists
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def handle_setup(args: argparse.Namespace) -> int:
+    """Handle 'worker setup' command."""
+    workspace = args.workspace or str(Path.home() / "comfygit")
+    api_key = args.api_key or generate_api_key()
+
+    config = {
+        "version": "1",
+        "api_key": api_key,
+        "workspace_path": workspace,
+        "default_mode": "docker",
+        "server_port": 9090,
+        "instance_port_range": {"start": 8188, "end": 8197},
+    }
+
+    save_worker_config(config)
+
+    print("Worker setup complete!")
+    print(f"  Workspace: {workspace}")
+    print(f"  API Key: {api_key}")
+    print(f"  Config: {WORKER_CONFIG_PATH}")
+    print()
+    print("To start the worker server:")
+    print("  cg-deploy worker up")
+
+    return 0
+
+
+def handle_up(args: argparse.Namespace) -> int:
+    """Handle 'worker up' command."""
+    config = load_worker_config()
+    if not config:
+        print("Worker not configured. Run 'cg-deploy worker setup' first.")
+        return 1
+
+    # Parse port range
+    port_range = args.port_range.split(":")
+    port_start = int(port_range[0])
+    port_end = int(port_range[1]) if len(port_range) > 1 else port_start + 10
+
+    print(f"Starting worker server on {args.host}:{args.port}...")
+    print(f"  Mode: {args.mode}")
+    print(f"  Instance ports: {port_start}-{port_end}")
+    print(f"  Broadcast: {args.broadcast}")
+    print()
+    print("Press Ctrl+C to stop.")
+
+    from ..worker.server import create_worker_app
+    from aiohttp import web
+
+    app = create_worker_app(
+        api_key=config["api_key"],
+        workspace_path=Path(config["workspace_path"]),
+        default_mode=args.mode,
+        port_range_start=port_start,
+        port_range_end=port_end,
+    )
+
+    # Save PID file
+    pid_file = WORKER_CONFIG_PATH.parent / "worker.pid"
+    import os
+
+    pid_file.write_text(str(os.getpid()))
+
+    try:
+        web.run_app(app, host=args.host, port=args.port, print=lambda _: None)
+    finally:
+        pid_file.unlink(missing_ok=True)
+
+    return 0
+
+
+def handle_down(args: argparse.Namespace) -> int:
+    """Handle 'worker down' command."""
+    pid_file = WORKER_CONFIG_PATH.parent / "worker.pid"
+
+    if not pid_file.exists():
+        print("Worker server is not running.")
+        return 0
+
+    try:
+        import os
+        import signal
+
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        pid_file.unlink(missing_ok=True)
+        print("Worker server stopped.")
+    except (OSError, ValueError) as e:
+        print(f"Failed to stop worker: {e}")
+        pid_file.unlink(missing_ok=True)
+        return 1
+
+    return 0
+
+
+def handle_status(args: argparse.Namespace) -> int:
+    """Handle 'worker status' command."""
+    config = load_worker_config()
+
+    if not config:
+        print("Worker not configured. Run 'cg-deploy worker setup' first.")
+        return 0
+
+    running = is_worker_running()
+    status = "RUNNING" if running else "NOT RUNNING"
+
+    print(f"Worker Status: {status}")
+    print(f"  Workspace: {config.get('workspace_path', 'N/A')}")
+    print(f"  Default Mode: {config.get('default_mode', 'docker')}")
+    print(f"  Server Port: {config.get('server_port', 9090)}")
+
+    port_range = config.get("instance_port_range", {})
+    print(
+        f"  Instance Ports: {port_range.get('start', 8188)}-{port_range.get('end', 8197)}"
+    )
+
+    return 0
+
+
+def handle_regenerate_key(args: argparse.Namespace) -> int:
+    """Handle 'worker regenerate-key' command."""
+    config = load_worker_config()
+    if not config:
+        print("Worker not configured. Run 'cg-deploy worker setup' first.")
+        return 1
+
+    old_key = config.get("api_key", "")[:20] + "..."
+    new_key = generate_api_key()
+
+    config["api_key"] = new_key
+    save_worker_config(config)
+
+    print("API key regenerated!")
+    print(f"  Old: {old_key}")
+    print(f"  New: {new_key}")
+    print()
+    print("Note: Update any clients using the old key.")
+
+    if is_worker_running():
+        print("Warning: Restart the worker server for the new key to take effect.")
+
+    return 0

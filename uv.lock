@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 members = [
     "comfygit",
     "comfygit-core",
+    "comfygit-deploy",
 ]
 
 [manifest.dependency-groups]
@@ -310,7 +311,7 @@ wheels = [
 
 [[package]]
 name = "comfygit"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "argcomplete" },
@@ -325,7 +326,7 @@ requires-dist = [
 
 [[package]]
 name = "comfygit-core"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "aiohttp" },
@@ -361,6 +362,33 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.4.1" }]
+
+[[package]]
+name = "comfygit-deploy"
+version = "0.3.3"
+source = { editable = "packages/deploy" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "comfygit-core" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9.0" },
+    { name = "comfygit-core", editable = "packages/core" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.4.1" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
+]
 
 [[package]]
 name = "coverage"
