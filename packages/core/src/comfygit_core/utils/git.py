@@ -1,5 +1,6 @@
 """Low-level git utilities for repository operations."""
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -485,8 +486,8 @@ def git_clone_subdirectory(
         OSError: If git clone fails
         ValueError: If subdirectory doesn't exist in repository
     """
-    import tempfile
     import shutil
+    import tempfile
 
     # Clone to temporary directory
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1249,3 +1250,262 @@ def git_revert(repo_path: Path, commit: str, no_commit: bool = False) -> None:
         repo_path,
         not_found_msg=f"Commit '{commit}' does not exist"
     )
+
+
+# =============================================================================
+# Git Authentication (for cloud deployments)
+# =============================================================================
+
+def _create_askpass_script(token: str) -> Path:
+    """Create a temporary GIT_ASKPASS script that echoes the token.
+
+    The script is created with restrictive permissions (0700) to protect the token.
+    Caller is responsible for cleanup after git command completes.
+
+    Args:
+        token: GitHub PAT or other credential to inject
+
+    Returns:
+        Path to temporary script file
+    """
+    import stat
+    import sys
+    import tempfile
+
+    # Create temp file with appropriate extension for platform
+    suffix = ".bat" if sys.platform == "win32" else ".sh"
+    fd, script_path = tempfile.mkstemp(suffix=suffix, prefix="git_askpass_")
+
+    try:
+        if sys.platform == "win32":
+            # Windows batch file
+            script_content = f"@echo {token}\n"
+        else:
+            # Unix shell script
+            script_content = f"#!/bin/sh\necho '{token}'\n"
+
+        os.write(fd, script_content.encode('utf-8'))
+        os.close(fd)
+
+        # Set executable permission (Unix only)
+        if sys.platform != "win32":
+            os.chmod(script_path, stat.S_IRWXU)  # 0700 - owner read/write/execute only
+
+        return Path(script_path)
+    except Exception:
+        os.close(fd)
+        Path(script_path).unlink(missing_ok=True)
+        raise
+
+
+def _git_with_auth(
+    cmd: list[str],
+    repo_path: Path,
+    token: str,
+    check: bool = True
+) -> subprocess.CompletedProcess:
+    """Run git command with token authentication via GIT_ASKPASS.
+
+    This injects the token at runtime using the GIT_ASKPASS environment variable,
+    which git uses to obtain credentials for HTTPS remotes. The token is never
+    stored on disk permanently - only in a temporary script that is deleted
+    immediately after the command completes.
+
+    Args:
+        cmd: Git command arguments (without 'git' prefix)
+        repo_path: Path to git repository
+        token: GitHub PAT or other credential
+        check: Whether to raise exception on non-zero exit
+
+    Returns:
+        CompletedProcess result
+
+    Raises:
+        OSError: If git command fails
+    """
+    script_path = _create_askpass_script(token)
+    try:
+        # Build environment with authentication settings
+        env = os.environ.copy()
+        env["GIT_ASKPASS"] = str(script_path)
+        env["GIT_TERMINAL_PROMPT"] = "0"  # Disable interactive prompts
+
+        result = subprocess.run(
+            ["git"] + cmd,
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=check
+        )
+        return result
+    finally:
+        # Always clean up temp script
+        script_path.unlink(missing_ok=True)
+
+
+def git_ls_remote_with_auth(repo_path: Path, remote_url: str, token: str) -> bool:
+    """Test git authentication by running ls-remote against a URL.
+
+    This is a lightweight way to verify credentials work without fetching
+    any actual content.
+
+    Args:
+        repo_path: Path to git repository (for working directory)
+        remote_url: Remote URL to test (must be HTTPS)
+        token: GitHub PAT to test
+
+    Returns:
+        True if authentication succeeded, False otherwise
+    """
+    try:
+        result = _git_with_auth(
+            ["ls-remote", "--exit-code", remote_url, "HEAD"],
+            repo_path,
+            token,
+            check=False
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def git_fetch_with_auth(
+    repo_path: Path,
+    remote: str,
+    token: str,
+    timeout: int = 30,
+) -> str:
+    """Fetch from remote with token authentication.
+
+    Args:
+        repo_path: Path to git repository
+        remote: Remote name (default: origin)
+        token: GitHub PAT for authentication
+        timeout: Command timeout in seconds
+
+    Returns:
+        Fetch output
+
+    Raises:
+        ValueError: If remote doesn't exist
+        OSError: If fetch fails (network, auth, etc.)
+    """
+    # Validate remote exists first
+    remote_url = git_remote_get_url(repo_path, remote)
+    if not remote_url:
+        raise ValueError(
+            f"Remote '{remote}' not configured. "
+            f"Add with: comfygit remote add {remote} <url>"
+        )
+
+    result = _git_with_auth(["fetch", remote], repo_path, token)
+    return result.stdout
+
+
+def git_push_with_auth(
+    repo_path: Path,
+    remote: str,
+    token: str,
+    branch: str | None = None,
+    force: bool = False,
+    timeout: int = 30,
+) -> str:
+    """Push commits to remote with token authentication.
+
+    Args:
+        repo_path: Path to git repository
+        remote: Remote name (default: origin)
+        token: GitHub PAT for authentication
+        branch: Branch to push (default: current branch)
+        force: Use --force-with-lease (default: False)
+        timeout: Command timeout in seconds
+
+    Returns:
+        Push output
+
+    Raises:
+        ValueError: If remote doesn't exist
+        OSError: If push fails (auth, conflicts, network)
+    """
+    # Validate remote exists
+    remote_url = git_remote_get_url(repo_path, remote)
+    if not remote_url:
+        raise ValueError(
+            f"Remote '{remote}' not configured. "
+            f"Add with: comfygit remote add {remote} <url>"
+        )
+
+    # If force pushing, fetch first to update remote refs for --force-with-lease
+    if force:
+        try:
+            git_fetch_with_auth(repo_path, remote, token, timeout)
+        except Exception:
+            # If fetch fails, continue anyway - user wants to force push
+            pass
+
+    cmd = ["push", remote]
+    if branch:
+        cmd.append(branch)
+    if force:
+        cmd.append("--force-with-lease")
+
+    try:
+        result = _git_with_auth(cmd, repo_path, token)
+        return result.stdout
+    except subprocess.CalledProcessError as e:
+        error_msg = (e.stderr or "").lower()
+        if "permission denied" in error_msg or "authentication" in error_msg:
+            raise OSError(
+                "Authentication failed. Check your token has repo access."
+            ) from e
+        elif "rejected" in error_msg:
+            raise OSError(
+                "Push rejected - remote has changes. Run: comfygit pull first"
+            ) from e
+        raise OSError(f"Push failed: {e.stderr or str(e)}") from e
+
+
+def git_pull_with_auth(
+    repo_path: Path,
+    remote: str,
+    token: str,
+    branch: str | None = None,
+    ff_only: bool = False,
+    timeout: int = 30,
+    strategy_option: str | None = None,
+) -> dict:
+    """Fetch and merge from remote with token authentication.
+
+    Args:
+        repo_path: Path to git repository
+        remote: Remote name (default: origin)
+        token: GitHub PAT for authentication
+        branch: Branch name (default: auto-detect current branch)
+        ff_only: Only allow fast-forward merges (default: False)
+        timeout: Command timeout in seconds
+        strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
+
+    Returns:
+        Dict with keys: 'fetch_output', 'merge_output', 'branch'
+
+    Raises:
+        ValueError: If remote doesn't exist, detached HEAD, or merge conflicts
+        OSError: If fetch/merge fails
+    """
+    # Auto-detect current branch if not specified
+    if not branch:
+        branch = git_current_branch(repo_path)
+
+    # Fetch with auth
+    fetch_output = git_fetch_with_auth(repo_path, remote, token, timeout)
+
+    # Then merge (no auth needed - local operation)
+    merge_ref = f"{remote}/{branch}"
+    merge_output = git_merge(repo_path, merge_ref, ff_only, timeout, strategy_option)
+
+    return {
+        'fetch_output': fetch_output,
+        'merge_output': merge_output,
+        'branch': branch,
+    }
