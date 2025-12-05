@@ -3,6 +3,7 @@
 TDD: Tests written first - should FAIL until implementation exists.
 """
 
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 import argparse
@@ -12,6 +13,83 @@ import pytest
 from comfygit_deploy.commands import worker as worker_commands
 from comfygit_deploy.commands import custom as custom_commands
 from comfygit_deploy.config import DeployConfig
+
+
+class TestWorkspaceValidation:
+    """Tests for workspace validation helper."""
+
+    def test_get_workspace_from_config(self, tmp_path: Path) -> None:
+        """get_validated_workspace returns workspace from config."""
+        config_path = tmp_path / "config" / "worker.json"
+        workspace_path = tmp_path / "workspace"
+        workspace_path.mkdir(parents=True)
+
+        import json
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps({
+            "workspace_path": str(workspace_path),
+        }))
+
+        with patch(
+            "comfygit_deploy.commands.worker.WORKER_CONFIG_PATH", config_path
+        ):
+            result = worker_commands.get_validated_workspace()
+
+        assert result == workspace_path
+
+    def test_get_workspace_from_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """get_validated_workspace returns workspace from COMFYGIT_HOME env."""
+        workspace_path = tmp_path / "workspace"
+        workspace_path.mkdir(parents=True)
+        monkeypatch.setenv("COMFYGIT_HOME", str(workspace_path))
+
+        # No config file exists
+        with patch(
+            "comfygit_deploy.commands.worker.WORKER_CONFIG_PATH",
+            tmp_path / "nonexistent" / "worker.json"
+        ):
+            result = worker_commands.get_validated_workspace()
+
+        assert result == workspace_path
+
+    def test_get_workspace_returns_none_if_not_configured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """get_validated_workspace returns None if no config or env."""
+        monkeypatch.delenv("COMFYGIT_HOME", raising=False)
+
+        with patch(
+            "comfygit_deploy.commands.worker.WORKER_CONFIG_PATH",
+            tmp_path / "nonexistent" / "worker.json"
+        ):
+            result = worker_commands.get_validated_workspace()
+
+        assert result is None
+
+    def test_get_workspace_prefers_env_over_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """COMFYGIT_HOME takes precedence over config file."""
+        config_path = tmp_path / "config" / "worker.json"
+        config_workspace = tmp_path / "config-workspace"
+        env_workspace = tmp_path / "env-workspace"
+        config_workspace.mkdir(parents=True)
+        env_workspace.mkdir(parents=True)
+
+        import json
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps({
+            "workspace_path": str(config_workspace),
+        }))
+
+        monkeypatch.setenv("COMFYGIT_HOME", str(env_workspace))
+
+        with patch(
+            "comfygit_deploy.commands.worker.WORKER_CONFIG_PATH", config_path
+        ):
+            result = worker_commands.get_validated_workspace()
+
+        assert result == env_workspace
 
 
 class TestWorkerCommands:

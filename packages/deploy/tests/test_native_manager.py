@@ -8,7 +8,121 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from comfygit_deploy.worker.native_manager import NativeManager, ProcessInfo
+from comfygit_deploy.worker.native_manager import (
+    NativeManager,
+    ProcessInfo,
+    DeployResult,
+)
+
+
+class TestEnvironmentExistsCheck:
+    """Test environment existence detection (skip re-import)."""
+
+    def test_environment_exists_when_comfyui_directory_present(self, tmp_path: Path) -> None:
+        """Environment exists if ComfyUI subdirectory is present."""
+        manager = NativeManager(tmp_path)
+
+        # Create environment with ComfyUI directory
+        env_path = tmp_path / "environments" / "test-env" / "ComfyUI"
+        env_path.mkdir(parents=True)
+
+        assert manager.environment_exists("test-env") is True
+
+    def test_environment_not_exists_when_no_comfyui_directory(self, tmp_path: Path) -> None:
+        """Environment doesn't exist if no ComfyUI directory."""
+        manager = NativeManager(tmp_path)
+
+        # Create empty environment directory (incomplete setup)
+        env_path = tmp_path / "environments" / "test-env"
+        env_path.mkdir(parents=True)
+
+        assert manager.environment_exists("test-env") is False
+
+    def test_environment_not_exists_when_no_directory(self, tmp_path: Path) -> None:
+        """Environment doesn't exist if directory is missing."""
+        manager = NativeManager(tmp_path)
+        assert manager.environment_exists("nonexistent") is False
+
+    @pytest.mark.asyncio
+    async def test_deploy_skips_import_when_environment_exists(self, tmp_path: Path) -> None:
+        """Deploy skips import and returns skipped status when env exists."""
+        manager = NativeManager(tmp_path)
+
+        # Pre-create environment
+        env_path = tmp_path / "environments" / "test-env" / "ComfyUI"
+        env_path.mkdir(parents=True)
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            result = await manager.deploy(
+                instance_id="inst_123",
+                environment_name="test-env",
+                import_source="https://github.com/user/repo.git",
+            )
+
+            # Should NOT call import
+            mock_exec.assert_not_called()
+
+            # Should return successful with skipped=True
+            assert result.success is True
+            assert result.skipped is True
+
+    @pytest.mark.asyncio
+    async def test_deploy_imports_when_environment_missing(self, tmp_path: Path) -> None:
+        """Deploy runs import when environment doesn't exist."""
+        manager = NativeManager(tmp_path)
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"Success", None)
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            result = await manager.deploy(
+                instance_id="inst_123",
+                environment_name="test-env",
+                import_source="https://github.com/user/repo.git",
+            )
+
+            # Should call import
+            mock_exec.assert_called_once()
+            assert result.success is True
+            assert result.skipped is False
+
+
+class TestReadinessPolling:
+    """Test HTTP readiness polling for ComfyUI."""
+
+    @pytest.mark.asyncio
+    async def test_wait_for_ready_returns_false_when_no_server(
+        self, tmp_path: Path
+    ) -> None:
+        """wait_for_ready returns False when no server is listening."""
+        manager = NativeManager(tmp_path)
+
+        # Use a port that almost certainly has nothing listening
+        result = await manager.wait_for_ready(
+            port=59999, timeout_seconds=0.5, poll_interval=0.1
+        )
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_wait_for_ready_accepts_timeout_params(
+        self, tmp_path: Path
+    ) -> None:
+        """wait_for_ready accepts custom timeout and poll_interval."""
+        manager = NativeManager(tmp_path)
+
+        import time
+        start = time.monotonic()
+        result = await manager.wait_for_ready(
+            port=59998, timeout_seconds=0.3, poll_interval=0.1
+        )
+        elapsed = time.monotonic() - start
+
+        assert result is False
+        # Should have taken roughly the timeout time
+        assert 0.2 < elapsed < 1.0
 
 
 class TestNativeManager:
@@ -40,7 +154,8 @@ class TestNativeManager:
                     branch="main",
                 )
 
-                assert result is True
+                assert result.success is True
+                assert result.skipped is False
                 # Verify cg import was called
                 call_args = mock_exec.call_args[0]
                 assert "cg" in call_args
@@ -52,8 +167,8 @@ class TestNativeManager:
                 assert "main" in call_args
 
     @pytest.mark.asyncio
-    async def test_deploy_returns_false_on_failure(self) -> None:
-        """Deploy returns False when import fails."""
+    async def test_deploy_returns_failure_on_error(self) -> None:
+        """Deploy returns failure result when import fails."""
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = NativeManager(Path(tmpdir))
 
@@ -69,7 +184,8 @@ class TestNativeManager:
                     import_source="bad-source",
                 )
 
-                assert result is False
+                assert result.success is False
+                assert result.error is not None
 
     def test_start_spawns_process(self) -> None:
         """Start launches cg run subprocess."""

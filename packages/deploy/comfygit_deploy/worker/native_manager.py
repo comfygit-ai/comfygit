@@ -7,8 +7,11 @@ import asyncio
 import os
 import signal
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
+
+import aiohttp
 
 
 @dataclass
@@ -18,6 +21,15 @@ class ProcessInfo:
     pid: int
     port: int
     returncode: int | None = None
+
+
+@dataclass
+class DeployResult:
+    """Result of a deploy operation."""
+
+    success: bool
+    skipped: bool = False
+    error: str | None = None
 
 
 class NativeManager:
@@ -32,14 +44,34 @@ class NativeManager:
         self.workspace_path = workspace_path
         self._processes: dict[str, subprocess.Popen] = {}
 
+    def environment_exists(self, environment_name: str) -> bool:
+        """Check if an environment is fully set up.
+
+        An environment is considered to exist if its ComfyUI directory is present.
+        This matches the RunPod script behavior for restart detection.
+
+        Args:
+            environment_name: Name of the environment
+
+        Returns:
+            True if environment has ComfyUI installed
+        """
+        comfyui_path = (
+            self.workspace_path / "environments" / environment_name / "ComfyUI"
+        )
+        return comfyui_path.is_dir()
+
     async def deploy(
         self,
         instance_id: str,
         environment_name: str,
         import_source: str,
         branch: str | None = None,
-    ) -> bool:
+    ) -> DeployResult:
         """Deploy an environment by cloning from git.
+
+        If the environment already exists (has ComfyUI directory), skips import
+        and returns success with skipped=True.
 
         Args:
             instance_id: Unique instance identifier
@@ -48,8 +80,12 @@ class NativeManager:
             branch: Optional branch/tag to checkout
 
         Returns:
-            True if deployment succeeded
+            DeployResult with success/skipped/error status
         """
+        # Check if environment already exists (e.g., worker restart)
+        if self.environment_exists(environment_name):
+            return DeployResult(success=True, skipped=True)
+
         # Build import command
         cmd = [
             "cg",
@@ -79,12 +115,13 @@ class NativeManager:
         stdout, _ = await proc.communicate()
 
         if proc.returncode != 0:
-            # Log failure for debugging
             output = stdout.decode() if stdout else ""
-            print(f"Import failed for {instance_id}: {output}")
-            return False
+            return DeployResult(
+                success=False,
+                error=f"Import failed for {instance_id}: {output}",
+            )
 
-        return True
+        return DeployResult(success=True, skipped=False)
 
     def start(
         self,
@@ -234,3 +271,39 @@ class NativeManager:
             return True
         except (ProcessLookupError, PermissionError):
             return False
+
+    async def wait_for_ready(
+        self,
+        port: int,
+        timeout_seconds: float = 120.0,
+        poll_interval: float = 2.0,
+    ) -> bool:
+        """Wait for ComfyUI to become ready by polling HTTP endpoint.
+
+        Polls the ComfyUI HTTP endpoint until it responds successfully
+        or the timeout is reached.
+
+        Args:
+            port: Port ComfyUI is listening on
+            timeout_seconds: Maximum time to wait (default 2 minutes)
+            poll_interval: Time between polling attempts
+
+        Returns:
+            True if ComfyUI is ready, False if timeout expired
+        """
+        url = f"http://localhost:{port}/"
+        deadline = time.monotonic() + timeout_seconds
+
+        async with aiohttp.ClientSession() as session:
+            while time.monotonic() < deadline:
+                try:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                        if resp.status == 200:
+                            return True
+                except Exception:
+                    # Connection refused, timeout, etc - keep trying
+                    pass
+
+                await asyncio.sleep(poll_interval)
+
+        return False

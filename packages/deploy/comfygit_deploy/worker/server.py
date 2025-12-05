@@ -220,29 +220,45 @@ async def _deploy_instance(worker: WorkerServer, instance: InstanceState) -> Non
     """Background task to deploy and start an instance."""
     try:
         if instance.mode == "native":
-            # Deploy environment
-            success = await worker.native_manager.deploy(
+            # Deploy environment (may skip if already exists)
+            result = await worker.native_manager.deploy(
                 instance_id=instance.id,
                 environment_name=instance.environment_name,
                 import_source=instance.import_source,
                 branch=instance.branch,
             )
 
-            if not success:
+            if not result.success:
                 worker.state.update_status(instance.id, "error")
                 worker.state.save()
                 return
 
             # Start ComfyUI process
+            worker.state.update_status(instance.id, "starting")
+            worker.state.save()
+
             proc_info = worker.native_manager.start(
                 instance_id=instance.id,
                 environment_name=instance.environment_name,
                 port=instance.assigned_port,
             )
 
-            if proc_info:
+            if not proc_info:
+                worker.state.update_status(instance.id, "error")
+                worker.state.save()
+                return
+
+            # Wait for ComfyUI to become ready
+            is_ready = await worker.native_manager.wait_for_ready(
+                port=instance.assigned_port,
+                timeout_seconds=120.0,
+                poll_interval=2.0,
+            )
+
+            if is_ready:
                 worker.state.update_status(instance.id, "running", pid=proc_info.pid)
             else:
+                # Process started but HTTP not responding
                 worker.state.update_status(instance.id, "error")
         else:
             # Docker mode - not yet implemented

@@ -27,6 +27,33 @@ def load_worker_config() -> dict | None:
         return None
 
 
+def get_validated_workspace() -> Path | None:
+    """Get workspace path from env or config.
+
+    Checks COMFYGIT_HOME env first, then falls back to worker config.
+
+    Returns:
+        Workspace Path if configured and exists, None otherwise.
+    """
+    import os
+
+    # Check environment variable first (takes precedence)
+    env_home = os.environ.get("COMFYGIT_HOME")
+    if env_home:
+        workspace = Path(env_home)
+        if workspace.exists():
+            return workspace
+
+    # Fall back to worker config
+    config = load_worker_config()
+    if config and config.get("workspace_path"):
+        workspace = Path(config["workspace_path"])
+        if workspace.exists():
+            return workspace
+
+    return None
+
+
 def save_worker_config(config: dict) -> None:
     """Save worker config to disk."""
     WORKER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -114,9 +141,19 @@ def handle_up(args: argparse.Namespace) -> int:
 
     pid_file.write_text(str(os.getpid()))
 
+    # Start mDNS broadcast if requested
+    broadcaster = None
+    if args.broadcast:
+        from ..worker.mdns import MDNSBroadcaster
+
+        broadcaster = MDNSBroadcaster(port=args.port)
+        broadcaster.start()
+
     try:
         web.run_app(app, host=args.host, port=args.port, print=lambda _: None)
     finally:
+        if broadcaster:
+            broadcaster.stop()
         pid_file.unlink(missing_ok=True)
 
     return 0
