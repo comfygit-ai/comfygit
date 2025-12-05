@@ -146,7 +146,7 @@ def handle_up(args: argparse.Namespace) -> int:
     if args.broadcast:
         from ..worker.mdns import MDNSBroadcaster
 
-        broadcaster = MDNSBroadcaster(port=args.port)
+        broadcaster = MDNSBroadcaster(port=args.port, mode=args.mode)
         broadcaster.start()
 
     try:

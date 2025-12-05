@@ -4,6 +4,7 @@ Provides REST API for creating, starting, stopping, and terminating instances.
 """
 
 import asyncio
+import json
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -384,6 +385,67 @@ async def handle_terminate_instance(request: web.Request) -> web.Response:
     })
 
 
+async def handle_logs(request: web.Request) -> web.Response | web.WebSocketResponse:
+    """Handle /api/v1/instances/{id}/logs - GET for fetch, WebSocket for streaming."""
+    # Check if this is a WebSocket upgrade request
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        return await _handle_logs_websocket(request)
+
+    # Regular HTTP GET request
+    worker: WorkerServer = request.app["worker"]
+    instance_id = request.match_info["id"]
+
+    instance = worker.state.instances.get(instance_id)
+    if not instance:
+        return web.json_response({"error": "Instance not found"}, status=404)
+
+    lines = int(request.query.get("lines", "100"))
+
+    if instance.mode == "native":
+        process_logs = worker.native_manager.get_logs(instance_id, lines=lines)
+        logs = [{"level": "INFO", "message": line} for line in process_logs.stdout]
+    else:
+        logs = []
+
+    return web.json_response({"logs": logs})
+
+
+async def _handle_logs_websocket(request: web.Request) -> web.WebSocketResponse:
+    """WebSocket /api/v1/instances/{id}/logs - Stream instance logs."""
+    worker: WorkerServer = request.app["worker"]
+    instance_id = request.match_info["id"]
+
+    instance = worker.state.instances.get(instance_id)
+    if not instance:
+        raise web.HTTPNotFound(text="Instance not found")
+
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+
+    # Stream logs (no initial connection message - tests expect first message to be log type)
+    last_index = 0
+    try:
+        while not ws.closed:
+            if instance.mode == "native":
+                buf = worker.native_manager._log_buffers.get(instance_id, [])
+                # Send new lines since last check
+                if len(buf) > last_index:
+                    for line in buf[last_index:]:
+                        await ws.send_json({
+                            "type": "log",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "level": "INFO",
+                            "message": line,
+                        })
+                    last_index = len(buf)
+
+            await asyncio.sleep(0.5)
+    except Exception:
+        pass
+
+    return ws
+
+
 def create_worker_app(
     api_key: str,
     workspace_path: Path,
@@ -427,5 +489,7 @@ def create_worker_app(
     app.router.add_post("/api/v1/instances/{id}/stop", handle_stop_instance)
     app.router.add_post("/api/v1/instances/{id}/start", handle_start_instance)
     app.router.add_delete("/api/v1/instances/{id}", handle_terminate_instance)
+    # Combined handler for both HTTP GET and WebSocket upgrade
+    app.router.add_get("/api/v1/instances/{id}/logs", handle_logs)
 
     return app

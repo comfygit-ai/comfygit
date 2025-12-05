@@ -32,6 +32,14 @@ class DeployResult:
     error: str | None = None
 
 
+@dataclass
+class ProcessLogs:
+    """Captured process output."""
+
+    stdout: list[str]
+    stderr: list[str]
+
+
 class NativeManager:
     """Manages ComfyUI instances as native processes."""
 
@@ -43,6 +51,8 @@ class NativeManager:
         """
         self.workspace_path = workspace_path
         self._processes: dict[str, subprocess.Popen] = {}
+        self._log_buffers: dict[str, list[str]] = {}  # Ring buffers for log capture
+        self._max_log_lines: int = 1000  # Keep last N lines per instance
 
     def environment_exists(self, environment_name: str) -> bool:
         """Check if an environment is fully set up.
@@ -166,11 +176,30 @@ class NativeManager:
             proc = subprocess.Popen(
                 cmd,
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 start_new_session=True,  # Detach from parent
+                text=True,
+                bufsize=1,  # Line buffered
             )
             self._processes[instance_id] = proc
+            self._log_buffers[instance_id] = []
+
+            # Start background thread to read output
+            import threading
+            def read_output():
+                try:
+                    for line in proc.stdout:
+                        buf = self._log_buffers.get(instance_id, [])
+                        buf.append(line.rstrip())
+                        if len(buf) > self._max_log_lines:
+                            buf.pop(0)
+                except Exception:
+                    pass
+
+            thread = threading.Thread(target=read_output, daemon=True)
+            thread.start()
+
             return ProcessInfo(pid=proc.pid, port=port)
         except Exception as e:
             print(f"Failed to start {instance_id}: {e}")
@@ -271,6 +300,20 @@ class NativeManager:
             return True
         except (ProcessLookupError, PermissionError):
             return False
+
+    def get_logs(self, instance_id: str, lines: int = 100) -> ProcessLogs:
+        """Get recent logs from an instance.
+
+        Args:
+            instance_id: Instance to get logs for
+            lines: Maximum number of lines to return
+
+        Returns:
+            ProcessLogs with stdout/stderr content
+        """
+        buf = self._log_buffers.get(instance_id, [])
+        # Return last N lines
+        return ProcessLogs(stdout=buf[-lines:], stderr=[])
 
     async def wait_for_ready(
         self,

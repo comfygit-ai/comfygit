@@ -3,8 +3,9 @@
 Provides async interface for worker server REST API.
 """
 
+import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, AsyncIterator
 
 import aiohttp
 
@@ -18,6 +19,15 @@ class CustomWorkerError(Exception):
 
     def __str__(self) -> str:
         return f"Worker Error ({self.status_code}): {self.message}"
+
+
+@dataclass
+class LogEntry:
+    """A single log entry from streaming."""
+
+    timestamp: str
+    level: str
+    message: str
 
 
 class CustomWorkerClient:
@@ -156,3 +166,69 @@ class CustomWorkerClient:
     async def terminate_instance(self, instance_id: str) -> dict:
         """Terminate and remove instance."""
         return await self._delete(f"/api/v1/instances/{instance_id}")
+
+    async def get_logs(self, instance_id: str, lines: int = 100) -> list[dict]:
+        """Get recent logs for an instance.
+
+        Args:
+            instance_id: Instance ID
+            lines: Number of lines to fetch
+
+        Returns:
+            List of log entries
+        """
+        result = await self._get(f"/api/v1/instances/{instance_id}/logs?lines={lines}")
+        return result.get("logs", [])
+
+    def _connect_ws(self, url: str):
+        """Create a WebSocket connection context manager.
+
+        Returns an async context manager that yields the WebSocket connection.
+        """
+        return _WSConnectionManager(url, self.api_key)
+
+    async def stream_logs(self, instance_id: str) -> AsyncIterator[LogEntry]:
+        """Stream logs from an instance via WebSocket.
+
+        Args:
+            instance_id: Instance ID
+
+        Yields:
+            LogEntry objects as they arrive
+        """
+        url = f"ws://{self.host}:{self.port}/api/v1/instances/{instance_id}/logs"
+        async with self._connect_ws(url) as ws:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    data = json.loads(msg.data)
+                    if data.get("type") == "log":
+                        yield LogEntry(
+                            timestamp=data.get("timestamp", ""),
+                            level=data.get("level", "INFO"),
+                            message=data.get("message", ""),
+                        )
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    break
+
+
+class _WSConnectionManager:
+    """Async context manager for WebSocket connections."""
+
+    def __init__(self, url: str, api_key: str):
+        self.url = url
+        self.api_key = api_key
+        self._session: aiohttp.ClientSession | None = None
+        self._ws = None
+
+    async def __aenter__(self):
+        self._session = aiohttp.ClientSession()
+        self._ws = await self._session.ws_connect(
+            self.url, headers={"Authorization": f"Bearer {self.api_key}"}
+        )
+        return self._ws
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._ws:
+            await self._ws.close()
+        if self._session:
+            await self._session.close()

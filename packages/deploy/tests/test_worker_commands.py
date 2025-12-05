@@ -207,7 +207,7 @@ class TestCustomCommands:
 
         assert result == 0
         mock_config.add_worker.assert_called_once_with(
-            "my-worker", "192.168.1.50", 9090, "cg_wk_abc123"
+            "my-worker", "192.168.1.50", 9090, "cg_wk_abc123", mode="docker"
         )
         mock_config.save.assert_called_once()
 

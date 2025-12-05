@@ -412,14 +412,91 @@ def handle_wait(args: Namespace) -> int:
     return 1
 
 
+def stream_worker_logs(
+    host: str, port: int, api_key: str, instance_id: str, follow: bool
+) -> None:
+    """Stream logs from a custom worker instance.
+
+    Args:
+        host: Worker host
+        port: Worker port
+        api_key: API key
+        instance_id: Instance ID (local, not namespaced)
+        follow: If True, stream continuously; if False, just print and exit
+    """
+    from ..providers.custom import CustomWorkerClient
+
+    async def _stream():
+        client = CustomWorkerClient(host=host, port=port, api_key=api_key)
+        try:
+            async for entry in client.stream_logs(instance_id):
+                print(f"[{entry.level}] {entry.message}")
+        except KeyboardInterrupt:
+            pass
+
+    asyncio.run(_stream())
+
+
+def fetch_worker_logs(
+    host: str, port: int, api_key: str, instance_id: str, lines: int
+) -> list[dict]:
+    """Fetch recent logs from a custom worker instance.
+
+    Args:
+        host: Worker host
+        port: Worker port
+        api_key: API key
+        instance_id: Instance ID (local, not namespaced)
+        lines: Number of lines to fetch
+
+    Returns:
+        List of log entries
+    """
+    from ..providers.custom import CustomWorkerClient
+
+    async def _fetch():
+        client = CustomWorkerClient(host=host, port=port, api_key=api_key)
+        return await client.get_logs(instance_id, lines=lines)
+
+    return asyncio.run(_fetch())
+
+
 def handle_logs(args: Namespace) -> int:
     """Handle 'logs' command."""
+    config = DeployConfig()
     worker_name, local_id = parse_instance_id(args.instance_id)
+    follow = getattr(args, "follow", False)
+    lines = getattr(args, "lines", 100)
 
     if worker_name:
-        # WebSocket log streaming for custom workers is Phase 3
-        print("Log streaming for custom workers is not yet implemented.")
-        print("Check your worker machine directly for logs.")
+        # Custom worker logs
+        worker = config.get_worker(worker_name)
+        if not worker:
+            print(f"Error: Worker '{worker_name}' not found.")
+            return 1
+
+        if follow:
+            # Stream logs via WebSocket
+            stream_worker_logs(
+                host=worker["host"],
+                port=worker["port"],
+                api_key=worker["api_key"],
+                instance_id=local_id,
+                follow=True,
+            )
+        else:
+            # Fetch recent logs
+            logs = fetch_worker_logs(
+                host=worker["host"],
+                port=worker["port"],
+                api_key=worker["api_key"],
+                instance_id=local_id,
+                lines=lines,
+            )
+            for entry in logs:
+                level = entry.get("level", "INFO")
+                message = entry.get("message", "")
+                print(f"[{level}] {message}")
     else:
         # RunPod doesn't have a direct logs API - users need to use the console
         print("Log streaming not available via API.")

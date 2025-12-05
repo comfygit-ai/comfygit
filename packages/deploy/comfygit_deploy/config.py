@@ -4,8 +4,15 @@ Stores RunPod API keys and custom worker registry in ~/.config/comfygit/deploy/c
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Any
+
+
+def _get_default_config_path() -> Path:
+    """Get default config path, respecting HOME environment variable."""
+    home = os.environ.get("HOME") or str(Path.home())
+    return Path(home) / ".config" / "comfygit" / "deploy" / "config.json"
 
 
 class DeployConfig:
@@ -16,15 +23,13 @@ class DeployConfig:
     - Custom worker registry (name -> {host, port, api_key, ...})
     """
 
-    DEFAULT_PATH = Path.home() / ".config" / "comfygit" / "deploy" / "config.json"
-
     def __init__(self, path: Path | None = None):
         """Initialize config.
 
         Args:
             path: Config file path. Defaults to ~/.config/comfygit/deploy/config.json
         """
-        self.path = path or self.DEFAULT_PATH
+        self.path = path or _get_default_config_path()
         self._data: dict[str, Any] = {"version": "1", "providers": {}, "workers": {}}
         self._load()
 

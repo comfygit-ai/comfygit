@@ -5,10 +5,13 @@ Commands for managing connections to self-hosted workers.
 
 import argparse
 import asyncio
+import json
+from dataclasses import asdict
 from typing import Any
 
 from ..config import DeployConfig
 from ..providers.custom import CustomWorkerClient
+from ..worker.mdns import DiscoveredWorker, MDNSScanner
 
 
 def test_worker_connection(host: str, port: int, api_key: str) -> dict[str, Any]:
@@ -44,25 +47,42 @@ def deploy_to_worker(
 
 def handle_add(args: argparse.Namespace) -> int:
     """Handle 'custom add' command."""
-    if not args.host and not args.discovered:
-        print("Error: --host is required (or use --discovered)")
-        return 1
+    config = DeployConfig()
+    host = args.host
+    port = args.port
+    mode = "docker"  # Default mode
 
-    if args.discovered:
-        # TODO: Load from last scan results
-        print("Error: --discovered not yet implemented")
+    if getattr(args, "discovered", False):
+        # Load from last scan results
+        discovered_file = config.path.parent / "discovered_workers.json"
+        if not discovered_file.exists():
+            print("Error: No scan results found. Run 'cg-deploy custom scan' first.")
+            return 1
+
+        discovered = json.loads(discovered_file.read_text())
+        worker = next((w for w in discovered if w["name"] == args.name), None)
+        if not worker:
+            print(f"Error: Worker '{args.name}' not found in scan results.")
+            return 1
+
+        host = worker["host"]
+        port = worker["port"]
+        mode = worker.get("mode", "docker")
+
+    if not host:
+        print("Error: --host is required (or use --discovered)")
         return 1
 
     if not args.api_key:
         print("Error: --api-key is required")
         return 1
 
-    config = DeployConfig()
-    config.add_worker(args.name, args.host, args.port, args.api_key)
+    config.add_worker(args.name, host, port, args.api_key, mode=mode)
     config.save()
 
     print(f"Added worker '{args.name}'")
-    print(f"  Host: {args.host}:{args.port}")
+    print(f"  Host: {host}:{port}")
+    print(f"  Mode: {mode}")
 
     return 0
 
@@ -169,8 +189,30 @@ def handle_deploy(args: argparse.Namespace) -> int:
 
 def handle_scan(args: argparse.Namespace) -> int:
     """Handle 'custom scan' command (mDNS discovery)."""
-    print(f"Scanning for workers (timeout: {args.timeout}s)...")
-    print()
-    print("mDNS discovery is planned for Phase 3.")
-    print("Use 'cg-deploy custom add' to manually add workers.")
+    timeout = getattr(args, "timeout", 5)
+    print(f"Scanning for workers (timeout: {timeout}s)...")
+
+    scanner = MDNSScanner(timeout=float(timeout))
+    workers = scanner.scan()
+
+    if not workers:
+        print("\nNo workers found on the network.")
+        print("Make sure workers are running with mDNS enabled.")
+        return 0
+
+    print(f"\nFound {len(workers)} worker(s):\n")
+    for w in workers:
+        print(f"  {w.name}")
+        print(f"    Host: {w.host}:{w.port}")
+        print(f"    Mode: {w.mode}")
+        print(f"    Version: {w.version}")
+        print()
+
+    # Save results for --discovered flag
+    config = DeployConfig()
+    discovered_file = config.path.parent / "discovered_workers.json"
+    discovered_file.parent.mkdir(parents=True, exist_ok=True)
+    discovered_file.write_text(json.dumps([asdict(w) for w in workers], indent=2))
+
+    print(f"Use 'cg-deploy custom add <name> --discovered --api-key <key>' to register.")
     return 0
