@@ -4,6 +4,8 @@ Manages instance lifecycle and persists state to JSON for recovery across restar
 """
 
 import json
+import os
+import signal
 import socket
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -121,6 +123,9 @@ class PortAllocator:
     def allocate(self, instance_id: str) -> int:
         """Allocate port for instance.
 
+        Finds a port that is both not allocated to another instance AND
+        not currently in use by any process (handles orphan processes).
+
         Args:
             instance_id: Unique instance identifier
 
@@ -134,10 +139,10 @@ class PortAllocator:
         if instance_id in self.allocated:
             return self.allocated[instance_id]
 
-        # Find next available port
+        # Find next available port (not allocated AND not in use)
         used_ports = set(self.allocated.values())
         for port in range(self.base_port, self.max_port):
-            if port not in used_ports:
+            if port not in used_ports and not self._is_port_in_use(port):
                 self.allocated[instance_id] = port
                 return port
 
@@ -169,6 +174,7 @@ class WorkerState:
         """Remove instances whose environments no longer exist.
 
         Checks for .cec/.complete marker file to confirm environment is valid.
+        Kills any running processes before removing instances.
         Persists cleanup to disk if any instances were removed.
         """
         if not self.workspace_path:
@@ -180,12 +186,30 @@ class WorkerState:
         for inst_id, inst in self.instances.items():
             marker = envs_dir / inst.environment_name / ".cec" / ".complete"
             if not marker.exists():
-                orphans.append(inst_id)
+                orphans.append((inst_id, inst))
 
         if orphans:
-            for inst_id in orphans:
+            for inst_id, inst in orphans:
+                # Kill any running process before removing
+                self._kill_instance_process(inst)
                 del self.instances[inst_id]
             self.save()
+
+    def _kill_instance_process(self, inst: InstanceState) -> None:
+        """Kill a running instance process by PID.
+
+        Args:
+            inst: Instance to kill
+        """
+        if not inst.pid:
+            return
+
+        try:
+            # Send SIGTERM to process group
+            os.killpg(os.getpgid(inst.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            # Process already gone or we can't kill it
+            pass
 
     def _load(self) -> None:
         """Load state from disk."""

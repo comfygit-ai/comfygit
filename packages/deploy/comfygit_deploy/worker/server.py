@@ -452,8 +452,14 @@ async def _handle_logs_websocket(request: web.Request) -> web.WebSocketResponse:
                     last_index = len(buf)
 
             await asyncio.sleep(0.5)
+    except asyncio.CancelledError:
+        # Server shutdown - close websocket gracefully
+        await ws.close()
     except Exception:
         pass
+    finally:
+        if not ws.closed:
+            await ws.close()
 
     return ws
 

@@ -105,7 +105,8 @@ class TestWorkerServerEndpoints(AioHTTPTestCase):
         data = await resp.json()
         assert "id" in data
         assert data["name"].startswith("deploy-test-deploy")
-        assert data["assigned_port"] == 8200
+        # Port should be in valid range (may not be 8200 if that port is in use)
+        assert 8200 <= data["assigned_port"] < 8210
         assert data["status"] == "deploying"
 
     @unittest_run_loop

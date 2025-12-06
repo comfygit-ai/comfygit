@@ -5,6 +5,7 @@ TDD: Tests written first - should FAIL until implementation exists.
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -18,7 +19,10 @@ from comfygit_deploy.worker.state import (
 class TestPortAllocator:
     """Tests for port allocation across instances."""
 
-    def test_allocate_returns_first_available_port(self, tmp_path: Path) -> None:
+    @patch.object(PortAllocator, "_is_port_in_use", return_value=False)
+    def test_allocate_returns_first_available_port(
+        self, mock_port_check, tmp_path: Path
+    ) -> None:
         """Should allocate ports starting from base_port."""
         state_file = tmp_path / "instances.json"
         allocator = PortAllocator(state_file, base_port=8188, max_instances=10)
@@ -26,7 +30,8 @@ class TestPortAllocator:
         port = allocator.allocate("inst_abc")
         assert port == 8188
 
-    def test_allocate_skips_used_ports(self, tmp_path: Path) -> None:
+    @patch.object(PortAllocator, "_is_port_in_use", return_value=False)
+    def test_allocate_skips_used_ports(self, mock_port_check, tmp_path: Path) -> None:
         """Should skip already allocated ports."""
         state_file = tmp_path / "instances.json"
         allocator = PortAllocator(state_file, base_port=8188, max_instances=10)
@@ -37,8 +42,9 @@ class TestPortAllocator:
         assert port1 == 8188
         assert port2 == 8189
 
+    @patch.object(PortAllocator, "_is_port_in_use", return_value=False)
     def test_allocate_returns_same_port_for_existing_instance(
-        self, tmp_path: Path
+        self, mock_port_check, tmp_path: Path
     ) -> None:
         """Should return same port if instance already has one."""
         state_file = tmp_path / "instances.json"
@@ -49,7 +55,10 @@ class TestPortAllocator:
 
         assert port1 == port2 == 8188
 
-    def test_release_frees_port_for_reuse(self, tmp_path: Path) -> None:
+    @patch.object(PortAllocator, "_is_port_in_use", return_value=False)
+    def test_release_frees_port_for_reuse(
+        self, mock_port_check, tmp_path: Path
+    ) -> None:
         """Should release port when instance terminated."""
         state_file = tmp_path / "instances.json"
         allocator = PortAllocator(state_file, base_port=8188, max_instances=10)
@@ -61,7 +70,10 @@ class TestPortAllocator:
 
         assert port3 == 8188  # Reuses released port
 
-    def test_allocate_raises_when_no_ports_available(self, tmp_path: Path) -> None:
+    @patch.object(PortAllocator, "_is_port_in_use", return_value=False)
+    def test_allocate_raises_when_no_ports_available(
+        self, mock_port_check, tmp_path: Path
+    ) -> None:
         """Should raise when all ports are in use."""
         state_file = tmp_path / "instances.json"
         allocator = PortAllocator(state_file, base_port=8188, max_instances=2)
@@ -71,6 +83,20 @@ class TestPortAllocator:
 
         with pytest.raises(RuntimeError, match="No available ports"):
             allocator.allocate("inst_c")
+
+    def test_allocate_skips_ports_in_use_by_other_processes(
+        self, tmp_path: Path
+    ) -> None:
+        """Should skip ports that are in use by external processes."""
+        state_file = tmp_path / "instances.json"
+        allocator = PortAllocator(state_file, base_port=8188, max_instances=10)
+
+        # Mock: port 8188 is in use, 8189 is free
+        with patch.object(
+            allocator, "_is_port_in_use", side_effect=[True, False]
+        ):
+            port = allocator.allocate("inst_a")
+            assert port == 8189  # Skipped 8188 because it was in use
 
 
 class TestInstanceState:
