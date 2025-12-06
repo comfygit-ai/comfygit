@@ -163,9 +163,12 @@ class CustomWorkerClient:
         """Start a stopped instance."""
         return await self._post(f"/api/v1/instances/{instance_id}/start")
 
-    async def terminate_instance(self, instance_id: str) -> dict:
+    async def terminate_instance(self, instance_id: str, keep_env: bool = False) -> dict:
         """Terminate and remove instance."""
-        return await self._delete(f"/api/v1/instances/{instance_id}")
+        path = f"/api/v1/instances/{instance_id}"
+        if keep_env:
+            path += "?keep_env=true"
+        return await self._delete(path)
 
     async def get_logs(self, instance_id: str, lines: int = 100) -> list[dict]:
         """Get recent logs for an instance.

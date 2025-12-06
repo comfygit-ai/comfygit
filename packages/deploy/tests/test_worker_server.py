@@ -26,14 +26,14 @@ class TestWorkerServerEndpoints(AioHTTPTestCase):
             "api_key": "cg_wk_test123",
             "workspace_path": "/tmp/test-workspace",
             "default_mode": "docker",
-            "port_range": {"start": 8188, "end": 8197},
+            "port_range": {"start": 8200, "end": 8210},
         }
         return create_worker_app(
             api_key=self.test_config["api_key"],
             workspace_path=Path(self.test_config["workspace_path"]),
             default_mode=self.test_config["default_mode"],
-            port_range_start=8188,
-            port_range_end=8197,
+            port_range_start=8200,
+            port_range_end=8210,
             state_dir=Path(self._temp_dir),
         )
 
@@ -75,8 +75,8 @@ class TestWorkerServerEndpoints(AioHTTPTestCase):
         assert "worker_version" in data
         assert "workspace_path" in data
         assert "default_mode" in data
-        assert data["ports"]["range_start"] == 8188
-        assert data["ports"]["range_end"] == 8197
+        assert data["ports"]["range_start"] == 8200
+        assert data["ports"]["range_end"] == 8210
 
     @unittest_run_loop
     async def test_list_instances_returns_empty_initially(self) -> None:
@@ -105,7 +105,7 @@ class TestWorkerServerEndpoints(AioHTTPTestCase):
         data = await resp.json()
         assert "id" in data
         assert data["name"].startswith("deploy-test-deploy")
-        assert data["assigned_port"] == 8188
+        assert data["assigned_port"] == 8200
         assert data["status"] == "deploying"
 
     @unittest_run_loop

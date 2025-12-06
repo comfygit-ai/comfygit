@@ -258,6 +258,7 @@ def handle_terminate(args: Namespace) -> int:
     """Handle 'terminate' command - terminate and remove an instance."""
     config = DeployConfig()
     worker_name, local_id = parse_instance_id(args.instance_id)
+    keep_env = getattr(args, "keep_env", False)
 
     # Confirm unless --force
     if not getattr(args, "force", False):
@@ -274,8 +275,8 @@ def handle_terminate(args: Namespace) -> int:
 
         print(f"Terminating instance {local_id} on {worker_name}...")
         try:
-            asyncio.run(client.terminate_instance(local_id))
-            print("Instance terminated.")
+            result = asyncio.run(client.terminate_instance(local_id, keep_env=keep_env))
+            print(result.get("message", "Instance terminated."))
             return 0
         except CustomWorkerError as e:
             print(f"Error: {e}")

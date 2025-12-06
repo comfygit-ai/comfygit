@@ -71,6 +71,23 @@ class NativeManager:
         )
         return comfyui_path.is_dir()
 
+    def delete_environment(self, environment_name: str) -> bool:
+        """Delete an environment directory.
+
+        Args:
+            environment_name: Name of the environment to delete
+
+        Returns:
+            True if deleted, False if not found
+        """
+        import shutil
+
+        env_path = self.workspace_path / "environments" / environment_name
+        if env_path.is_dir():
+            shutil.rmtree(env_path)
+            return True
+        return False
+
     async def deploy(
         self,
         instance_id: str,

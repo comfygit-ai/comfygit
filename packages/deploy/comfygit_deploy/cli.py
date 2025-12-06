@@ -97,6 +97,7 @@ def create_parser() -> argparse.ArgumentParser:
     terminate_parser = subparsers.add_parser("terminate", help="Terminate an instance")
     terminate_parser.add_argument("instance_id", help="Instance ID to terminate")
     terminate_parser.add_argument("--force", action="store_true", help="Force termination")
+    terminate_parser.add_argument("--keep-env", action="store_true", help="Keep environment directory")
 
     # logs
     logs_parser = subparsers.add_parser("logs", help="View instance logs")
@@ -185,7 +186,10 @@ def create_parser() -> argparse.ArgumentParser:
         help="Instance mode",
     )
     up_parser.add_argument("--broadcast", action="store_true", help="Enable mDNS broadcast")
-    up_parser.add_argument("--port-range", default="8188:8197", help="Instance port range")
+    up_parser.add_argument("--port-range", default="8200:8210", help="Instance port range")
+    up_parser.add_argument("--dev", action="store_true", help="Use saved dev config (from 'dev setup')")
+    up_parser.add_argument("--dev-core", metavar="PATH", help="Use local comfygit-core (editable)")
+    up_parser.add_argument("--dev-manager", metavar="PATH", help="Use local comfygit-manager")
 
     # worker down
     worker_subparsers.add_parser("down", help="Stop worker server")
@@ -195,6 +199,27 @@ def create_parser() -> argparse.ArgumentParser:
 
     # worker regenerate-key
     worker_subparsers.add_parser("regenerate-key", help="Regenerate API key")
+
+    # =========================================================================
+    # Dev commands (development mode setup)
+    # =========================================================================
+    dev_parser = subparsers.add_parser("dev", help="Development mode setup")
+    dev_subparsers = dev_parser.add_subparsers(dest="dev_command", help="Dev subcommands")
+
+    # dev setup
+    dev_setup_parser = dev_subparsers.add_parser(
+        "setup", help="Configure local dev paths for core/manager"
+    )
+    dev_setup_parser.add_argument("--core", metavar="PATH", help="Path to comfygit-core package")
+    dev_setup_parser.add_argument("--manager", metavar="PATH", help="Path to comfygit-manager")
+    dev_setup_parser.add_argument("--show", action="store_true", help="Show current dev config")
+    dev_setup_parser.add_argument("--clear", action="store_true", help="Clear dev config")
+
+    # dev patch
+    dev_patch_parser = dev_subparsers.add_parser(
+        "patch", help="Patch existing environments with dev core"
+    )
+    dev_patch_parser.add_argument("--env", help="Specific environment to patch (default: all)")
 
     return parser
 
@@ -296,6 +321,22 @@ def main(args: list[str] | None = None) -> int:
             if handler:
                 return handler(parsed)
             print(f"Unknown custom command: {parsed.custom_command}")
+            return 1
+
+        elif parsed.command == "dev":
+            from .commands import dev as dev_commands
+
+            if not parsed.dev_command:
+                parser.parse_args(["dev", "--help"])
+                return 0
+            handler_map = {
+                "setup": dev_commands.handle_setup,
+                "patch": dev_commands.handle_patch,
+            }
+            handler = handler_map.get(parsed.dev_command)
+            if handler:
+                return handler(parsed)
+            print(f"Unknown dev command: {parsed.dev_command}")
             return 1
 
         else:

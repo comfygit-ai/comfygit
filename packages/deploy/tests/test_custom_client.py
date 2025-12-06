@@ -42,7 +42,7 @@ class TestCustomWorkerClient(AioHTTPTestCase):
                     "workspace_path": "/workspace/comfygit",
                     "default_mode": "docker",
                     "gpu": {"name": "RTX 4090", "memory_total_mb": 24576},
-                    "ports": {"range_start": 8188, "range_end": 8197, "available": 10},
+                    "ports": {"range_start": 8200, "range_end": 8210, "available": 10},
                 }
             )
 

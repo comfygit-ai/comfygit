@@ -347,11 +347,11 @@ class TestProviderAwareInstanceActions:
             }
             mock_client_class.return_value = mock_client
 
-            args = Namespace(instance_id="my-gpu:inst_abc", force=False)
+            args = Namespace(instance_id="my-gpu:inst_abc", force=False, keep_env=False)
             result = handle_terminate(args)
 
             assert result == 0
-            mock_client.terminate_instance.assert_called_once_with("inst_abc")
+            mock_client.terminate_instance.assert_called_once_with("inst_abc", keep_env=False)
 
     def test_terminate_force_skips_confirmation(
         self, config_with_worker: DeployConfig
@@ -374,7 +374,7 @@ class TestProviderAwareInstanceActions:
             }
             mock_client_class.return_value = mock_client
 
-            args = Namespace(instance_id="my-gpu:inst_abc", force=True)
+            args = Namespace(instance_id="my-gpu:inst_abc", force=True, keep_env=False)
             result = handle_terminate(args)
 
             assert result == 0

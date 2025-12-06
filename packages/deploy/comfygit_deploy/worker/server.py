@@ -20,12 +20,15 @@ from .state import InstanceState, PortAllocator, WorkerState
 
 def generate_instance_id() -> str:
     """Generate unique instance ID."""
-    return f"inst_{secrets.token_hex(6)}"
+    return f"inst_{secrets.token_hex(4)}"
 
 
 def generate_instance_name(user_name: str | None) -> str:
     """Generate instance name with timestamp."""
+    import re
     base = user_name or "unnamed"
+    # Sanitize: lowercase, replace non-alphanumeric with hyphen, collapse multiples
+    base = re.sub(r'[^a-z0-9]+', '-', base.lower()).strip('-')[:32] or "unnamed"
     date = datetime.now(timezone.utc).strftime("%Y%m%d")
     suffix = secrets.token_hex(2)
     return f"deploy-{base}-{date}-{suffix}"
@@ -39,8 +42,8 @@ class WorkerServer:
         api_key: str,
         workspace_path: Path,
         default_mode: str = "docker",
-        port_range_start: int = 8188,
-        port_range_end: int = 8197,
+        port_range_start: int = 8200,
+        port_range_end: int = 8210,
         state_dir: Path | None = None,
     ):
         """Initialize worker server.
@@ -363,6 +366,7 @@ async def handle_terminate_instance(request: web.Request) -> web.Response:
     """DELETE /api/v1/instances/{id} - Terminate instance."""
     worker: WorkerServer = request.app["worker"]
     instance_id = request.match_info["id"]
+    keep_env = request.query.get("keep_env", "false").lower() == "true"
 
     instance = worker.state.instances.get(instance_id)
     if not instance:
@@ -371,6 +375,8 @@ async def handle_terminate_instance(request: web.Request) -> web.Response:
     # Terminate based on mode
     if instance.mode == "native":
         worker.native_manager.terminate(instance_id)
+        if not keep_env:
+            worker.native_manager.delete_environment(instance.environment_name)
     # Docker mode would go here
 
     # Release port and remove from state
@@ -378,10 +384,14 @@ async def handle_terminate_instance(request: web.Request) -> web.Response:
     worker.state.remove_instance(instance_id)
     worker.state.save()
 
+    msg = f"Instance terminated. Port {instance.assigned_port} released."
+    if not keep_env:
+        msg += f" Environment '{instance.environment_name}' deleted."
+
     return web.json_response({
         "id": instance_id,
         "status": "terminated",
-        "message": f"Instance terminated. Port {instance.assigned_port} released.",
+        "message": msg,
     })
 
 
@@ -450,8 +460,8 @@ def create_worker_app(
     api_key: str,
     workspace_path: Path,
     default_mode: str = "docker",
-    port_range_start: int = 8188,
-    port_range_end: int = 8197,
+    port_range_start: int = 8200,
+    port_range_end: int = 8210,
     state_dir: Path | None = None,
 ) -> web.Application:
     """Create aiohttp application for worker server.

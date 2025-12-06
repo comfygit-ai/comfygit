@@ -89,7 +89,7 @@ def handle_setup(args: argparse.Namespace) -> int:
         "workspace_path": workspace,
         "default_mode": "docker",
         "server_port": 9090,
-        "instance_port_range": {"start": 8188, "end": 8197},
+        "instance_port_range": {"start": 8200, "end": 8210},
     }
 
     save_worker_config(config)
@@ -107,6 +107,8 @@ def handle_setup(args: argparse.Namespace) -> int:
 
 def handle_up(args: argparse.Namespace) -> int:
     """Handle 'worker up' command."""
+    import os
+
     config = load_worker_config()
     if not config:
         print("Worker not configured. Run 'cg-deploy worker setup' first.")
@@ -116,6 +118,39 @@ def handle_up(args: argparse.Namespace) -> int:
     port_range = args.port_range.split(":")
     port_start = int(port_range[0])
     port_end = int(port_range[1]) if len(port_range) > 1 else port_start + 10
+
+    # Dev mode: explicit paths override saved config
+    dev_core = getattr(args, "dev_core", None)
+    dev_manager = getattr(args, "dev_manager", None)
+
+    # --dev flag loads saved config for any missing paths
+    if getattr(args, "dev", False):
+        from .dev import load_dev_config
+        dev_config = load_dev_config()
+        dev_core = dev_core or dev_config.get("core_path")
+        dev_manager = dev_manager or dev_config.get("manager_path")
+
+    if dev_core:
+        dev_core = str(Path(dev_core).resolve())
+        os.environ["COMFYGIT_DEV_CORE_PATH"] = dev_core
+        print(f"Dev mode: core -> {dev_core}")
+
+    if dev_manager:
+        dev_manager = str(Path(dev_manager).resolve())
+        # Symlink manager to system_nodes
+        workspace = Path(config["workspace_path"])
+        system_nodes = workspace / ".metadata" / "system_nodes"
+        system_nodes.mkdir(parents=True, exist_ok=True)
+        manager_link = system_nodes / "comfygit-manager"
+
+        if manager_link.is_symlink():
+            manager_link.unlink()
+        elif manager_link.is_dir():
+            import shutil
+            shutil.rmtree(manager_link)
+
+        manager_link.symlink_to(dev_manager)
+        print(f"Dev mode: manager -> {dev_manager}")
 
     print(f"Starting worker server on {args.host}:{args.port}...")
     print(f"  Mode: {args.mode}")
@@ -201,7 +236,7 @@ def handle_status(args: argparse.Namespace) -> int:
 
     port_range = config.get("instance_port_range", {})
     print(
-        f"  Instance Ports: {port_range.get('start', 8188)}-{port_range.get('end', 8197)}"
+        f"  Instance Ports: {port_range.get('start', 8200)}-{port_range.get('end', 8210)}"
     )
 
     return 0
