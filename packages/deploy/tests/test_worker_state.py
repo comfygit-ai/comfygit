@@ -207,3 +207,130 @@ class TestWorkerState:
 
         assert state.instances["inst_x"].status == "running"
         assert state.instances["inst_x"].container_id == "abc123"
+
+
+class TestOrphanInstanceCleanup:
+    """Tests for cleaning up instances with missing environments on startup."""
+
+    def test_load_removes_instances_without_complete_marker(
+        self, tmp_path: Path
+    ) -> None:
+        """Instances without .cec/.complete marker should be removed on load."""
+        state_file = tmp_path / "instances.json"
+        workspace = tmp_path / "workspace"
+        envs_dir = workspace / "environments"
+        envs_dir.mkdir(parents=True)
+
+        # Create environment dir without .complete marker
+        (envs_dir / "orphan-env").mkdir()
+
+        # Create valid environment with marker
+        valid_env = envs_dir / "valid-env"
+        valid_env.mkdir()
+        (valid_env / ".cec").mkdir()
+        (valid_env / ".cec" / ".complete").touch()
+
+        # Pre-populate state file with both instances
+        state_file.write_text(
+            json.dumps(
+                {
+                    "version": "1",
+                    "instances": {
+                        "inst_orphan": {
+                            "id": "inst_orphan",
+                            "name": "orphan-env",
+                            "environment_name": "orphan-env",
+                            "mode": "native",
+                            "assigned_port": 8200,
+                            "import_source": "x",
+                            "status": "running",
+                        },
+                        "inst_valid": {
+                            "id": "inst_valid",
+                            "name": "valid-env",
+                            "environment_name": "valid-env",
+                            "mode": "native",
+                            "assigned_port": 8201,
+                            "import_source": "y",
+                            "status": "running",
+                        },
+                    },
+                }
+            )
+        )
+
+        # Load state - should remove orphan, keep valid
+        state = WorkerState(state_file, workspace_path=workspace)
+
+        assert "inst_orphan" not in state.instances
+        assert "inst_valid" in state.instances
+
+    def test_load_removes_instances_with_missing_environment_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """Instances with completely missing environment dir should be removed."""
+        state_file = tmp_path / "instances.json"
+        workspace = tmp_path / "workspace"
+        envs_dir = workspace / "environments"
+        envs_dir.mkdir(parents=True)
+
+        # No environment directories exist at all
+
+        state_file.write_text(
+            json.dumps(
+                {
+                    "version": "1",
+                    "instances": {
+                        "inst_missing": {
+                            "id": "inst_missing",
+                            "name": "deleted-env",
+                            "environment_name": "deleted-env",
+                            "mode": "native",
+                            "assigned_port": 8200,
+                            "import_source": "x",
+                            "status": "stopped",
+                        },
+                    },
+                }
+            )
+        )
+
+        state = WorkerState(state_file, workspace_path=workspace)
+
+        assert "inst_missing" not in state.instances
+        assert len(state.instances) == 0
+
+    def test_load_persists_cleanup_to_disk(self, tmp_path: Path) -> None:
+        """Cleanup should persist to disk so subsequent loads stay clean."""
+        state_file = tmp_path / "instances.json"
+        workspace = tmp_path / "workspace"
+        envs_dir = workspace / "environments"
+        envs_dir.mkdir(parents=True)
+
+        # Pre-populate with orphan
+        state_file.write_text(
+            json.dumps(
+                {
+                    "version": "1",
+                    "instances": {
+                        "inst_orphan": {
+                            "id": "inst_orphan",
+                            "name": "gone",
+                            "environment_name": "gone",
+                            "mode": "native",
+                            "assigned_port": 8200,
+                            "import_source": "x",
+                            "status": "running",
+                        },
+                    },
+                }
+            )
+        )
+
+        # First load cleans up
+        state = WorkerState(state_file, workspace_path=workspace)
+        assert len(state.instances) == 0
+
+        # Verify disk was updated
+        data = json.loads(state_file.read_text())
+        assert len(data["instances"]) == 0

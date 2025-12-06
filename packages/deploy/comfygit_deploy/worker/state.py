@@ -151,15 +151,41 @@ class PortAllocator:
 class WorkerState:
     """Persistent state for all instances managed by this worker."""
 
-    def __init__(self, state_file: Path):
+    def __init__(self, state_file: Path, workspace_path: Path | None = None):
         """Initialize worker state.
 
         Args:
             state_file: Path to instances.json
+            workspace_path: ComfyGit workspace path (for environment validation)
         """
         self.state_file = state_file
+        self.workspace_path = workspace_path
         self.instances: dict[str, InstanceState] = {}
         self._load()
+        if workspace_path:
+            self._validate_instances()
+
+    def _validate_instances(self) -> None:
+        """Remove instances whose environments no longer exist.
+
+        Checks for .cec/.complete marker file to confirm environment is valid.
+        Persists cleanup to disk if any instances were removed.
+        """
+        if not self.workspace_path:
+            return
+
+        envs_dir = self.workspace_path / "environments"
+        orphans = []
+
+        for inst_id, inst in self.instances.items():
+            marker = envs_dir / inst.environment_name / ".cec" / ".complete"
+            if not marker.exists():
+                orphans.append(inst_id)
+
+        if orphans:
+            for inst_id in orphans:
+                del self.instances[inst_id]
+            self.save()
 
     def _load(self) -> None:
         """Load state from disk."""

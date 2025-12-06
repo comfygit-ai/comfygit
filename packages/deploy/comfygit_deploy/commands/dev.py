@@ -7,9 +7,18 @@ import argparse
 import json
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 DEV_CONFIG_PATH = Path.home() / ".config" / "comfygit" / "deploy" / "dev.json"
+
+
+@dataclass
+class DevNode:
+    """A development node configuration."""
+
+    name: str
+    path: str
 
 
 def load_dev_config() -> dict:
@@ -20,6 +29,12 @@ def load_dev_config() -> dict:
         return json.loads(DEV_CONFIG_PATH.read_text())
     except (json.JSONDecodeError, OSError):
         return {}
+
+
+def get_dev_nodes() -> list[DevNode]:
+    """Get list of configured dev nodes."""
+    config = load_dev_config()
+    return [DevNode(name=n["name"], path=n["path"]) for n in config.get("dev_nodes", [])]
 
 
 def save_dev_config(config: dict) -> None:
@@ -53,6 +68,11 @@ def handle_setup(args: argparse.Namespace) -> int:
                 print(f"  Core: {config['core_path']}")
             if config.get("manager_path"):
                 print(f"  Manager: {config['manager_path']}")
+            dev_nodes = config.get("dev_nodes", [])
+            if dev_nodes:
+                print(f"  Dev nodes ({len(dev_nodes)}):")
+                for node in dev_nodes:
+                    print(f"    - {node['name']}: {node['path']}")
         return 0
 
     # Clear config
@@ -128,13 +148,15 @@ def handle_setup(args: argparse.Namespace) -> int:
 
 
 def handle_patch(args: argparse.Namespace) -> int:
-    """Handle 'dev patch' command - patch existing environments with dev core."""
+    """Handle 'dev patch' command - patch existing environments with dev config."""
     config = load_dev_config()
     core_path = config.get("core_path")
+    dev_nodes = config.get("dev_nodes", [])
 
-    if not core_path:
-        print("No dev core path configured.")
+    if not core_path and not dev_nodes:
+        print("No dev config found.")
         print("Run: cg-deploy dev setup --core PATH")
+        print("     cg-deploy dev add-node NAME PATH")
         return 1
 
     workspace = get_workspace_path()
@@ -160,7 +182,11 @@ def handle_patch(args: argparse.Namespace) -> int:
         print("No environments with .venv found.")
         return 0
 
-    print(f"Patching {len(envs)} environment(s) with dev core: {core_path}")
+    print(f"Patching {len(envs)} environment(s):")
+    if core_path:
+        print(f"  - dev core: {core_path}")
+    for node in dev_nodes:
+        print(f"  - dev node: {node['name']} -> {node['path']}")
     print()
 
     for env_path in envs:
@@ -171,16 +197,160 @@ def handle_patch(args: argparse.Namespace) -> int:
             print(f"  {env_name}: skipped (no .venv)")
             continue
 
-        # Install editable
-        cmd = ["uv", "pip", "install", "-e", core_path, "--python", str(venv_python)]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        success = True
 
-        if result.returncode == 0:
+        # Patch core if configured
+        if core_path:
+            cmd = ["uv", "pip", "install", "-e", core_path, "--python", str(venv_python)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"  {env_name}: core failed - {result.stderr.strip()[:60]}")
+                success = False
+
+        # Apply dev nodes
+        for node in dev_nodes:
+            node_result = _apply_dev_node_to_env(env_path, node["name"], node["path"], workspace)
+            if not node_result:
+                print(f"  {env_name}: node {node['name']} failed")
+                success = False
+
+        if success:
             print(f"  {env_name}: patched")
-        else:
-            print(f"  {env_name}: failed - {result.stderr.strip()[:60]}")
 
     print()
-    print("Done. Restart any running ComfyUI instances to use dev core.")
+    print("Done. Restart any running ComfyUI instances to apply changes.")
+
+    return 0
+
+
+def _apply_dev_node_to_env(env_path: Path, node_name: str, node_path: str, workspace: Path) -> bool:
+    """Apply a dev node to an environment (symlink + track).
+
+    Args:
+        env_path: Path to the environment
+        node_name: Name of the node
+        node_path: Path to the dev node source
+        workspace: Workspace path
+
+    Returns:
+        True if successful
+    """
+    import shutil
+
+    custom_nodes = env_path / "ComfyUI" / "custom_nodes"
+    if not custom_nodes.exists():
+        return False
+
+    target = custom_nodes / node_name
+    source = Path(node_path)
+
+    # Create/update symlink
+    if target.is_symlink():
+        if target.resolve() == source.resolve():
+            # Already correct
+            pass
+        else:
+            target.unlink()
+            target.symlink_to(source)
+    elif target.exists():
+        # Regular directory exists - replace with symlink
+        shutil.rmtree(target)
+        target.symlink_to(source)
+    else:
+        target.symlink_to(source)
+
+    # Track with cg node add --dev
+    env = os.environ.copy()
+    env["COMFYGIT_HOME"] = str(workspace)
+
+    cmd = ["cg", "-e", env_path.name, "node", "add", node_name, "--dev"]
+    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+
+    # Success if tracked or already tracked
+    return result.returncode == 0 or "already tracked" in result.stderr.lower()
+
+
+def handle_add_node(args: argparse.Namespace) -> int:
+    """Handle 'dev add-node' command."""
+    config = load_dev_config()
+
+    node_name = args.name
+    node_path = Path(args.path).resolve()
+
+    # Validate path
+    if not node_path.is_dir():
+        print(f"Error: Path does not exist: {node_path}")
+        return 1
+
+    # Check for __init__.py or common node indicators
+    has_init = (node_path / "__init__.py").exists()
+    has_nodes = (node_path / "nodes.py").exists() or (node_path / "nodes").exists()
+    if not has_init and not has_nodes:
+        print(f"Warning: {node_path} doesn't look like a ComfyUI node (no __init__.py or nodes.py)")
+
+    # Add to dev_nodes list
+    dev_nodes = config.get("dev_nodes", [])
+
+    # Check if already exists
+    existing = next((n for n in dev_nodes if n["name"] == node_name), None)
+    if existing:
+        existing["path"] = str(node_path)
+        print(f"Updated dev node: {node_name} -> {node_path}")
+    else:
+        dev_nodes.append({"name": node_name, "path": str(node_path)})
+        print(f"Added dev node: {node_name} -> {node_path}")
+
+    config["dev_nodes"] = dev_nodes
+    save_dev_config(config)
+
+    print()
+    print("To apply to existing environments:")
+    print("  cg-deploy dev patch")
+    print()
+    print("New instances created with --dev will include this node.")
+
+    return 0
+
+
+def handle_remove_node(args: argparse.Namespace) -> int:
+    """Handle 'dev remove-node' command."""
+    config = load_dev_config()
+    node_name = args.name
+
+    dev_nodes = config.get("dev_nodes", [])
+    original_len = len(dev_nodes)
+
+    dev_nodes = [n for n in dev_nodes if n["name"] != node_name]
+
+    if len(dev_nodes) == original_len:
+        print(f"Dev node not found: {node_name}")
+        return 1
+
+    config["dev_nodes"] = dev_nodes
+    save_dev_config(config)
+
+    print(f"Removed dev node: {node_name}")
+    print("Note: Existing symlinks in environments are not removed.")
+
+    return 0
+
+
+def handle_list_nodes(args: argparse.Namespace) -> int:
+    """Handle 'dev list-nodes' command."""
+    config = load_dev_config()
+    dev_nodes = config.get("dev_nodes", [])
+
+    if not dev_nodes:
+        print("No dev nodes configured.")
+        print()
+        print("Add a dev node:")
+        print("  cg-deploy dev add-node NAME PATH")
+        return 0
+
+    print(f"Dev nodes ({len(dev_nodes)}):")
+    for node in dev_nodes:
+        path = Path(node["path"])
+        exists = "✓" if path.exists() else "✗"
+        print(f"  {exists} {node['name']}: {node['path']}")
 
     return 0

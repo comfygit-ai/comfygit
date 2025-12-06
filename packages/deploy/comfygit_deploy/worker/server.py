@@ -65,7 +65,9 @@ class WorkerServer:
         state_dir = state_dir or Path.home() / ".config" / "comfygit" / "deploy"
         state_dir.mkdir(parents=True, exist_ok=True)
 
-        self.state = WorkerState(state_dir / "instances.json")
+        self.state = WorkerState(
+            state_dir / "instances.json", workspace_path=workspace_path
+        )
         self.port_allocator = PortAllocator(
             state_dir / "instances.json",
             base_port=port_range_start,

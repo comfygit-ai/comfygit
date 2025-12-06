@@ -5,6 +5,7 @@ Uses `cg` CLI directly to import environments and run ComfyUI processes.
 
 import asyncio
 import os
+import shutil
 import signal
 import subprocess
 import time
@@ -12,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import aiohttp
+
+from ..commands.dev import get_dev_nodes
 
 
 @dataclass
@@ -111,6 +114,8 @@ class NativeManager:
         """
         # Check if environment already exists (e.g., worker restart)
         if self.environment_exists(environment_name):
+            # Still apply dev nodes in case config changed
+            self._apply_dev_nodes(environment_name)
             return DeployResult(success=True, skipped=True)
 
         # Build import command
@@ -148,7 +153,50 @@ class NativeManager:
                 error=f"Import failed for {instance_id}: {output}",
             )
 
+        # Apply dev nodes if configured
+        self._apply_dev_nodes(environment_name)
+
         return DeployResult(success=True, skipped=False)
+
+    def _apply_dev_nodes(self, environment_name: str) -> None:
+        """Apply configured dev nodes to an environment.
+
+        Creates symlinks and tracks with cg node add --dev.
+        """
+        dev_nodes = get_dev_nodes()
+        if not dev_nodes:
+            return
+
+        env_path = self.workspace_path / "environments" / environment_name
+        custom_nodes = env_path / "ComfyUI" / "custom_nodes"
+
+        if not custom_nodes.exists():
+            return
+
+        env = os.environ.copy()
+        env["COMFYGIT_HOME"] = str(self.workspace_path)
+
+        for node in dev_nodes:
+            target = custom_nodes / node.name
+            source = Path(node.path)
+
+            if not source.exists():
+                continue
+
+            # Create/update symlink
+            if target.is_symlink():
+                if target.resolve() != source.resolve():
+                    target.unlink()
+                    target.symlink_to(source)
+            elif target.exists():
+                shutil.rmtree(target)
+                target.symlink_to(source)
+            else:
+                target.symlink_to(source)
+
+            # Track with cg node add --dev
+            cmd = ["cg", "-e", environment_name, "node", "add", node.name, "--dev"]
+            subprocess.run(cmd, env=env, capture_output=True)
 
     def start(
         self,

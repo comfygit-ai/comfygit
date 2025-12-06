@@ -1,6 +1,7 @@
 """Simplified Environment - owns everything about a single ComfyUI environment."""
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from functools import cached_property
@@ -1789,6 +1790,17 @@ class Environment:
             if "dependency-groups" not in config:
                 config["dependency-groups"] = {}
             config["dependency-groups"]["system-nodes"] = list(local_requirements)
+
+            # Dev mode: redirect comfygit-core to local editable path
+            dev_core_path = os.environ.get("COMFYGIT_DEV_CORE_PATH")
+            if dev_core_path and any("comfygit-core" in req for req in local_requirements):
+                config.setdefault("tool", {}).setdefault("uv", {}).setdefault("sources", {})
+                config["tool"]["uv"]["sources"]["comfygit-core"] = {
+                    "path": dev_core_path,
+                    "editable": True
+                }
+                logger.info(f"Dev mode: comfygit-core → {dev_core_path}")
+
             self.pyproject.save(config)
             logger.info(f"Updated system-nodes deps: {', '.join(local_requirements)}")
 

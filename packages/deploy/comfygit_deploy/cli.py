@@ -217,9 +217,25 @@ def create_parser() -> argparse.ArgumentParser:
 
     # dev patch
     dev_patch_parser = dev_subparsers.add_parser(
-        "patch", help="Patch existing environments with dev core"
+        "patch", help="Patch existing environments with dev config"
     )
     dev_patch_parser.add_argument("--env", help="Specific environment to patch (default: all)")
+
+    # dev add-node
+    dev_add_node_parser = dev_subparsers.add_parser(
+        "add-node", help="Add a dev node to be symlinked into environments"
+    )
+    dev_add_node_parser.add_argument("name", help="Node directory name (e.g., ComfyUI-Async-API)")
+    dev_add_node_parser.add_argument("path", help="Path to the node source directory")
+
+    # dev remove-node
+    dev_remove_node_parser = dev_subparsers.add_parser(
+        "remove-node", help="Remove a dev node from config"
+    )
+    dev_remove_node_parser.add_argument("name", help="Node name to remove")
+
+    # dev list-nodes
+    dev_subparsers.add_parser("list-nodes", help="List configured dev nodes")
 
     return parser
 
@@ -332,6 +348,9 @@ def main(args: list[str] | None = None) -> int:
             handler_map = {
                 "setup": dev_commands.handle_setup,
                 "patch": dev_commands.handle_patch,
+                "add-node": dev_commands.handle_add_node,
+                "remove-node": dev_commands.handle_remove_node,
+                "list-nodes": dev_commands.handle_list_nodes,
             }
             handler = handler_map.get(parsed.dev_command)
             if handler:
