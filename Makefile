@@ -149,6 +149,7 @@ show-versions:
 	@echo "Current package versions:"
 	@echo -n "  comfygit-core: " && grep '^version =' packages/core/pyproject.toml | grep -oP 'version = "\K[^"]+'
 	@echo -n "  comfygit (cli): " && grep '^version =' packages/cli/pyproject.toml | grep -oP 'version = "\K[^"]+'
+	@echo -n "  comfygit-deploy: " && grep '^version =' packages/deploy/pyproject.toml | grep -oP 'version = "\K[^"]+'
 
 # Check version compatibility
 check-versions:
@@ -164,8 +165,11 @@ bump-version:
 	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION)"/' packages/core/pyproject.toml
 	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION)"/' packages/cli/pyproject.toml
 	@sed -i 's/comfygit-core==[0-9]\+\.[0-9]\+\.[0-9]\+/comfygit-core==$(VERSION)/' packages/cli/pyproject.toml
+	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION)"/' packages/deploy/pyproject.toml
+	@sed -i 's/comfygit==[0-9]\+\.[0-9]\+\.[0-9]\+/comfygit==$(VERSION)/' packages/deploy/pyproject.toml
 	@echo "✓ Updated all packages to $(VERSION)"
 	@echo "✓ Updated CLI dependency: comfygit-core==$(VERSION)"
+	@echo "✓ Updated deploy dependency: comfygit==$(VERSION)"
 	@make show-versions
 
 # Bump major version for all packages

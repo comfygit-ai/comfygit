@@ -20,6 +20,7 @@ def check_compatibility():
     packages = {
         "core": root / "packages/core/pyproject.toml",
         "cli": root / "packages/cli/pyproject.toml",
+        "deploy": root / "packages/deploy/pyproject.toml",
     }
 
     versions = {}
