@@ -270,53 +270,74 @@ class NativeManager:
             print(f"Failed to start {instance_id}: {e}")
             return None
 
-    def stop(self, instance_id: str) -> bool:
+    def stop(self, instance_id: str, pid: int | None = None) -> bool:
         """Stop a running ComfyUI process.
 
         Args:
             instance_id: Instance to stop
+            pid: Optional PID to kill if process not tracked in memory
 
         Returns:
             True if stopped (or wasn't running)
         """
         proc = self._processes.get(instance_id)
-        if not proc:
-            return True
 
-        if proc.poll() is not None:
-            # Already dead
-            return True
+        # If we have a tracked process, use it
+        if proc:
+            if proc.poll() is not None:
+                # Already dead
+                return True
 
-        try:
-            # Send SIGTERM to process group
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-
-            # Wait up to 5 seconds for graceful shutdown
             try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                # Force kill
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                proc.wait(timeout=2)
+                # Send SIGTERM to process group
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
 
-            return True
-        except ProcessLookupError:
-            # Process already gone
-            return True
-        except Exception as e:
-            print(f"Error stopping {instance_id}: {e}")
-            return False
+                # Wait up to 5 seconds for graceful shutdown
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    proc.wait(timeout=2)
 
-    def terminate(self, instance_id: str) -> bool:
+                return True
+            except ProcessLookupError:
+                return True
+            except Exception as e:
+                print(f"Error stopping {instance_id}: {e}")
+                return False
+
+        # No tracked process - try to kill by PID if provided
+        if pid:
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+                # Give it a moment to die
+                time.sleep(0.5)
+                # Check if still alive and force kill
+                try:
+                    os.kill(pid, 0)  # Check if process exists
+                    os.killpg(os.getpgid(pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # Already dead
+                return True
+            except ProcessLookupError:
+                return True  # Already dead
+            except (PermissionError, OSError):
+                return False
+
+        return True
+
+    def terminate(self, instance_id: str, pid: int | None = None) -> bool:
         """Terminate instance and remove tracking.
 
         Args:
             instance_id: Instance to terminate
+            pid: Optional PID to kill if process not tracked in memory
 
         Returns:
             True if terminated successfully
         """
-        result = self.stop(instance_id)
+        result = self.stop(instance_id, pid=pid)
         self._processes.pop(instance_id, None)
         return result
 

@@ -316,7 +316,7 @@ async def handle_stop_instance(request: web.Request) -> web.Response:
 
     # Stop based on mode
     if instance.mode == "native":
-        worker.native_manager.stop(instance_id)
+        worker.native_manager.stop(instance_id, pid=instance.pid)
     # Docker mode would go here
 
     worker.state.update_status(instance_id, "stopped")
@@ -376,7 +376,7 @@ async def handle_terminate_instance(request: web.Request) -> web.Response:
 
     # Terminate based on mode
     if instance.mode == "native":
-        worker.native_manager.terminate(instance_id)
+        worker.native_manager.terminate(instance_id, pid=instance.pid)
         if not keep_env:
             worker.native_manager.delete_environment(instance.environment_name)
     # Docker mode would go here
