@@ -3,10 +3,8 @@
 TDD: Tests written first - should FAIL until implementation exists.
 """
 
-import pytest
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
-
 from comfygit_deploy.providers.custom import CustomWorkerClient
 
 

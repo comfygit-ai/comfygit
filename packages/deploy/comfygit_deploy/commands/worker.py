@@ -4,7 +4,6 @@ Commands for setting up and managing the worker server on GPU machines.
 """
 
 import argparse
-import asyncio
 import json
 import secrets
 from pathlib import Path
@@ -69,7 +68,6 @@ def is_worker_running() -> bool:
 
     try:
         import os
-        import signal
 
         pid = int(pid_file.read_text().strip())
         os.kill(pid, 0)  # Check if process exists
@@ -159,8 +157,9 @@ def handle_up(args: argparse.Namespace) -> int:
     print()
     print("Press Ctrl+C to stop.")
 
-    from ..worker.server import create_worker_app
     from aiohttp import web
+
+    from ..worker.server import create_worker_app
 
     app = create_worker_app(
         api_key=config["api_key"],

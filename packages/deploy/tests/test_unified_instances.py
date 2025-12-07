@@ -4,13 +4,11 @@ TDD: These tests verify that `cg-deploy instances` aggregates from both
 RunPod and custom workers, with proper namespacing and filtering.
 """
 
-import asyncio
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from comfygit_deploy.commands.instances import (
     handle_instances,
     handle_start,

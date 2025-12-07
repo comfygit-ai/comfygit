@@ -5,8 +5,6 @@ Phase 3: Tests for scanning the network to discover ComfyGit workers.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from comfygit_deploy.worker.mdns import SERVICE_TYPE
 
 
@@ -32,7 +30,7 @@ class TestMDNSScanner:
 
     def test_scanner_returns_worker_info(self) -> None:
         """Scanner returns structured worker info (host, port, name)."""
-        from comfygit_deploy.worker.mdns import MDNSScanner, DiscoveredWorker
+        from comfygit_deploy.worker.mdns import DiscoveredWorker, MDNSScanner
 
         with patch("comfygit_deploy.worker.mdns.Zeroconf") as mock_zc_class:
             with patch("comfygit_deploy.worker.mdns.ServiceBrowser"):
@@ -83,6 +81,7 @@ class TestCustomScanCommand:
     def test_scan_uses_mdns_scanner(self, tmp_path, monkeypatch) -> None:
         """Scan command uses MDNSScanner to discover workers."""
         from argparse import Namespace
+
         from comfygit_deploy.commands.custom import handle_scan
 
         # Mock config directory
@@ -103,6 +102,7 @@ class TestCustomScanCommand:
     def test_scan_displays_discovered_workers(self, tmp_path, monkeypatch, capsys) -> None:
         """Scan command displays discovered workers."""
         from argparse import Namespace
+
         from comfygit_deploy.commands.custom import handle_scan
         from comfygit_deploy.worker.mdns import DiscoveredWorker
 
@@ -130,11 +130,11 @@ class TestCustomScanCommand:
 
     def test_scan_saves_results_for_discovered_flag(self, tmp_path, monkeypatch) -> None:
         """Scan saves results so 'custom add --discovered' can use them."""
+        import json
         from argparse import Namespace
+
         from comfygit_deploy.commands.custom import handle_scan
         from comfygit_deploy.worker.mdns import DiscoveredWorker
-        from comfygit_deploy.config import DeployConfig
-        import json
 
         monkeypatch.setenv("HOME", str(tmp_path))
         config_dir = tmp_path / ".config" / "comfygit" / "deploy"
@@ -168,9 +168,10 @@ class TestCustomAddDiscovered:
 
     def test_add_discovered_uses_saved_scan(self, tmp_path, monkeypatch) -> None:
         """add --discovered uses workers from last scan."""
-        from argparse import Namespace
-        from comfygit_deploy.commands.custom import handle_add
         import json
+        from argparse import Namespace
+
+        from comfygit_deploy.commands.custom import handle_add
 
         monkeypatch.setenv("HOME", str(tmp_path))
         config_dir = tmp_path / ".config" / "comfygit" / "deploy"

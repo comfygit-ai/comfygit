@@ -1,7 +1,7 @@
 """Worker server components for self-hosted deployment."""
 
-from .state import InstanceState, PortAllocator, WorkerState
 from .server import WorkerServer, create_worker_app
+from .state import InstanceState, PortAllocator, WorkerState
 
 __all__ = [
     "InstanceState",

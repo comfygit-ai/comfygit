@@ -1,17 +1,12 @@
 """Tests for native process manager."""
 
-import asyncio
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from comfygit_deploy.worker.native_manager import (
     NativeManager,
-    ProcessInfo,
-    DeployResult,
 )
 
 

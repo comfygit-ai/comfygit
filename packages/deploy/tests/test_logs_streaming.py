@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
-
 from comfygit_deploy.worker.server import create_worker_app
 
 
@@ -58,9 +57,12 @@ class TestLogStreamingEndpoint(AioHTTPTestCase):
     @unittest_run_loop
     async def test_logs_endpoint_requires_auth(self) -> None:
         """WebSocket logs endpoint requires authentication."""
-        with pytest.raises(Exception):
-            # Should fail without auth header
+        from aiohttp import WSServerHandshakeError
+
+        with pytest.raises(WSServerHandshakeError) as exc_info:
+            # Should fail without auth header - returns 401
             await self.client.ws_connect("/api/v1/instances/test-id/logs")
+        assert exc_info.value.status == 401
 
     @unittest_run_loop
     async def test_logs_returns_json_messages(self) -> None:
@@ -98,6 +100,7 @@ class TestLogStreamingClient:
     async def test_client_has_stream_logs_method(self) -> None:
         """CustomWorkerClient has stream_logs async generator method."""
         import inspect
+
         from comfygit_deploy.providers.custom import CustomWorkerClient
 
         client = CustomWorkerClient(host="localhost", port=9090, api_key="test")
@@ -158,9 +161,10 @@ class TestLogsFollowCommand:
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
         """logs --follow streams logs for custom worker instances."""
-        from argparse import Namespace
-        from comfygit_deploy.commands.instances import handle_logs
         import json
+        from argparse import Namespace
+
+        from comfygit_deploy.commands.instances import handle_logs
 
         monkeypatch.setenv("HOME", str(tmp_path))
         config_dir = tmp_path / ".config" / "comfygit" / "deploy"
@@ -189,7 +193,7 @@ class TestLogsFollowCommand:
             mock_stream.return_value = None  # Side effect handled via printing
 
             args = Namespace(instance_id="my-worker:inst_123", follow=True, lines=100)
-            result = handle_logs(args)
+            handle_logs(args)
 
             # Should call stream_worker_logs for custom worker with follow=True
             mock_stream.assert_called_once()
@@ -200,9 +204,10 @@ class TestLogsFollowCommand:
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
         """logs without --follow fetches last N lines (not streaming)."""
-        from argparse import Namespace
-        from comfygit_deploy.commands.instances import handle_logs
         import json
+        from argparse import Namespace
+
+        from comfygit_deploy.commands.instances import handle_logs
 
         monkeypatch.setenv("HOME", str(tmp_path))
         config_dir = tmp_path / ".config" / "comfygit" / "deploy"

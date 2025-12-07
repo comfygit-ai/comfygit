@@ -4,8 +4,9 @@ Provides async interface for worker server REST API.
 """
 
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any
 
 import aiohttp
 

@@ -3,15 +3,13 @@
 TDD: Tests written first - should FAIL until implementation exists.
 """
 
-import os
-from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
 import argparse
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
-
-from comfygit_deploy.commands import worker as worker_commands
 from comfygit_deploy.commands import custom as custom_commands
+from comfygit_deploy.commands import worker as worker_commands
 from comfygit_deploy.config import DeployConfig
 
 
@@ -175,7 +173,7 @@ class TestWorkerCommands:
         with patch(
             "comfygit_deploy.commands.worker.WORKER_CONFIG_PATH", config_path
         ):
-            result = worker_commands.handle_regenerate_key(args)
+            worker_commands.handle_regenerate_key(args)
 
         config = json.loads(config_path.read_text())
         assert config["api_key"] != "cg_wk_oldkey"

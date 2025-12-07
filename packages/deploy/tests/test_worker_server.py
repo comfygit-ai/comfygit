@@ -5,13 +5,10 @@ TDD: Tests written first - should FAIL until implementation exists.
 
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
-import pytest
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
-
-from comfygit_deploy.worker.server import create_worker_app, WorkerServer
+from comfygit_deploy.worker.server import create_worker_app
 
 
 class TestWorkerServerEndpoints(AioHTTPTestCase):

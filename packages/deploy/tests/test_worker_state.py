@@ -8,11 +8,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from comfygit_deploy.worker.state import (
     InstanceState,
-    WorkerState,
     PortAllocator,
+    WorkerState,
 )
 
 

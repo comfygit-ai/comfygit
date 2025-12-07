@@ -11,7 +11,7 @@ from typing import Any
 
 from ..config import DeployConfig
 from ..providers.custom import CustomWorkerClient
-from ..worker.mdns import DiscoveredWorker, MDNSScanner
+from ..worker.mdns import MDNSScanner
 
 
 def test_worker_connection(host: str, port: int, api_key: str) -> dict[str, Any]:
@@ -138,11 +138,11 @@ def handle_test(args: argparse.Namespace) -> int:
     )
 
     if result.get("success"):
-        print(f"  Status: OK")
+        print("  Status: OK")
         print(f"  Version: {result.get('worker_version', 'unknown')}")
         return 0
     else:
-        print(f"  Status: FAILED")
+        print("  Status: FAILED")
         print(f"  Error: {result.get('error', 'Unknown error')}")
         return 1
 
@@ -214,5 +214,5 @@ def handle_scan(args: argparse.Namespace) -> int:
     discovered_file.parent.mkdir(parents=True, exist_ok=True)
     discovered_file.write_text(json.dumps([asdict(w) for w in workers], indent=2))
 
-    print(f"Use 'cg-deploy custom add <name> --discovered --api-key <key>' to register.")
+    print("Use 'cg-deploy custom add <name> --discovered --api-key <key>' to register.")
     return 0

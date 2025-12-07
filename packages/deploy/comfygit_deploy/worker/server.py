@@ -4,11 +4,9 @@ Provides REST API for creating, starting, stopping, and terminating instances.
 """
 
 import asyncio
-import json
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
-
 from typing import Any
 
 from aiohttp import web
