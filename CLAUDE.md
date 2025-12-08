@@ -82,6 +82,7 @@ make lint
 - Never manually edit version numbers - use `make bump-version`
 - The publish workflow validates version match and skips if already published
 - GitHub releases include AI-generated summaries (requires ANTHROPIC_API_KEY secret)
+- Code should be written assuming it should work across Linux, Windows, and Mac!
 
 ## General
 Don't make any implementation overly complex. This is a one-person dev MVP project.

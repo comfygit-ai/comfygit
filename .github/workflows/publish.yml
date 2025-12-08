@@ -7,6 +7,7 @@ on:
     paths:
       - "packages/core/pyproject.toml"
       - "packages/cli/pyproject.toml"
+      - "packages/deploy/pyproject.toml"
 
 permissions:
   contents: write
@@ -30,19 +31,21 @@ jobs:
         run: |
           CORE_VERSION=$(grep -m1 '^version' packages/core/pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
           CLI_VERSION=$(grep -m1 '^version' packages/cli/pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
+          DEPLOY_VERSION=$(grep -m1 '^version' packages/deploy/pyproject.toml | sed 's/.*"\([^"]*\)".*/\1/')
 
           echo "Core version: $CORE_VERSION"
           echo "CLI version: $CLI_VERSION"
+          echo "Deploy version: $DEPLOY_VERSION"
 
-          if [ "$CORE_VERSION" != "$CLI_VERSION" ]; then
-            echo "::error::Version mismatch! core=$CORE_VERSION cli=$CLI_VERSION"
-            echo "Lockstep versioning requires both packages to have the same version."
+          if [ "$CORE_VERSION" != "$CLI_VERSION" ] || [ "$CORE_VERSION" != "$DEPLOY_VERSION" ]; then
+            echo "::error::Version mismatch! core=$CORE_VERSION cli=$CLI_VERSION deploy=$DEPLOY_VERSION"
+            echo "Lockstep versioning requires all packages to have the same version."
             echo "Run: make bump-version VERSION=X.Y.Z"
             exit 1
           fi
 
           echo "version=$CORE_VERSION" >> $GITHUB_OUTPUT
-          echo "✓ Versions match: $CORE_VERSION"
+          echo "✓ All versions match: $CORE_VERSION"
 
       - name: Check if version exists on PyPI
         id: check_pypi
@@ -125,10 +128,56 @@ jobs:
       - name: Publish to PyPI
         run: uv publish --trusted-publishing automatic
 
+  wait-for-cli:
+    name: Wait for CLI Availability
+    needs: [check-versions, publish-cli]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for comfygit on PyPI
+        run: |
+          VERSION="${{ needs.check-versions.outputs.version }}"
+          MAX_ATTEMPTS=20
+          SLEEP_SECONDS=15
+
+          echo "Waiting for comfygit $VERSION to be available on PyPI..."
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/comfygit/$VERSION/json")
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "✓ comfygit $VERSION is now available on PyPI"
+              exit 0
+            fi
+
+            echo "Attempt $i/$MAX_ATTEMPTS: Not yet available (HTTP $HTTP_STATUS), waiting ${SLEEP_SECONDS}s..."
+            sleep $SLEEP_SECONDS
+          done
+
+          echo "::error::Timeout waiting for comfygit $VERSION on PyPI after $((MAX_ATTEMPTS * SLEEP_SECONDS))s"
+          exit 1
+
+  publish-deploy:
+    name: Publish Deploy to PyPI
+    needs: [check-versions, wait-for-cli]
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build comfygit-deploy
+        run: uv build --package comfygit-deploy --no-sources
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing automatic
+
   create-release:
     name: Create GitHub Release
-    needs: [check-versions, publish-core, publish-cli]
-    if: always() && needs.publish-core.result == 'success' && needs.publish-cli.result == 'success'
+    needs: [check-versions, publish-core, publish-cli, publish-deploy]
+    if: always() && needs.publish-core.result == 'success' && needs.publish-cli.result == 'success' && needs.publish-deploy.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -159,22 +208,26 @@ jobs:
           if [ -n "$ANTHROPIC_API_KEY" ]; then
             echo "Generating AI summary with Claude Haiku..."
 
-            # Escape commits for JSON
-            COMMITS_ESCAPED=$(echo "$COMMITS" | jq -Rs .)
+            # Build the prompt
+            PROMPT="You are writing release notes for ComfyGit, a git-based environment manager for ComfyUI. This release includes comfygit-core (the library), comfygit (the CLI), and comfygit-deploy (remote deployment CLI). Given these git commits, write a brief 2-3 sentence summary of the key changes in this release. Be concise and focus on user-facing improvements. Do not use bullet points, just prose. Commits:
+
+            $COMMITS"
+
+            # Build JSON payload using jq to handle escaping properly
+            JSON_PAYLOAD=$(jq -n \
+              --arg prompt "$PROMPT" \
+              '{
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 300,
+                messages: [{role: "user", content: $prompt}]
+              }')
 
             # Call Anthropic API
             RESPONSE=$(curl -s https://api.anthropic.com/v1/messages \
               -H "Content-Type: application/json" \
               -H "x-api-key: $ANTHROPIC_API_KEY" \
               -H "anthropic-version: 2023-06-01" \
-              -d "{
-                \"model\": \"claude-haiku-4-20250514\",
-                \"max_tokens\": 300,
-                \"messages\": [{
-                  \"role\": \"user\",
-                  \"content\": \"You are writing release notes for ComfyGit, a git-based environment manager for ComfyUI. This release includes both comfygit-core (the library) and comfygit (the CLI). Given these git commits, write a brief 2-3 sentence summary of the key changes in this release. Be concise and focus on user-facing improvements. Do not use bullet points, just prose. Commits:\\n${COMMITS_ESCAPED}\"
-                }]
-              }" 2>/dev/null)
+              -d "$JSON_PAYLOAD" 2>/dev/null)
 
             # Extract the summary from response
             AI_SUMMARY=$(echo "$RESPONSE" | jq -r '.content[0].text // empty' 2>/dev/null)
@@ -194,6 +247,7 @@ jobs:
             echo ""
             echo "- \`comfygit-core==${{ needs.check-versions.outputs.version }}\`"
             echo "- \`comfygit==${{ needs.check-versions.outputs.version }}\`"
+            echo "- \`comfygit-deploy==${{ needs.check-versions.outputs.version }}\`"
             echo ""
             if [ -n "$AI_SUMMARY" ]; then
               echo "## Summary"
