@@ -93,6 +93,60 @@ class TestWorkspaceValidation:
 class TestWorkerCommands:
     """Tests for worker command handlers."""
 
+    def test_handle_up_uses_env_workspace_over_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """handle_up should use COMFYGIT_HOME over config workspace_path.
+
+        This is the key test: when COMFYGIT_HOME is set, the worker server
+        should use that workspace, not the one saved in worker.json.
+        """
+        config_path = tmp_path / "worker.json"
+        config_workspace = tmp_path / "config-workspace"
+        env_workspace = tmp_path / "env-workspace"
+        config_workspace.mkdir(parents=True)
+        env_workspace.mkdir(parents=True)
+
+        # Create config with one workspace
+        import json
+        config_path.write_text(json.dumps({
+            "version": "1",
+            "api_key": "cg_wk_test123",
+            "workspace_path": str(config_workspace),
+            "default_mode": "native",
+        }))
+
+        # Set env to different workspace
+        monkeypatch.setenv("COMFYGIT_HOME", str(env_workspace))
+
+        args = argparse.Namespace(
+            host="127.0.0.1",
+            port=9999,
+            mode="native",
+            broadcast=False,
+            port_range="8200:8210",
+            dev=False,
+            dev_core=None,
+            dev_manager=None,
+        )
+
+        # Track what workspace_path is passed to create_worker_app
+        captured_workspace = None
+
+        def mock_create_app(**kwargs):
+            nonlocal captured_workspace
+            captured_workspace = kwargs.get("workspace_path")
+            # Return a mock app that we can "run"
+            return MagicMock()
+
+        with patch("comfygit_deploy.commands.worker.WORKER_CONFIG_PATH", config_path):
+            with patch("comfygit_deploy.worker.server.create_worker_app", mock_create_app):
+                with patch("aiohttp.web.run_app"):  # Don't actually start server
+                    worker_commands.handle_up(args)
+
+        # The workspace passed to create_worker_app should be from env, not config
+        assert captured_workspace == env_workspace
+
     def test_handle_setup_creates_config(self, tmp_path: Path) -> None:
         """worker setup should create worker config."""
         config_path = tmp_path / "worker.json"

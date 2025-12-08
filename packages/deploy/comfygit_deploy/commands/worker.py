@@ -112,6 +112,13 @@ def handle_up(args: argparse.Namespace) -> int:
         print("Worker not configured. Run 'cg-deploy worker setup' first.")
         return 1
 
+    # Use COMFYGIT_HOME if set, otherwise fall back to config
+    workspace = get_validated_workspace()
+    if not workspace:
+        print("No valid workspace found.")
+        print("Set COMFYGIT_HOME or run 'cg-deploy worker setup --workspace /path'")
+        return 1
+
     # Parse port range
     port_range = args.port_range.split(":")
     port_start = int(port_range[0])
@@ -136,7 +143,6 @@ def handle_up(args: argparse.Namespace) -> int:
     if dev_manager:
         dev_manager = str(Path(dev_manager).resolve())
         # Symlink manager to system_nodes
-        workspace = Path(config["workspace_path"])
         system_nodes = workspace / ".metadata" / "system_nodes"
         system_nodes.mkdir(parents=True, exist_ok=True)
         manager_link = system_nodes / "comfygit-manager"
@@ -163,7 +169,7 @@ def handle_up(args: argparse.Namespace) -> int:
 
     app = create_worker_app(
         api_key=config["api_key"],
-        workspace_path=Path(config["workspace_path"]),
+        workspace_path=workspace,
         default_mode=args.mode,
         port_range_start=port_start,
         port_range_end=port_end,
