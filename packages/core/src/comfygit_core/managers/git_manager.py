@@ -597,27 +597,43 @@ __pycache__/
             branch: Branch name (default: current branch)
 
         Returns:
-            Dict with keys: 'ahead', 'behind' (commit counts)
+            Dict with keys:
+            - 'ahead': commits ahead of remote (int)
+            - 'behind': commits behind remote (int)
+            - 'remote_branch_exists': whether the remote branch exists (bool)
         """
-        from ..utils.git import git_get_current_branch, git_remote_get_url, git_rev_list_count
+        from ..utils.git import (
+            git_get_current_branch,
+            git_remote_get_url,
+            git_rev_list_count,
+            git_rev_list_count_single,
+            git_rev_parse,
+        )
 
         # Check if remote exists
         if not git_remote_get_url(self.repo_path, remote):
-            return {"ahead": 0, "behind": 0}
+            return {"ahead": 0, "behind": 0, "remote_branch_exists": False}
 
         # Get current branch if not specified
         if not branch:
             branch = git_get_current_branch(self.repo_path)
             if not branch:
-                return {"ahead": 0, "behind": 0}
+                return {"ahead": 0, "behind": 0, "remote_branch_exists": False}
+
+        remote_ref = f"{remote}/{branch}"
+
+        # Check if remote branch exists (first push scenario)
+        if not git_rev_parse(self.repo_path, remote_ref):
+            # Remote branch doesn't exist - all local commits are "ahead"
+            local_count = git_rev_list_count_single(self.repo_path, branch)
+            return {"ahead": local_count, "behind": 0, "remote_branch_exists": False}
 
         # Compare HEAD to remote/branch
         # git rev-list --left-right --count origin/main...HEAD
         # Returns: "behind\tahead" (commits on left, commits on right)
-        remote_ref = f"{remote}/{branch}"
         behind, ahead = git_rev_list_count(self.repo_path, remote_ref, "HEAD")
 
-        return {"ahead": ahead, "behind": behind}
+        return {"ahead": ahead, "behind": behind, "remote_branch_exists": True}
 
     # =============================================================================
     # Branch Management
