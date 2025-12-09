@@ -1018,6 +1018,25 @@ def git_rev_list_count(repo_path: Path, left_ref: str, right_ref: str) -> tuple[
     return (0, 0)
 
 
+def git_rev_list_count_single(repo_path: Path, ref: str = "HEAD") -> int:
+    """Count total commits reachable from a ref.
+
+    Args:
+        repo_path: Path to git repository
+        ref: Reference to count from (default: HEAD)
+
+    Returns:
+        Number of commits, or 0 if ref doesn't exist
+    """
+    result = _git(["rev-list", "--count", ref], repo_path, check=False)
+    if result.returncode != 0:
+        return 0
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return 0
+
+
 def git_remote_list(repo_path: Path) -> list[tuple[str, str, str]]:
     """List all git remotes.
 
