@@ -621,24 +621,35 @@ class InstalledPackageInfo:
         return bool(self.suggested_version and
                    self.installed_version != self.suggested_version)
 
-@dataclass(frozen=True)
+@dataclass
 class WorkflowNodeWidgetRef:
-    """Reference to a widget value in a workflow node."""
+    """Reference to a widget value in a workflow node.
+
+    Core identity fields: node_id, node_type, widget_index, widget_value
+    Optional metadata fields: property_url, property_directory (from properties.models)
+
+    Hash/eq are based only on core identity fields for deduplication.
+    """
     node_id: str
     node_type: str
     widget_index: int
     widget_value: str  # Original value from workflow
-    
+
+    # Optional metadata from properties.models (for download intent creation)
+    property_url: str | None = None
+    property_directory: str | None = None
+
     def __eq__(self, value: object) -> bool:
+        """Compare based on core identity fields only (excludes property metadata)."""
         if isinstance(value, WorkflowNodeWidgetRef):
-            return self.node_id == value.node_id and \
-                self.node_type == value.node_type and \
-                self.widget_index == value.widget_index and \
-                self.widget_value == value.widget_value
+            return (self.node_id == value.node_id and
+                    self.node_type == value.node_type and
+                    self.widget_index == value.widget_index and
+                    self.widget_value == value.widget_value)
         return False
-    
+
     def __hash__(self) -> int:
-        """Hash based on all fields for proper dict/set lookups."""
+        """Hash based on core identity fields only for proper dict/set lookups."""
         return hash((self.node_id, self.node_type, self.widget_index, self.widget_value))
 
 @dataclass

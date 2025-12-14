@@ -152,9 +152,40 @@ class ModelResolver:
                 for model in candidates
             ]
 
+        # Strategy 5: Auto-create download intent from properties.models metadata
+        if ref.property_url:
+            target_directory = ref.property_directory or self._infer_directory_for_node(ref.node_type)
+            target_path = Path(target_directory) / Path(ref.widget_value).name
+            logger.debug(
+                f"Creating property-based download intent for {ref.widget_value} "
+                f"from URL: {ref.property_url} -> {target_path}"
+            )
+            return [
+                ResolvedModel(
+                    workflow=workflow_name,
+                    reference=ref,
+                    resolved_model=None,
+                    model_source=ref.property_url,
+                    target_path=target_path,
+                    match_type="property_download_intent",
+                    match_confidence=1.0,
+                )
+            ]
+
         # No matches found
         logger.debug(f"No matches found in pyproject or model index for {ref}")
         return None
+
+    def _infer_directory_for_node(self, node_type: str) -> str:
+        """Infer target model directory from node type.
+
+        Uses model_config mappings to determine appropriate directory.
+        Falls back to 'models' if node type is unknown.
+        """
+        directories = self.model_config.get_directories_for_node(node_type)
+        if directories:
+            return directories[0]  # Use first directory as default
+        return "models"
 
     def _try_exact_match(self, path: str, all_models: list[ModelWithLocation] | None =None) -> list["ModelWithLocation"]:
         """Try exact path match"""
