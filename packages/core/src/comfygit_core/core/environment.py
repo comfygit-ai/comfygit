@@ -1474,19 +1474,21 @@ class Environment:
     def export_environment(
         self,
         output_path: Path,
-        callbacks: ExportCallbacks | None = None
+        callbacks: ExportCallbacks | None = None,
+        allow_issues: bool = False
     ) -> Path:
         """Export environment as .tar.gz bundle.
 
         Args:
             output_path: Path for output tarball
             callbacks: Optional callbacks for warnings/progress
+            allow_issues: Allow export even with unresolved workflow issues
 
         Returns:
             Path to created tarball
 
         Raises:
-            CDExportError: If environment has uncommitted changes or unresolved issues
+            CDExportError: If environment has uncommitted changes or unresolved issues (unless allow_issues)
         """
         from ..managers.export_import_manager import ExportImportManager
         from ..models.exceptions import CDExportError, ExportErrorContext
@@ -1516,8 +1518,8 @@ class Environment:
                 context=context
             )
 
-        # Validation: Check all workflows are resolved
-        if not status.is_commit_safe:
+        # Validation: Check all workflows are resolved (unless allow_issues)
+        if not status.is_commit_safe and not allow_issues:
             context = ExportErrorContext(has_unresolved_issues=True)
             raise CDExportError(
                 "Cannot export - workflows have unresolved issues",

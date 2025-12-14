@@ -749,7 +749,7 @@ class GlobalCommands:
         callbacks = CLIExportCallbacks()
 
         try:
-            tarball_path = env.export_environment(output_path, callbacks=callbacks)
+            tarball_path = env.export_environment(output_path, callbacks=callbacks, allow_issues=args.allow_issues)
 
             # Check if we need user confirmation
             if callbacks.models_without_sources and not args.allow_issues:

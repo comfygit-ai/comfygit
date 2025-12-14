@@ -197,7 +197,7 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     # export - Export ComfyGit environment
     export_parser = subparsers.add_parser("export", help="Export ComfyGit environment (include relevant files from .cec)")
     export_parser.add_argument("path", type=Path, nargs="?", help="Path to output file")
-    export_parser.add_argument("--allow-issues", action="store_true", help="Skip confirmation if models are missing source URLs")
+    export_parser.add_argument("--allow-issues", action="store_true", help="Export even with unresolved workflows or models without source URLs")
     export_parser.set_defaults(func=global_cmds.export_env)
 
     # Model management subcommands

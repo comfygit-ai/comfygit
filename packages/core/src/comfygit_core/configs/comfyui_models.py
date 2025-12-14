@@ -1,5 +1,14 @@
 """Default ComfyUI models configuration"""
 
+# Multi-model widget configurations: node_type -> list of widget indices containing models
+# These nodes load multiple models from different widget positions
+MULTI_MODEL_WIDGET_CONFIGS: dict[str, list[int]] = {
+    "CheckpointLoader": [0, 1],           # checkpoint, config
+    "DualCLIPLoader": [0, 1],             # clip_name1, clip_name2
+    "TripleCLIPLoader": [0, 1, 2],        # clip_name1, clip_name2, clip_name3
+    "QuadrupleCLIPLoader": [0, 1, 2, 3],  # clip_name1, clip_name2, clip_name3, clip_name4
+}
+
 COMFYUI_MODELS_CONFIG = {
     "version": "2024.1",
     "default_extensions": [
