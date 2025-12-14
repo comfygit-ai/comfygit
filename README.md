@@ -6,6 +6,8 @@
 
 Git for your ComfyUI environments — version control, package management, and reproducible sharing.
 
+<img width="2400" height="813" alt="Gemini_Generated_Image_gg9thvgg9thvgg9t - Copy" src="https://github.com/user-attachments/assets/8d215b1a-c59e-4f03-855c-170e05cfa5f7" />
+
 ## Highlights
 
 - 🔄 **Isolated environments** — test new nodes without breaking production
