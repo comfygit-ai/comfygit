@@ -64,9 +64,9 @@ def environment_completer(prefix: str, parsed_args: argparse.Namespace, **kwargs
     """Complete environment names from workspace.
 
     Used for:
-    - comfygit use <TAB>
-    - comfygit delete <TAB>
-    - comfygit -e <TAB>
+    - cg use <TAB>
+    - cg delete <TAB>
+    - cg -e <TAB>
     """
     workspace = get_workspace_safe()
     if not workspace:
@@ -89,7 +89,7 @@ def workflow_completer(prefix: str, parsed_args: argparse.Namespace, **kwargs: A
     2. Synced workflows
 
     Used for:
-    - comfygit workflow resolve <TAB>
+    - cg workflow resolve <TAB>
     """
     workspace = get_workspace_safe()
     if not workspace:
@@ -125,8 +125,8 @@ def installed_node_completer(prefix: str, parsed_args: argparse.Namespace, **kwa
     """Complete installed node names.
 
     Used for:
-    - comfygit node remove <TAB>
-    - comfygit node update <TAB>
+    - cg node remove <TAB>
+    - cg node update <TAB>
     """
     workspace = get_workspace_safe()
     if not workspace:

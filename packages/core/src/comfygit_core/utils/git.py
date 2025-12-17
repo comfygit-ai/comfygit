@@ -708,7 +708,7 @@ def git_fetch(
     if not remote_url:
         raise ValueError(
             f"Remote '{remote}' not configured. "
-            f"Add with: comfygit remote add {remote} <url>"
+            f"Add with: cg remote add {remote} <url>"
         )
 
     cmd = ["fetch", remote]
@@ -875,7 +875,7 @@ def git_push(
     if not remote_url:
         raise ValueError(
             f"Remote '{remote}' not configured. "
-            f"Add with: comfygit remote add {remote} <url>"
+            f"Add with: cg remote add {remote} <url>"
         )
 
     # If force pushing, fetch first to update remote refs for --force-with-lease
@@ -924,7 +924,7 @@ def git_push(
 
         if "rejected" in combined_error:
             raise OSError(
-                "Push rejected - remote has changes. Run: comfygit pull first"
+                "Push rejected - remote has changes. Run: cg pull first"
             ) from e
 
         raise OSError(f"Push failed: {e}") from e
@@ -1457,7 +1457,7 @@ def git_fetch_with_auth(
     if not remote_url:
         raise ValueError(
             f"Remote '{remote}' not configured. "
-            f"Add with: comfygit remote add {remote} <url>"
+            f"Add with: cg remote add {remote} <url>"
         )
 
     result = _git_with_auth(["fetch", remote], repo_path, token)
@@ -1496,7 +1496,7 @@ def git_push_with_auth(
     if not remote_url:
         raise ValueError(
             f"Remote '{remote}' not configured. "
-            f"Add with: comfygit remote add {remote} <url>"
+            f"Add with: cg remote add {remote} <url>"
         )
 
     # If force pushing, fetch first to update remote refs for --force-with-lease
@@ -1533,7 +1533,7 @@ def git_push_with_auth(
 
         if "rejected" in error_msg:
             raise OSError(
-                "Push rejected - remote has changes. Run: comfygit pull first"
+                "Push rejected - remote has changes. Run: cg pull first"
             ) from e
         raise OSError(f"Push failed: {e.stderr or str(e)}") from e
 

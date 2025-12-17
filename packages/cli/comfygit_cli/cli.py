@@ -65,7 +65,7 @@ def _check_for_old_docker_installation() -> None:
     print("  • New version: UV packages, 'comfygit' command")
     print("\nBoth versions can coexist. Your old environments are unchanged.")
     print("\nTo use old version: pip install comfydock==0.1.6")
-    print("To use new version: comfygit init")
+    print("To use new version: cg init")
     print("\nMigration guide: https://github.com/comfyhub-org/comfygit/blob/main/MIGRATION.md")
     print("="*70 + "\n")
 

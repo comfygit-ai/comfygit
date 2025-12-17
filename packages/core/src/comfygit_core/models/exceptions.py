@@ -327,13 +327,13 @@ class DownloadErrorContext:
                 return (
                     f"CivitAI model requires authentication (HTTP {self.http_status}). "
                     "No API key found. Get your key from https://civitai.com/user/account "
-                    "and add it with: comfygit config --civitai-key <your-key>"
+                    "and add it with: cg config --civitai-key <your-key>"
                 )
             elif self.error_category == "auth_invalid":
                 return (
                     f"CivitAI authentication failed (HTTP {self.http_status}). "
                     "Your API key may be invalid or expired. "
-                    "Update it with: comfygit config --civitai-key <your-key>"
+                    "Update it with: cg config --civitai-key <your-key>"
                 )
             elif self.error_category == "forbidden":
                 return (

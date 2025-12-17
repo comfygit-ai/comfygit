@@ -70,7 +70,7 @@ class ModelSymlinkManager:
                         f"Manual action required:\n"
                         f"  1. Backup if needed: mv {self.models_link_path} {self.models_link_path}.backup\n"
                         f"  2. Remove: rm -rf {self.models_link_path}\n"
-                        f"  3. Retry: comfygit sync"
+                        f"  3. Retry: cg repair"
                     )
 
         # Ensure parent directory (ComfyUI/) exists

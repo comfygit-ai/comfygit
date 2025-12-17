@@ -64,7 +64,7 @@ class StatusScanner:
         #   - Operations like 'run', 'repair', 'node add' auto-sync before executing
         #   - Status is high-frequency with workflow caching - needs to be fast
         #   - Package drift self-corrects on next sync operation
-        # If thorough check needed, use 'comfygit repair --dry-run' (future)
+        # If thorough check needed, use 'cg repair --dry-run' (future)
         # TODO: Add package sync status
         # package_status = self.check_packages_sync()
         comparison.packages_in_sync = True #package_status.in_sync

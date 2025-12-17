@@ -552,9 +552,9 @@ class Environment:
             else:
                 raise CDEnvironmentError(
                     "Cannot pull with uncommitted changes.\n"
-                    "  • Commit: comfygit commit -m 'message'\n"
-                    "  • Discard: comfygit reset --hard\n"
-                    "  • Force: comfygit pull origin --force"
+                    "  • Commit: cg commit -m 'message'\n"
+                    "  • Discard: cg reset --hard\n"
+                    "  • Force: cg pull origin --force"
                 )
 
         # Capture pre-pull state for atomic rollback
@@ -568,9 +568,25 @@ class Environment:
             )
 
         try:
-            # Pull (fetch + merge)
-            logger.info("Pulling from remote...")
-            pull_result = self.git_manager.pull(remote, branch, strategy_option=strategy_option, force=force)
+            # Determine branch
+            from ..utils.git import git_get_current_branch, git_fetch
+            current_branch = branch or git_get_current_branch(self.cec_path)
+            target_ref = f"{remote}/{current_branch}"
+
+            if force:
+                # Force mode: completely replace local with remote (no merge, no conflicts)
+                logger.info(f"Force pulling - resetting to {target_ref}...")
+                git_fetch(self.cec_path, remote)
+                git_reset_hard(self.cec_path, target_ref)
+                pull_result = {
+                    'fetch_output': '',
+                    'merge_output': f'Reset to {target_ref}',
+                    'branch': current_branch,
+                }
+            else:
+                # Normal pull (fetch + merge)
+                logger.info("Pulling from remote...")
+                pull_result = self.git_manager.pull(remote, branch, strategy_option=strategy_option)
 
             # Auto-repair (restores workflows, installs nodes, downloads models)
             logger.info("Syncing environment after pull...")
@@ -626,7 +642,7 @@ class Environment:
         if self.git_manager.has_uncommitted_changes():
             raise CDEnvironmentError(
                 "Cannot push with uncommitted changes.\n"
-                "  Run: comfygit commit -m 'message' first"
+                "  Run: cg commit -m 'message' first"
             )
 
         # Note: Workflow issue validation happens during commit (execute_commit checks is_commit_safe).

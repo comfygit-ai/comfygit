@@ -31,7 +31,7 @@ class WorkspaceConfigRepository:
         if not self.config_file_path.exists():
             raise ComfyDockError(
                 f"Workspace config not found: {self.config_file_path}\n"
-                f"Run 'comfygit init' to create a workspace."
+                f"Run 'cg init' to create a workspace."
             )
 
         try:

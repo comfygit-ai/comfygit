@@ -442,7 +442,7 @@ class EnvironmentFactory:
                 # User must manually set up their own remote if they want to push back to a separate repo.
                 logger.warning(
                     f"Subdirectory import from {base_url}#{subdir} - no remote configured. "
-                    "Set up a remote manually if you want to push changes: comfygit remote add origin <url>"
+                    "Set up a remote manually if you want to push changes: cg remote add origin <url>"
                 )
         else:
             logger.info(f"Cloning {base_url} to {cec_path}")
