@@ -2103,12 +2103,14 @@ class EnvironmentCommands:
             )
 
             # Pull and repair with progress callbacks
+            force = getattr(args, 'force', False)
             result = env.pull_and_repair(
                 remote=args.remote,
                 model_strategy=getattr(args, 'models', 'all'),
                 model_callbacks=model_callbacks,
                 node_callbacks=node_callbacks,
                 strategy_option=strategy_option,
+                force=force,
             )
 
             # Extract sync result for summary

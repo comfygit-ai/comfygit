@@ -500,6 +500,7 @@ class Environment:
         model_callbacks: BatchDownloadCallbacks | None = None,
         node_callbacks: NodeInstallCallbacks | None = None,
         strategy_option: str | None = None,
+        force: bool = False,
     ) -> dict:
         """Pull from remote and auto-repair environment (atomic operation).
 
@@ -513,12 +514,13 @@ class Environment:
             model_callbacks: Optional callbacks for model download progress
             node_callbacks: Optional callbacks for node installation progress
             strategy_option: Optional git merge strategy (e.g., "ours" or "theirs")
+            force: If True, discard uncommitted changes and allow unrelated histories
 
         Returns:
             Dict with pull results and sync_result
 
         Raises:
-            CDEnvironmentError: If uncommitted changes exist or sync fails
+            CDEnvironmentError: If uncommitted changes exist (without force) or sync fails
             ValueError: If merge conflicts
             OSError: If pull or repair fails
         """
@@ -531,11 +533,17 @@ class Environment:
 
         # Check for uncommitted changes (now excluding uv.lock)
         if self.git_manager.has_uncommitted_changes():
-            raise CDEnvironmentError(
-                "Cannot pull with uncommitted changes.\n"
-                "  • Commit: comfygit commit -m 'message'\n"
-                "  • Discard: comfygit reset --hard"
-            )
+            if force:
+                # Force mode: discard uncommitted changes
+                logger.warning("Force mode: discarding uncommitted changes")
+                self.git_manager.reset_to("HEAD", mode="hard")
+            else:
+                raise CDEnvironmentError(
+                    "Cannot pull with uncommitted changes.\n"
+                    "  • Commit: comfygit commit -m 'message'\n"
+                    "  • Discard: comfygit reset --hard\n"
+                    "  • Force: comfygit pull origin --force"
+                )
 
         # Capture pre-pull state for atomic rollback
         pre_pull_commit = git_rev_parse(self.cec_path, "HEAD")
@@ -550,7 +558,7 @@ class Environment:
         try:
             # Pull (fetch + merge)
             logger.info("Pulling from remote...")
-            pull_result = self.git_manager.pull(remote, branch, strategy_option=strategy_option)
+            pull_result = self.git_manager.pull(remote, branch, strategy_option=strategy_option, force=force)
 
             # Auto-repair (restores workflows, installs nodes, downloads models)
             logger.info("Syncing environment after pull...")
