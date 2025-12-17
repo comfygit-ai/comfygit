@@ -466,8 +466,11 @@ class Environment:
 
         Returns:
             RefDiff showing all changes
+
+        Raises:
+            ValueError: If remote branch doesn't exist
         """
-        from ..utils.git import git_fetch, git_get_current_branch
+        from ..utils.git import git_fetch, git_get_current_branch, git_rev_parse
 
         # Fetch to update remote refs
         git_fetch(self.cec_path, remote)
@@ -475,6 +478,15 @@ class Environment:
         # Determine target ref
         current_branch = branch or git_get_current_branch(self.cec_path)
         target_ref = f"{remote}/{current_branch}"
+
+        # Check if remote branch exists
+        if not git_rev_parse(self.cec_path, target_ref):
+            raise ValueError(
+                f"Remote branch '{target_ref}' doesn't exist.\n"
+                f"The remote '{remote}' may not have a branch named '{current_branch}'.\n"
+                f"  • Check available branches: git branch -r\n"
+                f"  • Push this branch first: cg push -r {remote}"
+            )
 
         # Analyze diff
         analyzer = RefDiffAnalyzer(self.cec_path)
