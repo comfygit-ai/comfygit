@@ -466,8 +466,11 @@ class Environment:
 
         Returns:
             RefDiff showing all changes
+
+        Raises:
+            ValueError: If remote branch doesn't exist
         """
-        from ..utils.git import git_fetch, git_get_current_branch
+        from ..utils.git import git_fetch, git_get_current_branch, git_rev_parse
 
         # Fetch to update remote refs
         git_fetch(self.cec_path, remote)
@@ -475,6 +478,15 @@ class Environment:
         # Determine target ref
         current_branch = branch or git_get_current_branch(self.cec_path)
         target_ref = f"{remote}/{current_branch}"
+
+        # Check if remote branch exists
+        if not git_rev_parse(self.cec_path, target_ref):
+            raise ValueError(
+                f"Remote branch '{target_ref}' doesn't exist.\n"
+                f"The remote '{remote}' may not have a branch named '{current_branch}'.\n"
+                f"  • Check available branches: git branch -r\n"
+                f"  • Push this branch first: cg push -r {remote}"
+            )
 
         # Analyze diff
         analyzer = RefDiffAnalyzer(self.cec_path)
@@ -500,6 +512,7 @@ class Environment:
         model_callbacks: BatchDownloadCallbacks | None = None,
         node_callbacks: NodeInstallCallbacks | None = None,
         strategy_option: str | None = None,
+        force: bool = False,
     ) -> dict:
         """Pull from remote and auto-repair environment (atomic operation).
 
@@ -513,12 +526,13 @@ class Environment:
             model_callbacks: Optional callbacks for model download progress
             node_callbacks: Optional callbacks for node installation progress
             strategy_option: Optional git merge strategy (e.g., "ours" or "theirs")
+            force: If True, discard uncommitted changes and allow unrelated histories
 
         Returns:
             Dict with pull results and sync_result
 
         Raises:
-            CDEnvironmentError: If uncommitted changes exist or sync fails
+            CDEnvironmentError: If uncommitted changes exist (without force) or sync fails
             ValueError: If merge conflicts
             OSError: If pull or repair fails
         """
@@ -531,11 +545,17 @@ class Environment:
 
         # Check for uncommitted changes (now excluding uv.lock)
         if self.git_manager.has_uncommitted_changes():
-            raise CDEnvironmentError(
-                "Cannot pull with uncommitted changes.\n"
-                "  • Commit: comfygit commit -m 'message'\n"
-                "  • Discard: comfygit reset --hard"
-            )
+            if force:
+                # Force mode: discard uncommitted changes
+                logger.warning("Force mode: discarding uncommitted changes")
+                self.git_manager.reset_to("HEAD", mode="hard")
+            else:
+                raise CDEnvironmentError(
+                    "Cannot pull with uncommitted changes.\n"
+                    "  • Commit: cg commit -m 'message'\n"
+                    "  • Discard: cg reset --hard\n"
+                    "  • Force: cg pull origin --force"
+                )
 
         # Capture pre-pull state for atomic rollback
         pre_pull_commit = git_rev_parse(self.cec_path, "HEAD")
@@ -548,9 +568,25 @@ class Environment:
             )
 
         try:
-            # Pull (fetch + merge)
-            logger.info("Pulling from remote...")
-            pull_result = self.git_manager.pull(remote, branch, strategy_option=strategy_option)
+            # Determine branch
+            from ..utils.git import git_get_current_branch, git_fetch
+            current_branch = branch or git_get_current_branch(self.cec_path)
+            target_ref = f"{remote}/{current_branch}"
+
+            if force:
+                # Force mode: completely replace local with remote (no merge, no conflicts)
+                logger.info(f"Force pulling - resetting to {target_ref}...")
+                git_fetch(self.cec_path, remote)
+                git_reset_hard(self.cec_path, target_ref)
+                pull_result = {
+                    'fetch_output': '',
+                    'merge_output': f'Reset to {target_ref}',
+                    'branch': current_branch,
+                }
+            else:
+                # Normal pull (fetch + merge)
+                logger.info("Pulling from remote...")
+                pull_result = self.git_manager.pull(remote, branch, strategy_option=strategy_option)
 
             # Auto-repair (restores workflows, installs nodes, downloads models)
             logger.info("Syncing environment after pull...")
@@ -606,7 +642,7 @@ class Environment:
         if self.git_manager.has_uncommitted_changes():
             raise CDEnvironmentError(
                 "Cannot push with uncommitted changes.\n"
-                "  Run: comfygit commit -m 'message' first"
+                "  Run: cg commit -m 'message' first"
             )
 
         # Note: Workflow issue validation happens during commit (execute_commit checks is_commit_safe).

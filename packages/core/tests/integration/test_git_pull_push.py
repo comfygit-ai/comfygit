@@ -401,3 +401,211 @@ nodes = {}
         verify_repo = tmp_path / "verify-repo"
         subprocess.run(["git", "clone", "-b", "feature", str(bare_repo), str(verify_repo)], check=True, capture_output=True)
         assert (verify_repo / "workflows" / "feature_work.json").exists()
+
+
+class TestGitPullForce:
+    """Test force pull operations."""
+
+    def test_pull_force_allows_uncommitted_changes(self, test_workspace, tmp_path, mock_comfyui_clone, mock_github_api):
+        """Pull with --force should allow pulling even with uncommitted changes."""
+        # Create remote repo
+        remote_repo = tmp_path / "remote-repo"
+        remote_repo.mkdir()
+        subprocess.run(["git", "init"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=remote_repo, check=True, capture_output=True)
+
+        pyproject_content = """
+[project]
+name = "test-env"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.comfygit]
+comfyui_version = "main"
+python_version = "3.12"
+nodes = {}
+"""
+        (remote_repo / "pyproject.toml").write_text(pyproject_content)
+        (remote_repo / ".python-version").write_text("3.12\n")
+        subprocess.run(["git", "add", "."], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial"], cwd=remote_repo, check=True, capture_output=True)
+
+        # Import environment
+        env = test_workspace.import_from_git(
+            git_url=str(remote_repo),
+            name="test-pull-force",
+            model_strategy="skip"
+        )
+
+        # Make local uncommitted change
+        workflows_dir = env.cec_path / "workflows"
+        workflows_dir.mkdir(exist_ok=True)
+        (workflows_dir / "local_change.json").write_text('{"local": true}')
+
+        # Make change in remote
+        (remote_repo / "workflows").mkdir(exist_ok=True)
+        (remote_repo / "workflows" / "remote.json").write_text('{"remote": true}')
+        subprocess.run(["git", "add", "."], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Remote change"], cwd=remote_repo, check=True, capture_output=True)
+
+        # Pull with force=True should succeed (discarding local changes)
+        result = env.pull_and_repair(remote="origin", force=True)
+
+        # Verify remote changes were pulled
+        assert result is not None
+        assert (env.cec_path / "workflows" / "remote.json").exists()
+        # Local uncommitted changes should be discarded
+        assert not (env.cec_path / "workflows" / "local_change.json").exists()
+
+    def test_pull_force_handles_unrelated_histories(self, test_workspace, tmp_path, mock_comfyui_clone, mock_github_api):
+        """Pull with --force should handle 'unrelated histories' error."""
+        # Create first repo (will be the remote) with a different initial commit
+        remote_repo = tmp_path / "remote-repo"
+        remote_repo.mkdir()
+        subprocess.run(["git", "init"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=remote_repo, check=True, capture_output=True)
+
+        remote_pyproject = """
+[project]
+name = "remote-env"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.comfygit]
+comfyui_version = "main"
+python_version = "3.12"
+nodes = {}
+"""
+        (remote_repo / "pyproject.toml").write_text(remote_pyproject)
+        (remote_repo / ".python-version").write_text("3.12\n")
+        subprocess.run(["git", "add", "."], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Remote initial"], cwd=remote_repo, check=True, capture_output=True)
+
+        # Import from a DIFFERENT repo first to get an env with unrelated history
+        # Create another repo for initial import
+        first_repo = tmp_path / "first-repo"
+        first_repo.mkdir()
+        subprocess.run(["git", "init"], cwd=first_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=first_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=first_repo, check=True, capture_output=True)
+
+        first_pyproject = """
+[project]
+name = "first-env"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.comfygit]
+comfyui_version = "main"
+python_version = "3.12"
+nodes = {}
+"""
+        (first_repo / "pyproject.toml").write_text(first_pyproject)
+        (first_repo / ".python-version").write_text("3.12\n")
+        subprocess.run(["git", "add", "."], cwd=first_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "First initial"], cwd=first_repo, check=True, capture_output=True)
+
+        # Import from first repo
+        env = test_workspace.import_from_git(
+            git_url=str(first_repo),
+            name="test-unrelated",
+            model_strategy="skip"
+        )
+
+        # Now replace origin with the remote_repo (which has unrelated history)
+        from comfygit_core.utils.git import git_remote_remove, git_remote_add
+        git_remote_remove(env.cec_path, "origin")
+        git_remote_add(env.cec_path, "origin", str(remote_repo))
+
+        # Without --force, pull should fail with "unrelated histories" error
+        with pytest.raises(OSError, match="(?i)unrelated"):
+            env.pull_and_repair(remote="origin")
+
+        # With force=True AND strategy_option="theirs", pull should succeed
+        # by using --allow-unrelated-histories and resolving conflicts with remote's version
+        result = env.pull_and_repair(remote="origin", force=True, strategy_option="theirs")
+
+        assert result is not None
+        # The remote's pyproject.toml should now have remote's content
+        assert "remote-env" in (env.cec_path / "pyproject.toml").read_text()
+        assert result['branch'] == "main"
+
+
+class TestGitPushForce:
+    """Test force push operations."""
+
+    def test_push_force_uses_force_with_lease_first(self, test_workspace, tmp_path, mock_comfyui_clone, mock_github_api):
+        """Force push should try --force-with-lease first (safe)."""
+        # Create bare remote
+        bare_repo = tmp_path / "bare-repo"
+        bare_repo.mkdir()
+        subprocess.run(["git", "init", "--bare"], cwd=bare_repo, check=True, capture_output=True)
+
+        # Create and push initial content
+        remote_repo = tmp_path / "remote-repo"
+        remote_repo.mkdir()
+        subprocess.run(["git", "init"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=remote_repo, check=True, capture_output=True)
+
+        pyproject_content = """
+[project]
+name = "test-env"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.comfygit]
+comfyui_version = "main"
+python_version = "3.12"
+nodes = {}
+"""
+        (remote_repo / "pyproject.toml").write_text(pyproject_content)
+        subprocess.run(["git", "add", "."], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Initial"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "remote", "add", "origin", str(bare_repo)], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "push", "-u", "origin", "main"], cwd=remote_repo, check=True, capture_output=True)
+
+        # Import environment
+        env = test_workspace.import_from_git(
+            git_url=str(bare_repo),
+            name="test-push-force",
+            model_strategy="skip"
+        )
+
+        # Make and commit a change
+        workflows_dir = env.cec_path / "workflows"
+        workflows_dir.mkdir(exist_ok=True)
+        (workflows_dir / "new.json").write_text('{"new": true}')
+        env.git_manager.commit_with_identity("Add new workflow")
+
+        # Rewind the bare repo to simulate divergence
+        # Clone bare repo, reset to parent, force push
+        diverge_repo = tmp_path / "diverge-repo"
+        subprocess.run(["git", "clone", str(bare_repo), str(diverge_repo)], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=diverge_repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=diverge_repo, check=True, capture_output=True)
+        (diverge_repo / "diverge.txt").write_text("diverged")
+        subprocess.run(["git", "add", "."], cwd=diverge_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Diverge"], cwd=diverge_repo, check=True, capture_output=True)
+        subprocess.run(["git", "push", "--force", "origin", "main"], cwd=diverge_repo, check=True, capture_output=True)
+
+        # Normal push should fail (remote diverged)
+        with pytest.raises(OSError, match="rejected"):
+            env.push_commits(remote="origin", force=False)
+
+        # Force push should succeed by retrying with true --force after --force-with-lease fails
+        result = env.push_commits(remote="origin", force=True)
+        assert result is not None
+
+        # Verify our content is now in remote
+        verify_repo = tmp_path / "verify-repo"
+        subprocess.run(["git", "clone", str(bare_repo), str(verify_repo)], check=True, capture_output=True)
+        assert (verify_repo / "workflows" / "new.json").exists()
+        # The diverged content should be gone
+        assert not (verify_repo / "diverge.txt").exists()

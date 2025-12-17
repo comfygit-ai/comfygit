@@ -174,7 +174,7 @@ class EnvironmentCommands:
 
     # === Commands that operate ON environments ===
 
-    @with_env_logging("env create")
+    @with_env_logging("create")
     def create(self, args: argparse.Namespace, logger=None) -> None:
         """Create a new environment."""
         # Ensure workspace exists, creating it if necessary
@@ -220,7 +220,7 @@ class EnvironmentCommands:
             print(f"  • Add nodes: cg -e {args.name} node add <node-name>")
             print(f"  • Set as active: cg use {args.name}")
 
-    @with_env_logging("env use")
+    @with_env_logging("use")
     def use(self, args: argparse.Namespace, logger=None) -> None:
         """Set the active environment."""
         from comfygit_cli.utils.progress import create_model_sync_progress
@@ -237,7 +237,7 @@ class EnvironmentCommands:
         print(f"✓ Active environment set to: {args.name}")
         print("You can now run commands without the -e flag")
 
-    @with_env_logging("env delete")
+    @with_env_logging("delete")
     def delete(self, args: argparse.Namespace, logger=None) -> None:
         """Delete an environment."""
         # Check that environment exists (don't require active environment)
@@ -270,7 +270,7 @@ class EnvironmentCommands:
 
     # === Commands that operate IN environments ===
 
-    @with_env_logging("env run")
+    @with_env_logging("run")
     def run(self, args: argparse.Namespace) -> None:
         """Run ComfyUI in the specified environment."""
         RESTART_EXIT_CODE = 42
@@ -359,7 +359,7 @@ class EnvironmentCommands:
             # Default: raw TOML (exact file representation)
             print(tomlkit.dumps(config))
 
-    @with_env_logging("env status")
+    @with_env_logging("status")
     def status(self, args: argparse.Namespace) -> None:
         """Show environment status using semantic methods."""
         env = self._get_env(args)
@@ -867,7 +867,7 @@ class EnvironmentCommands:
 
     # === Node management ===
 
-    @with_env_logging("env node add")
+    @with_env_logging("node add")
     def node_add(self, args: argparse.Namespace, logger=None) -> None:
         """Add custom node(s) - directly modifies pyproject.toml."""
         env = self._get_env(args)
@@ -906,7 +906,7 @@ class EnvironmentCommands:
                 for node_id, error in failed_nodes:
                     print(f"  • {node_id}: {error}")
 
-            print(f"\nRun 'cg -e {env.name} env status' to review changes")
+            print(f"\nRun 'cg -e {env.name} status' to review changes")
             return
 
         # Single node mode (original behavior)
@@ -965,9 +965,9 @@ class EnvironmentCommands:
         else:
             print(f"✓ Node '{node_info.name}' added to pyproject.toml")
 
-        print(f"\nRun 'cg -e {env.name} env status' to review changes")
+        print(f"\nRun 'cg -e {env.name} status' to review changes")
 
-    @with_env_logging("env node remove")
+    @with_env_logging("node remove")
     def node_remove(self, args: argparse.Namespace, logger=None) -> None:
         """Remove custom node(s) - handles filesystem immediately."""
         env = self._get_env(args)
@@ -1006,7 +1006,7 @@ class EnvironmentCommands:
                 for node_id, error in failed_nodes:
                     print(f"  • {node_id}: {error}")
 
-            print(f"\nRun 'cg -e {env.name} env status' to review changes")
+            print(f"\nRun 'cg -e {env.name} status' to review changes")
             return
 
         # Single node mode (original behavior)
@@ -1044,9 +1044,9 @@ class EnvironmentCommands:
             if result.filesystem_action == "deleted":
                 print("   (cached globally, can reinstall)")
 
-        print(f"\nRun 'cg -e {env.name} env status' to review changes")
+        print(f"\nRun 'cg -e {env.name} status' to review changes")
 
-    @with_env_logging("env node prune")
+    @with_env_logging("node prune")
     def node_prune(self, args: argparse.Namespace, logger=None) -> None:
         """Remove unused custom nodes from environment."""
         env = self._get_env(args)
@@ -1115,7 +1115,7 @@ class EnvironmentCommands:
                 print(f"  • {node_id}: {error}")
             sys.exit(1)
 
-    @with_env_logging("env node list")
+    @with_env_logging("node list")
     def node_list(self, args: argparse.Namespace) -> None:
         """List custom nodes in the environment."""
         env = self._get_env(args)
@@ -1140,7 +1140,7 @@ class EnvironmentCommands:
 
             print(f"  • {node.registry_id or node.name} ({node.source}){version_suffix}")
 
-    @with_env_logging("env node update")
+    @with_env_logging("node update")
     def node_update(self, args: argparse.Namespace, logger=None) -> None:
         """Update a custom node."""
         from comfygit_core.strategies.confirmation import (
@@ -1188,7 +1188,7 @@ class EnvironmentCommands:
 
     # === Constraint management ===
 
-    @with_env_logging("env constraint add")
+    @with_env_logging("constraint add")
     def constraint_add(self, args: argparse.Namespace, logger=None) -> None:
         """Add constraint dependencies to [tool.uv]."""
         env = self._get_env(args)
@@ -1209,7 +1209,7 @@ class EnvironmentCommands:
         print(f"✓ Added {len(args.packages)} constraint(s) to pyproject.toml")
         print(f"\nRun 'cg -e {env.name} constraint list' to view all constraints")
 
-    @with_env_logging("env constraint list")
+    @with_env_logging("constraint list")
     def constraint_list(self, args: argparse.Namespace) -> None:
         """List constraint dependencies from [tool.uv]."""
         env = self._get_env(args)
@@ -1225,7 +1225,7 @@ class EnvironmentCommands:
         for constraint in constraints:
             print(f"  • {constraint}")
 
-    @with_env_logging("env constraint remove")
+    @with_env_logging("constraint remove")
     def constraint_remove(self, args: argparse.Namespace, logger=None) -> None:
         """Remove constraint dependencies from [tool.uv]."""
         env = self._get_env(args)
@@ -1256,7 +1256,7 @@ class EnvironmentCommands:
 
     # === Python dependency management ===
 
-    @with_env_logging("env py add")
+    @with_env_logging("py add")
     def py_add(self, args: argparse.Namespace, logger=None) -> None:
         """Add Python dependencies to the environment."""
         env = self._get_env(args)
@@ -1316,7 +1316,7 @@ class EnvironmentCommands:
             print(f"\n✓ Added {len(args.packages)} package(s) to dependencies")
         print(f"\nRun 'cg -e {env.name} status' to review changes")
 
-    @with_env_logging("env py remove")
+    @with_env_logging("py remove")
     def py_remove(self, args: argparse.Namespace, logger=None) -> None:
         """Remove Python dependencies from the environment."""
         env = self._get_env(args)
@@ -1390,7 +1390,7 @@ class EnvironmentCommands:
 
         print(f"\nRun 'cg -e {env.name} status' to review changes")
 
-    @with_env_logging("env py remove-group")
+    @with_env_logging("py remove-group")
     def py_remove_group(self, args: argparse.Namespace, logger=None) -> None:
         """Remove an entire dependency group."""
         env = self._get_env(args)
@@ -1407,7 +1407,7 @@ class EnvironmentCommands:
         print(f"\n✓ Removed dependency group '{group_name}'")
         print(f"\nRun 'cg -e {env.name} py list --all' to view remaining groups")
 
-    @with_env_logging("env py uv")
+    @with_env_logging("py uv")
     def py_uv(self, args: argparse.Namespace, logger=None) -> None:
         """Direct UV command passthrough for advanced users."""
         env = self._get_env(args)
@@ -1434,7 +1434,7 @@ class EnvironmentCommands:
         )
         sys.exit(result.returncode)
 
-    @with_env_logging("env py list")
+    @with_env_logging("py list")
     def py_list(self, args: argparse.Namespace) -> None:
         """List Python dependencies."""
         env = self._get_env(args)
@@ -1473,7 +1473,7 @@ class EnvironmentCommands:
 
     # === Git-based operations ===
 
-    @with_env_logging("env repair")
+    @with_env_logging("repair")
     def repair(self, args: argparse.Namespace, logger=None) -> None:
         """Repair environment to match pyproject.toml (for manual edits or git operations)."""
         env = self._get_env(args)
@@ -1653,7 +1653,7 @@ class EnvironmentCommands:
         print("✓ Changes applied successfully!")
         print(f"\nEnvironment '{env.name}' is ready to use")
 
-    @with_env_logging("env checkout")
+    @with_env_logging("checkout")
     def checkout(self, args: argparse.Namespace, logger=None) -> None:
         """Checkout commits, branches, or files."""
         from .strategies.rollback import AutoRollbackStrategy, InteractiveRollbackStrategy
@@ -1694,7 +1694,7 @@ class EnvironmentCommands:
             print(f"✗ Checkout failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_env_logging("env branch")
+    @with_env_logging("branch")
     def branch(self, args: argparse.Namespace, logger=None) -> None:
         """Manage branches."""
         env = self._get_env(args)
@@ -1738,7 +1738,7 @@ class EnvironmentCommands:
             print(f"✗ Branch operation failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_env_logging("env switch")
+    @with_env_logging("switch")
     def switch(self, args: argparse.Namespace, logger=None) -> None:
         """Switch to branch."""
         env = self._get_env(args)
@@ -1753,7 +1753,7 @@ class EnvironmentCommands:
             print(f"✗ Switch failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_env_logging("env reset")
+    @with_env_logging("reset")
     def reset_git(self, args: argparse.Namespace, logger=None) -> None:
         """Reset HEAD to ref (git-native reset)."""
         from .strategies.rollback import InteractiveRollbackStrategy
@@ -1783,7 +1783,7 @@ class EnvironmentCommands:
             print(f"✗ Reset failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_env_logging("env merge")
+    @with_env_logging("merge")
     def merge(self, args: argparse.Namespace, logger=None) -> None:
         """Merge branch into current with atomic conflict resolution."""
         env = self._get_env(args)
@@ -1878,7 +1878,7 @@ class EnvironmentCommands:
             print(f"✗ Merge failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_env_logging("env revert")
+    @with_env_logging("revert")
     def revert(self, args: argparse.Namespace, logger=None) -> None:
         """Revert a commit."""
         env = self._get_env(args)
@@ -1893,7 +1893,7 @@ class EnvironmentCommands:
             print(f"✗ Revert failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_env_logging("env commit")
+    @with_env_logging("commit")
     def commit(self, args: argparse.Namespace, logger=None) -> None:
         """Commit workflows with optional issue resolution."""
         env = self._get_env(args)
@@ -1976,7 +1976,7 @@ class EnvironmentCommands:
 
     # === Git remote operations ===
 
-    @with_env_logging("env pull")
+    @with_env_logging("pull")
     def pull(self, args: argparse.Namespace, logger=None) -> None:
         """Pull from remote and repair environment."""
         env = self._get_env(args)
@@ -1985,8 +1985,15 @@ class EnvironmentCommands:
         if not env.git_manager.has_remote(args.remote):
             print(f"✗ Remote '{args.remote}' not configured")
             print()
-            print("💡 Set up a remote first:")
-            print(f"   cg remote add {args.remote} <url>")
+            # Check if other remotes exist
+            remotes = env.git_manager.list_remotes()
+            if remotes:
+                remote_names = list({r[0] for r in remotes})  # Unique names
+                print("💡 Use an existing remote:")
+                print(f"   cg pull -r {remote_names[0]}")
+            else:
+                print("💡 Set up a remote first:")
+                print(f"   cg remote add {args.remote} <url>")
             sys.exit(1)
 
         # Preview mode - read-only, just show what would change
@@ -2103,12 +2110,14 @@ class EnvironmentCommands:
             )
 
             # Pull and repair with progress callbacks
+            force = getattr(args, 'force', False)
             result = env.pull_and_repair(
                 remote=args.remote,
                 model_strategy=getattr(args, 'models', 'all'),
                 model_callbacks=model_callbacks,
                 node_callbacks=node_callbacks,
                 strategy_option=strategy_option,
+                force=force,
             )
 
             # Extract sync result for summary
@@ -2184,7 +2193,7 @@ class EnvironmentCommands:
             print(f"✗ Pull failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_env_logging("env push")
+    @with_env_logging("push")
     def push(self, args: argparse.Namespace, logger=None) -> None:
         """Push commits to remote."""
         env = self._get_env(args)
@@ -2201,8 +2210,15 @@ class EnvironmentCommands:
         if not env.git_manager.has_remote(args.remote):
             print(f"✗ Remote '{args.remote}' not configured")
             print()
-            print("💡 Set up a remote first:")
-            print(f"   cg remote add {args.remote} <url>")
+            # Check if other remotes exist
+            remotes = env.git_manager.list_remotes()
+            if remotes:
+                remote_names = list({r[0] for r in remotes})  # Unique names
+                print("💡 Use an existing remote:")
+                print(f"   cg push -r {remote_names[0]}")
+            else:
+                print("💡 Set up a remote first:")
+                print(f"   cg remote add {args.remote} <url>")
             sys.exit(1)
 
         try:
@@ -2246,7 +2262,7 @@ class EnvironmentCommands:
             print(f"✗ Push failed: {e}", file=sys.stderr)
             sys.exit(1)
 
-    @with_env_logging("env remote")
+    @with_env_logging("remote")
     def remote(self, args: argparse.Namespace, logger=None) -> None:
         """Manage git remotes."""
         env = self._get_env(args)

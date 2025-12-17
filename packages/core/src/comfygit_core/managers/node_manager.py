@@ -648,7 +648,7 @@ class NodeManager:
             # Warn about extra nodes (don't auto-delete during manual sync)
             for node_name in untracked:
                 logger.warning(f"Untracked node found: {node_name}")
-                logger.warning(f"  Run 'comfygit node add {node_name} --dev' to track it")
+                logger.warning(f"  Run 'cg node add {node_name} --dev' to track it")
 
         # Install missing registry/git nodes (skip if .disabled version exists)
         nodes_to_install = [

@@ -453,6 +453,7 @@ __pycache__/
         branch: str | None = None,
         ff_only: bool = False,
         strategy_option: str | None = None,
+        force: bool = False,
     ) -> dict:
         """Pull from remote (fetch + merge).
 
@@ -461,6 +462,7 @@ __pycache__/
             branch: Branch to pull (default: current branch)
             ff_only: Only allow fast-forward merges (default: False)
             strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
+            force: If True, allow unrelated histories merge (default: False)
 
         Returns:
             Dict with keys: 'fetch_output', 'merge_output', 'branch'
@@ -471,10 +473,10 @@ __pycache__/
         """
         from ..utils.git import git_pull
 
-        logger.info(f"Pulling {remote}/{branch or 'current branch'}")
+        logger.info(f"Pulling {remote}/{branch or 'current branch'}" + (" (force)" if force else ""))
 
         result = git_pull(
-            self.repo_path, remote, branch, ff_only=ff_only, strategy_option=strategy_option
+            self.repo_path, remote, branch, ff_only=ff_only, strategy_option=strategy_option, force=force
         )
 
         return result

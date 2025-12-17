@@ -708,7 +708,7 @@ def git_fetch(
     if not remote_url:
         raise ValueError(
             f"Remote '{remote}' not configured. "
-            f"Add with: comfygit remote add {remote} <url>"
+            f"Add with: cg remote add {remote} <url>"
         )
 
     cmd = ["fetch", remote]
@@ -722,6 +722,7 @@ def git_merge(
     ff_only: bool = False,
     timeout: int = 30,
     strategy_option: str | None = None,
+    allow_unrelated_histories: bool = False,
 ) -> str:
     """Merge a ref into current branch.
 
@@ -731,6 +732,7 @@ def git_merge(
         ff_only: Only allow fast-forward merges (default: False)
         timeout: Command timeout in seconds
         strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
+        allow_unrelated_histories: Allow merging unrelated histories (default: False)
 
     Returns:
         Merge output
@@ -744,6 +746,8 @@ def git_merge(
         cmd.append("--ff-only")
     if strategy_option:
         cmd.extend(["-X", strategy_option])
+    if allow_unrelated_histories:
+        cmd.append("--allow-unrelated-histories")
     cmd.append(ref)
 
     try:
@@ -770,6 +774,13 @@ def git_merge(
                 "Remote has diverged - resolve manually."
             ) from e
 
+        # Check for unrelated histories error
+        if "unrelated histories" in combined_error:
+            raise OSError(
+                f"Cannot merge {ref}: refusing to merge unrelated histories.\n"
+                "Use --force to allow merging unrelated histories."
+            ) from e
+
         # Check for merge conflict indicators (git uses "CONFLICT" in stderr)
         # Exit code 1 from git merge typically indicates a conflict
         if "conflict" in combined_error or returncode == 1:
@@ -789,6 +800,7 @@ def git_pull(
     ff_only: bool = False,
     timeout: int = 30,
     strategy_option: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Fetch and merge from remote (pull operation).
 
@@ -799,6 +811,7 @@ def git_pull(
         ff_only: Only allow fast-forward merges (default: False)
         timeout: Command timeout in seconds
         strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
+        force: If True, allow unrelated histories merge (default: False)
 
     Returns:
         Dict with keys: 'fetch_output', 'merge_output', 'branch'
@@ -816,7 +829,14 @@ def git_pull(
 
     # Then merge
     merge_ref = f"{remote}/{branch}"
-    merge_output = git_merge(repo_path, merge_ref, ff_only, timeout, strategy_option)
+    merge_output = git_merge(
+        repo_path,
+        merge_ref,
+        ff_only,
+        timeout,
+        strategy_option,
+        allow_unrelated_histories=force,
+    )
 
     return {
         'fetch_output': fetch_output,
@@ -830,6 +850,7 @@ def git_push(
     remote: str = "origin",
     branch: str | None = None,
     force: bool = False,
+    force_unsafe: bool = False,
     timeout: int = 30,
 ) -> str:
     """Push commits to remote.
@@ -838,7 +859,8 @@ def git_push(
         repo_path: Path to git repository
         remote: Remote name (default: origin)
         branch: Branch to push (default: current branch)
-        force: Use --force-with-lease (default: False)
+        force: Use --force-with-lease first, then retry with --force if needed
+        force_unsafe: Use --force directly (skip --force-with-lease)
         timeout: Command timeout in seconds
 
     Returns:
@@ -853,11 +875,11 @@ def git_push(
     if not remote_url:
         raise ValueError(
             f"Remote '{remote}' not configured. "
-            f"Add with: comfygit remote add {remote} <url>"
+            f"Add with: cg remote add {remote} <url>"
         )
 
     # If force pushing, fetch first to update remote refs for --force-with-lease
-    if force:
+    if force and not force_unsafe:
         try:
             git_fetch(repo_path, remote, timeout)
         except Exception:
@@ -869,22 +891,42 @@ def git_push(
     if branch:
         cmd.append(branch)
 
-    if force:
+    if force_unsafe:
+        # Dangerous: use --force directly
+        cmd.append("--force")
+    elif force:
+        # Safe: use --force-with-lease (will fail if remote changed since last fetch)
         cmd.append("--force-with-lease")
 
     try:
         result = _git(cmd, repo_path)
         return result.stdout
-    except CDProcessError as e:
+    except OSError as e:
+        # _git() converts CDProcessError to OSError
+        original_error = e.__cause__ if isinstance(e.__cause__, CDProcessError) else None
         error_msg = str(e).lower()
-        if "permission denied" in error_msg or "authentication" in error_msg:
+        stderr_str = ""
+
+        if original_error:
+            stderr_str = (original_error.stderr or "").lower()
+
+        combined_error = error_msg + " " + stderr_str
+
+        if "permission denied" in combined_error or "authentication" in combined_error:
             raise OSError(
                 "Authentication failed. Check SSH key or HTTPS credentials."
             ) from e
-        elif "rejected" in error_msg:
+
+        # If --force-with-lease failed due to stale refs, and force=True, retry with --force
+        if force and not force_unsafe and ("stale info" in combined_error or "rejected" in combined_error):
+            logger.warning("--force-with-lease failed, retrying with --force")
+            return git_push(repo_path, remote, branch, force=True, force_unsafe=True, timeout=timeout)
+
+        if "rejected" in combined_error:
             raise OSError(
-                "Push rejected - remote has changes. Run: comfygit pull first"
+                "Push rejected - remote has changes. Run: cg pull first"
             ) from e
+
         raise OSError(f"Push failed: {e}") from e
 
 
@@ -1415,7 +1457,7 @@ def git_fetch_with_auth(
     if not remote_url:
         raise ValueError(
             f"Remote '{remote}' not configured. "
-            f"Add with: comfygit remote add {remote} <url>"
+            f"Add with: cg remote add {remote} <url>"
         )
 
     result = _git_with_auth(["fetch", remote], repo_path, token)
@@ -1428,6 +1470,7 @@ def git_push_with_auth(
     token: str,
     branch: str | None = None,
     force: bool = False,
+    force_unsafe: bool = False,
     timeout: int = 30,
 ) -> str:
     """Push commits to remote with token authentication.
@@ -1437,7 +1480,8 @@ def git_push_with_auth(
         remote: Remote name (default: origin)
         token: GitHub PAT for authentication
         branch: Branch to push (default: current branch)
-        force: Use --force-with-lease (default: False)
+        force: Use --force-with-lease first, then retry with --force if needed
+        force_unsafe: Use --force directly (skip --force-with-lease)
         timeout: Command timeout in seconds
 
     Returns:
@@ -1452,11 +1496,11 @@ def git_push_with_auth(
     if not remote_url:
         raise ValueError(
             f"Remote '{remote}' not configured. "
-            f"Add with: comfygit remote add {remote} <url>"
+            f"Add with: cg remote add {remote} <url>"
         )
 
     # If force pushing, fetch first to update remote refs for --force-with-lease
-    if force:
+    if force and not force_unsafe:
         try:
             git_fetch_with_auth(repo_path, remote, token, timeout)
         except Exception:
@@ -1466,7 +1510,10 @@ def git_push_with_auth(
     cmd = ["push", remote]
     if branch:
         cmd.append(branch)
-    if force:
+
+    if force_unsafe:
+        cmd.append("--force")
+    elif force:
         cmd.append("--force-with-lease")
 
     try:
@@ -1478,9 +1525,15 @@ def git_push_with_auth(
             raise OSError(
                 "Authentication failed. Check your token has repo access."
             ) from e
-        elif "rejected" in error_msg:
+
+        # If --force-with-lease failed due to stale refs, and force=True, retry with --force
+        if force and not force_unsafe and ("stale info" in error_msg or "rejected" in error_msg):
+            logger.warning("--force-with-lease failed, retrying with --force")
+            return git_push_with_auth(repo_path, remote, token, branch, force=True, force_unsafe=True, timeout=timeout)
+
+        if "rejected" in error_msg:
             raise OSError(
-                "Push rejected - remote has changes. Run: comfygit pull first"
+                "Push rejected - remote has changes. Run: cg pull first"
             ) from e
         raise OSError(f"Push failed: {e.stderr or str(e)}") from e
 
@@ -1493,6 +1546,7 @@ def git_pull_with_auth(
     ff_only: bool = False,
     timeout: int = 30,
     strategy_option: str | None = None,
+    force: bool = False,
 ) -> dict:
     """Fetch and merge from remote with token authentication.
 
@@ -1504,6 +1558,7 @@ def git_pull_with_auth(
         ff_only: Only allow fast-forward merges (default: False)
         timeout: Command timeout in seconds
         strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
+        force: If True, allow unrelated histories merge (default: False)
 
     Returns:
         Dict with keys: 'fetch_output', 'merge_output', 'branch'
@@ -1521,7 +1576,14 @@ def git_pull_with_auth(
 
     # Then merge (no auth needed - local operation)
     merge_ref = f"{remote}/{branch}"
-    merge_output = git_merge(repo_path, merge_ref, ff_only, timeout, strategy_option)
+    merge_output = git_merge(
+        repo_path,
+        merge_ref,
+        ff_only,
+        timeout,
+        strategy_option,
+        allow_unrelated_histories=force,
+    )
 
     return {
         'fetch_output': fetch_output,

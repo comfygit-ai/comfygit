@@ -6,7 +6,7 @@ from comfygit_cli.env_commands import EnvironmentCommands
 
 
 class TestManifest:
-    """Test 'comfygit manifest' command handler."""
+    """Test 'cg manifest' command handler."""
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_manifest_default_toml_output(self, mock_workspace):

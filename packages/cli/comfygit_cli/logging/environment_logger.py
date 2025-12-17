@@ -408,21 +408,21 @@ def with_env_logging(command_name: str, get_env_name: Callable | None = None, lo
     """Decorator for environment commands that automatically sets up logging.
     
     Args:
-        command_name: Name of the command for logging (e.g., "env create")
+        command_name: Name of the command for logging (e.g., "create", "node add")
         get_env_name: Optional function to extract env name from args.
-                     If None, tries args.name, then args.env_name, 
+                     If None, tries args.name, then args.env_name,
                      then calls self._get_env_name(args) if available.
         log_args: If True, automatically logs all args attributes (default: True)
         **log_context: Additional static context to log
-    
+
     Example:
-        @with_env_logging("env create")  # Automatically logs all args
+        @with_env_logging("create")  # Automatically logs all args
         def create(self, args):
             # All logging automatically goes to environment log
             result = self.env_mgr.create_environment(...)
-        
-        @with_env_logging("env apply", log_args=False, custom_field="value")
-        def apply(self, args):
+
+        @with_env_logging("repair", log_args=False, custom_field="value")
+        def repair(self, args):
             # Only logs custom_field, not args
     """
     def decorator(func: Callable) -> Callable:
