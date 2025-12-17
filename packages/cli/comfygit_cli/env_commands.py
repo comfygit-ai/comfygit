@@ -1985,8 +1985,15 @@ class EnvironmentCommands:
         if not env.git_manager.has_remote(args.remote):
             print(f"✗ Remote '{args.remote}' not configured")
             print()
-            print("💡 Set up a remote first:")
-            print(f"   cg remote add {args.remote} <url>")
+            # Check if other remotes exist
+            remotes = env.git_manager.list_remotes()
+            if remotes:
+                remote_names = list({r[0] for r in remotes})  # Unique names
+                print("💡 Use an existing remote:")
+                print(f"   cg pull -r {remote_names[0]}")
+            else:
+                print("💡 Set up a remote first:")
+                print(f"   cg remote add {args.remote} <url>")
             sys.exit(1)
 
         # Preview mode - read-only, just show what would change
@@ -2203,8 +2210,15 @@ class EnvironmentCommands:
         if not env.git_manager.has_remote(args.remote):
             print(f"✗ Remote '{args.remote}' not configured")
             print()
-            print("💡 Set up a remote first:")
-            print(f"   cg remote add {args.remote} <url>")
+            # Check if other remotes exist
+            remotes = env.git_manager.list_remotes()
+            if remotes:
+                remote_names = list({r[0] for r in remotes})  # Unique names
+                print("💡 Use an existing remote:")
+                print(f"   cg push -r {remote_names[0]}")
+            else:
+                print("💡 Set up a remote first:")
+                print(f"   cg remote add {args.remote} <url>")
             sys.exit(1)
 
         try:
