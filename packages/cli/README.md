@@ -4,7 +4,7 @@ Command-line interface for ComfyGit workspace and environment management.
 
 ## Overview
 
-The CLI (`cfd` command) provides interactive, user-friendly access to ComfyGit's environment management system. It wraps the `comfygit-core` library with:
+The CLI (`cg` command) provides interactive, user-friendly access to ComfyGit's environment management system. It wraps the `comfygit-core` library with:
 
 - **Smart tab completion** - Context-aware shell completion for bash/zsh
 - **Interactive resolution** - User-guided dependency resolution for ambiguous cases
@@ -30,15 +30,15 @@ pip install comfydock-cli
 The CLI provides smart shell completion that understands your workspace context:
 
 ```bash
-cfd use <TAB>           # Lists all environments
-cfd -e prod node remove <TAB>  # Lists installed nodes in 'prod'
-cfd workflow resolve <TAB>     # Prioritizes unresolved workflows
+cg use <TAB>           # Lists all environments
+cg -e prod node remove <TAB>  # Lists installed nodes in 'prod'
+cg workflow resolve <TAB>     # Prioritizes unresolved workflows
 ```
 
 **Setup:**
 ```bash
-cfd completion install    # One-time setup (bash/zsh)
-cfd completion status     # Check installation
+cg completion install    # One-time setup (bash/zsh)
+cg completion status     # Check installation
 ```
 
 The installer:
@@ -114,13 +114,13 @@ Every command is logged to environment-specific files:
     └── workspace.log       # Workspace-level operations (init, import, etc)
 ```
 
-View logs:
+View debug logs:
 ```bash
-cfd logs                    # Last 200 lines of active env
-cfd logs -n 500             # Last 500 lines
-cfd logs --full             # All logs (no limit)
-cfd logs --level ERROR      # Only errors
-cfd logs --workspace        # Workspace logs instead of env
+cg debug                    # Last 200 lines of active env
+cg debug -n 500             # Last 500 lines
+cg debug --full             # All logs (no limit)
+cg debug --level ERROR      # Only errors
+cg debug --workspace        # Workspace logs instead of env
 ```
 
 Logs include:
@@ -143,10 +143,10 @@ Core library errors are translated into actionable CLI commands:
 
 Suggested actions:
   1. Track existing directory as development node
-     → cfd node add ComfyUI-Manager --dev
+     → cg node add ComfyUI-Manager --dev
   2. Remove and reinstall from registry
-     → cfd node remove ComfyUI-Manager
-     → cfd node add comfyui-manager
+     → cg node remove ComfyUI-Manager
+     → cg node add comfyui-manager
 ```
 
 ## Command Reference
@@ -154,7 +154,7 @@ Suggested actions:
 ### Global Options
 
 ```bash
-cfd [options] <command> [args]
+cg [options] <command> [args]
 
 Options:
   -e, --env NAME    Target specific environment (uses active if not specified)
@@ -168,54 +168,54 @@ Commands that operate at the workspace level (no environment needed):
 
 ```bash
 # Initialize workspace (one-time setup)
-cfd init [PATH]
+cg init [PATH]
   --models-dir PATH    Point to existing models directory
   --yes, -y            Use all defaults, no prompts
 
 # List all environments
-cfd list
+cg list
 
 # Import environment from tarball or git
-cfd import [PATH|URL]
+cg import [PATH|URL]
   --name NAME          Environment name (skips prompt)
   --branch, -b REF     Git branch/tag/commit
   --torch-backend BACKEND  PyTorch backend (auto/cpu/cu128/rocm6.3/xpu)
   --use                Set as active environment after import
 
 # Export environment to tarball
-cfd export [PATH]
+cg export [PATH]
   --allow-issues       Skip confirmation if models lack source URLs
 
 # Configuration
-cfd config
+cg config
   --civitai-key KEY    Set CivitAI API key (empty string to clear)
   --show               Show current configuration
 
 # Registry management
-cfd registry status    # Show registry cache status
-cfd registry update    # Update registry data from GitHub
+cg registry status    # Show registry cache status
+cg registry update    # Update registry data from GitHub
 
 # Model index (workspace-wide)
-cfd model index find QUERY        # Find models by hash/filename
-cfd model index list              # List all indexed models
-cfd model index show IDENTIFIER   # Show detailed model info
-cfd model index status            # Show index status
-cfd model index sync              # Scan models directory
-cfd model index dir PATH          # Set models directory
+cg model index find QUERY        # Find models by hash/filename
+cg model index list              # List all indexed models
+cg model index show IDENTIFIER   # Show detailed model info
+cg model index status            # Show index status
+cg model index sync              # Scan models directory
+cg model index dir PATH          # Set models directory
 
 # Model download (to workspace models directory)
-cfd model download URL
+cg model download URL
   --path PATH          Target path relative to models dir
   -c, --category TYPE  Model category for auto-path (checkpoints/loras/vae)
   -y, --yes            Skip path confirmation
 
 # Model source management
-cfd model add-source [MODEL] [URL]  # Interactive if args omitted
+cg model add-source [MODEL] [URL]  # Interactive if args omitted
 
 # Tab completion
-cfd completion install     # Install completion for your shell
-cfd completion uninstall   # Remove completion
-cfd completion status      # Show installation status
+cg completion install     # Install completion for your shell
+cg completion uninstall   # Remove completion
+cg completion status      # Show installation status
 ```
 
 ### Environment Management
@@ -224,7 +224,7 @@ Commands that operate ON environments:
 
 ```bash
 # Create new environment
-cfd create NAME
+cg create NAME
   --template PATH      Template manifest
   --python VERSION     Python version (default: 3.11)
   --comfyui VERSION    ComfyUI version
@@ -232,18 +232,18 @@ cfd create NAME
   --use                Set as active environment
 
 # Set active environment
-cfd use NAME
+cg use NAME
 
 # Delete environment
-cfd delete NAME
+cg delete NAME
   -y, --yes            Skip confirmation
 
 # Show environment status
-cfd status
+cg status
   -v, --verbose        Show full details
 
 # Repair environment to match pyproject.toml
-cfd repair
+cg repair
   -y, --yes            Skip confirmation
   --models MODE        Model download strategy (all/required/skip)
 ```
@@ -254,11 +254,11 @@ Commands that operate IN environments (require `-e` or active environment):
 
 ```bash
 # Run ComfyUI
-cfd run [COMFYUI_ARGS...]
+cg run [COMFYUI_ARGS...]
   --no-sync            Skip environment sync before running
 
-# View logs
-cfd logs
+# View debug logs
+cg debug
   -n, --lines N        Number of lines (default: 200)
   --level LEVEL        Filter by log level (DEBUG/INFO/WARNING/ERROR)
   --full               Show all logs (no line limit)
@@ -271,21 +271,24 @@ Git-based versioning for environments:
 
 ```bash
 # Commit current state
-cfd commit
+cg commit
   -m, --message MSG    Commit message (auto-generated if not provided)
   --auto               Auto-resolve issues without interaction
   --allow-issues       Allow committing workflows with unresolved issues
 
 # View commit history
-cfd commit log
+cg log
+  -n, --limit N        Number of commits to show (default: 20)
   -v, --verbose        Show full details
 
-# Rollback to previous state
-cfd rollback [VERSION]
-  # No version: Discard uncommitted changes
-  # With version (e.g., v1, v2): Restore that commit
+# Discard uncommitted changes
+cg reset --hard
   -y, --yes            Skip confirmation
-  --force              Force rollback, discard uncommitted changes
+
+# Restore to a previous commit
+cg checkout <ref>
+  -y, --yes            Skip confirmation for uncommitted changes
+  --force              Force checkout, discarding uncommitted changes
 ```
 
 ### Git Integration
@@ -294,18 +297,18 @@ Sync environments via git remotes:
 
 ```bash
 # Remote management
-cfd remote add NAME URL      # Add git remote
-cfd remote remove NAME       # Remove git remote
-cfd remote list              # List all remotes
+cg remote add NAME URL      # Add git remote
+cg remote remove NAME       # Remove git remote
+cg remote list              # List all remotes
 
 # Pull from remote
-cfd pull
+cg pull
   -r, --remote NAME    Remote name (default: origin)
   --models MODE        Model download strategy (all/required/skip)
   --force              Discard uncommitted changes
 
 # Push to remote
-cfd push
+cg push
   -r, --remote NAME    Remote name (default: origin)
   --force              Force push using --force-with-lease
 ```
@@ -314,7 +317,7 @@ cfd push
 
 ```bash
 # Add custom node
-cfd node add IDENTIFIER [IDENTIFIER...]
+cg node add IDENTIFIER [IDENTIFIER...]
   # IDENTIFIER can be:
   #   - Registry ID: comfyui-manager
   #   - GitHub URL: https://github.com/user/repo
@@ -326,14 +329,14 @@ cfd node add IDENTIFIER [IDENTIFIER...]
   --force              Force overwrite existing directory
 
 # Remove custom node
-cfd node remove IDENTIFIER [IDENTIFIER...]
+cg node remove IDENTIFIER [IDENTIFIER...]
   --dev                Remove development node specifically
 
 # List installed nodes
-cfd node list
+cg node list
 
 # Update node
-cfd node update IDENTIFIER
+cg node update IDENTIFIER
   -y, --yes            Auto-confirm updates
   --no-test            Skip dependency resolution test
 ```
@@ -342,10 +345,10 @@ cfd node update IDENTIFIER
 
 ```bash
 # List workflows with status
-cfd workflow list
+cg workflow list
 
 # Resolve workflow dependencies
-cfd workflow resolve NAME
+cg workflow resolve NAME
   --auto               Auto-resolve without interaction
   --install            Auto-install missing nodes
   --no-install         Skip node installation prompt
@@ -355,21 +358,21 @@ cfd workflow resolve NAME
 
 ```bash
 # Add Python package
-cfd py add [PACKAGE...]
+cg py add [PACKAGE...]
   -r, --requirements FILE  Add from requirements.txt
   --upgrade                Upgrade existing packages
 
 # Remove Python package
-cfd py remove PACKAGE [PACKAGE...]
+cg py remove PACKAGE [PACKAGE...]
 
 # List dependencies
-cfd py list
+cg py list
   --all                Show all including dependency groups
 
 # Manage constraints (UV constraint dependencies)
-cfd constraint add PACKAGE [PACKAGE...]    # e.g., torch==2.4.1
-cfd constraint list
-cfd constraint remove PACKAGE [PACKAGE...]
+cg constraint add PACKAGE [PACKAGE...]    # e.g., torch==2.4.1
+cg constraint list
+cg constraint remove PACKAGE [PACKAGE...]
 ```
 
 ## Common Workflows
@@ -378,37 +381,37 @@ cfd constraint remove PACKAGE [PACKAGE...]
 
 ```bash
 # 1. Initialize workspace (one-time)
-cfd init
+cg init
 
 # During init, you'll be prompted to set up models directory:
 # - Point to existing ComfyUI models directory (recommended)
 # - Or use the default empty directory
 
 # 2. Create and activate environment
-cfd create my-project --use
+cg create my-project --use
 
 # 3. Add custom nodes
-cfd node add comfyui-manager
-cfd node add https://github.com/ltdrdata/ComfyUI-Impact-Pack
+cg node add comfyui-manager
+cg node add https://github.com/ltdrdata/ComfyUI-Impact-Pack
 
 # 4. Run ComfyUI and build your workflow
-cfd run
+cg run
 
 # 5. Commit your work
-cfd commit -m "Initial setup with Impact Pack"
+cg commit -m "Initial setup with Impact Pack"
 
 # 6. Export for sharing
-cfd export my-project-v1.tar.gz
+cg export my-project-v1.tar.gz
 ```
 
 ### Importing a Shared Project
 
 ```bash
 # Import from tarball
-cfd import workflow-pack.tar.gz --name imported-project --use
+cg import workflow-pack.tar.gz --name imported-project --use
 
 # Or import from git
-cfd import https://github.com/user/comfyui-project.git --name team-project --use
+cg import https://github.com/user/comfyui-project.git --name team-project --use
 
 # The import process will:
 # 1. Download missing nodes
@@ -416,49 +419,49 @@ cfd import https://github.com/user/comfyui-project.git --name team-project --use
 # 3. Set up Python environment
 # 4. Prepare ComfyUI for running
 
-cfd run
+cg run
 ```
 
 ### Team Collaboration via Git
 
 ```bash
 # On machine 1: Set up and share
-cfd create team-workflow --use
-cfd node add comfyui-animatediff
+cg create team-workflow --use
+cg node add comfyui-animatediff
 # ... build workflow ...
-cfd commit -m "Initial animation workflow"
+cg commit -m "Initial animation workflow"
 
 # Add GitHub/GitLab remote
-cfd remote add origin https://github.com/team/comfy-project.git
-cfd push
+cg remote add origin https://github.com/team/comfy-project.git
+cg push
 
 # On machine 2: Clone and work
-cfd import https://github.com/team/comfy-project.git --name team-workflow --use
+cg import https://github.com/team/comfy-project.git --name team-workflow --use
 # ... make changes ...
-cfd commit -m "Added refiners"
-cfd push
+cg commit -m "Added refiners"
+cg push
 
 # Back on machine 1: Pull updates
-cfd pull
-cfd run
+cg pull
+cg run
 ```
 
 ### Managing Models Across Environments
 
 ```bash
 # Check what models you have
-cfd model index status
+cg model index status
 # Output: 124 models indexed in /home/user/models
 
 # Find specific model
-cfd model index find "sd_xl"
+cg model index find "sd_xl"
 # Shows matches with hash, size, file path
 
 # Download new model
-cfd model download https://civitai.com/models/133005
+cg model download https://civitai.com/models/133005
 
 # Update index after manually adding models
-cfd model index sync
+cg model index sync
 
 # Models are automatically symlinked into environments
 # No duplication, shared across all environments
@@ -468,7 +471,7 @@ cfd model index sync
 
 ```bash
 # Load a workflow with missing nodes/models
-cfd workflow resolve my-animation
+cg workflow resolve my-animation
 
 # The CLI will:
 # 1. Analyze the workflow
@@ -478,29 +481,29 @@ cfd workflow resolve my-animation
 # 5. Update environment to match
 
 # For non-interactive use:
-cfd workflow resolve my-animation --auto --install
+cg workflow resolve my-animation --auto --install
 ```
 
 ### Experimenting Without Breaking Production
 
 ```bash
 # Create experimental environment
-cfd create experimental --use
+cg create experimental --use
 
 # Install risky nodes
-cfd node add some-experimental-node
+cg node add some-experimental-node
 
 # If things break:
-cfd rollback  # Discard uncommitted changes
+cg reset --hard  # Discard uncommitted changes
 
-# Or commit and rollback later:
-cfd commit -m "Testing experimental node"
+# Or commit and revert later:
+cg commit -m "Testing experimental node"
 # ... test ...
-cfd rollback v1  # Go back to before the commit
+cg revert HEAD  # Create new commit that undoes the last commit
 
 # When ready to merge changes back to production:
-cfd export experimental.tar.gz
-cfd use production
+cg export experimental.tar.gz
+cg use production
 # Manually review and selectively add nodes from experimental
 ```
 
@@ -508,23 +511,23 @@ cfd use production
 
 ### Using Logs
 
-Logs are your friend when things go wrong:
+Debug logs are your friend when things go wrong:
 
 ```bash
 # View recent logs
-cfd logs
+cg debug
 
 # View all logs
-cfd logs --full
+cg debug --full
 
 # Filter by error level
-cfd logs --level ERROR
+cg debug --level ERROR
 
 # View more lines
-cfd logs -n 1000
+cg debug -n 1000
 
 # View workspace logs (for init, import, export issues)
-cfd logs --workspace
+cg debug --workspace
 ```
 
 **Log locations:**
@@ -544,7 +547,7 @@ Logs rotate automatically at 10MB with 5 backups kept.
 **"No workspace found"**
 ```bash
 # Make sure you've initialized
-cfd init
+cg init
 
 # Or set COMFYGIT_HOME to point to existing workspace
 export COMFYGIT_HOME=/path/to/workspace
@@ -553,35 +556,35 @@ export COMFYGIT_HOME=/path/to/workspace
 **"No active environment"**
 ```bash
 # List environments
-cfd list
+cg list
 
 # Set active environment
-cfd use <name>
+cg use <name>
 
 # Or use -e flag
-cfd -e <name> status
+cg -e <name> status
 ```
 
 **Node installation fails**
 ```bash
 # Check the logs
-cfd logs --level ERROR
+cg debug --level ERROR
 
 # Try repairing the environment
-cfd repair -y
+cg repair -y
 
 # View Python dependency conflicts
-cfd py list
+cg py list
 ```
 
 **Tab completion not working**
 ```bash
 # Check status
-cfd completion status
+cg completion status
 
 # Reinstall if needed
-cfd completion uninstall
-cfd completion install
+cg completion uninstall
+cg completion install
 
 # Reload shell
 source ~/.bashrc  # or ~/.zshrc
@@ -591,12 +594,12 @@ source ~/.bashrc  # or ~/.zshrc
 
 - `COMFYGIT_HOME` - Override default workspace location (`~/comfygit`)
 - `COMFYGIT_DEV_COMPRESS_LOGS` - Enable compressed logging (dev feature: `true`/`1`/`yes`)
-- `CIVITAI_API_KEY` - CivitAI API key (or use `cfd config --civitai-key`)
+- `CIVITAI_API_KEY` - CivitAI API key (or use `cg config --civitai-key`)
 
 Example:
 ```bash
 export COMFYGIT_HOME=/mnt/storage/comfygit
-cfd init
+cg init
 ```
 
 ## For Library Users

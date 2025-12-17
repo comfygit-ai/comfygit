@@ -88,12 +88,12 @@ Utilities for building node registries and managing ComfyUI integrations (run du
 - **test_concurrent_api.py** - Tests concurrent API performance against ComfyUI registry with request timing and success tracking
 
 ## Configuration
-- **pyproject.toml** - Package metadata, dependencies (comfygit-core, aiohttp, argcomplete), and CLI entry points (comfydock, cfd commands)
+- **pyproject.toml** - Package metadata, dependencies (comfygit-core, aiohttp, argcomplete), and CLI entry points (comfygit, cg commands)
 
 ## Key Entry Points
 
 ### Command-Line Interface
-- **comfygit / cfd** - Main CLI invocation points defined in pyproject.toml, routes to environment or global commands
+- **comfygit / cg** - Main CLI invocation points defined in pyproject.toml, routes to environment or global commands
 
 ### Handler Classes
 - **EnvironmentCommands** - Primary handler for environment-scoped operations (nodes, models, workflows, Python packages)

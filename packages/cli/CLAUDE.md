@@ -86,7 +86,7 @@ uv run pytest packages/cli/tests/ --cov=comfygit_cli
 
 ### Command Handler Pattern
 ```python
-@with_env_logging("command name")
+@with_env_logging("status")  # Use actual command name, e.g., "status", "node add"
 def command(self, args: argparse.Namespace, logger=None) -> None:
     """Command description."""
     env = self._get_env(args)
@@ -131,17 +131,17 @@ Before committing CLI changes:
 1. ✅ Run `uv run mypy packages/cli/comfygit_cli/`
 2. ✅ Run `uv run pyright packages/cli/comfygit_cli/`
 3. ✅ Run `uv run pytest packages/cli/tests/`
-4. ✅ Test manually with `uv run cfd <command>`
+4. ✅ Test manually with `uv run cg <command>`
 5. ✅ Check no red squiggles in IDE
 
 ## Common Commands
 
 ```bash
 # Run CLI locally
-uv run cfd --help
+uv run cg --help
 
 # Test specific command
-uv run cfd -e test-env status
+uv run cg -e test-env status
 
 # Install in dev mode
 uv pip install -e packages/cli/
