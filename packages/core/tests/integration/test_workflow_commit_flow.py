@@ -796,7 +796,7 @@ class TestWorkflowReset:
 
         This is equivalent to 'rollback to current version' - a convenient shorthand.
 
-        Scenario: User has uncommitted changes, runs 'comfygit rollback' (no target)
+        Scenario: User has uncommitted changes, runs 'cg reset --hard' (discard changes)
         Expected: Changes discarded, stay at current version, no new commit
         """
         import subprocess

@@ -98,7 +98,7 @@ class TestStatusRealBugScenario:
             capture_output=True
         )
 
-        # ACT: Get workflow status (this is what `comfygit status` does)
+        # ACT: Get workflow status (this is what `cg status` does)
         workflow_status = test_env.workflow_manager.get_workflow_status()
         test_workflow = next(
             (wf for wf in workflow_status.analyzed_workflows if wf.name == "test_workflow"),
