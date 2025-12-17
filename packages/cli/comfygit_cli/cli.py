@@ -5,6 +5,7 @@ import argparse
 import sys
 from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
+from typing import Callable
 
 import argcomplete
 
@@ -20,6 +21,14 @@ from .completers import (
 from .env_commands import EnvironmentCommands
 from .global_commands import GlobalCommands
 from .logging.logging_config import setup_logging
+
+
+def _make_help_func(parser: argparse.ArgumentParser) -> Callable[[argparse.Namespace], None]:
+    """Create a function that prints parser help and exits."""
+    def show_help(args: argparse.Namespace) -> None:
+        parser.print_help()
+        sys.exit(1)
+    return show_help
 
 try:
     __version__ = version("comfygit")
@@ -203,10 +212,12 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     # Model management subcommands
     model_parser = subparsers.add_parser("model", help="Manage model index")
     model_subparsers = model_parser.add_subparsers(dest="model_command", help="Model commands")
+    model_parser.set_defaults(func=_make_help_func(model_parser))
 
     # model index subcommands
     model_index_parser = model_subparsers.add_parser("index", help="Model index operations")
     model_index_subparsers = model_index_parser.add_subparsers(dest="model_index_command", help="Model index commands")
+    model_index_parser.set_defaults(func=_make_help_func(model_index_parser))
 
     # model index find
     model_index_find_parser = model_index_subparsers.add_parser("find", help="Find models by hash or filename")
@@ -253,6 +264,7 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     # Registry management subcommands
     registry_parser = subparsers.add_parser("registry", help="Manage node registry cache")
     registry_subparsers = registry_parser.add_subparsers(dest="registry_command", help="Registry commands")
+    registry_parser.set_defaults(func=_make_help_func(registry_parser))
 
     # registry status
     registry_status_parser = registry_subparsers.add_parser("status", help="Show registry cache status")
@@ -280,6 +292,7 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     completion_cmds = CompletionCommands()
     completion_parser = subparsers.add_parser("completion", help="Manage shell tab completion")
     completion_subparsers = completion_parser.add_subparsers(dest="completion_command", help="Completion commands")
+    completion_parser.set_defaults(func=_make_help_func(completion_parser))
 
     # completion install
     completion_install_parser = completion_subparsers.add_parser("install", help="Install tab completion for your shell")
@@ -303,6 +316,7 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
         dest="orch_command",
         help="Orchestrator commands"
     )
+    orch_parser.set_defaults(func=_make_help_func(orch_parser))
 
     # orch status
     orch_status_parser = orch_subparsers.add_parser("status", help="Show orchestrator status")
@@ -522,8 +536,9 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     remote_subparsers = remote_parser.add_subparsers(
         dest="remote_command",
-        required=True
+        help="Remote commands"
     )
+    remote_parser.set_defaults(func=_make_help_func(remote_parser))
 
     # remote add
     remote_add_parser = remote_subparsers.add_parser(
@@ -538,6 +553,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         "url",
         help="Remote URL"
     )
+    remote_add_parser.set_defaults(func=env_cmds.remote)
 
     # remote remove
     remote_remove_parser = remote_subparsers.add_parser(
@@ -548,18 +564,19 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         "name",
         help="Remote name to remove"
     )
+    remote_remove_parser.set_defaults(func=env_cmds.remote)
 
     # remote list
     remote_list_parser = remote_subparsers.add_parser(
         "list",
         help="List all git remotes"
     )
-
-    remote_parser.set_defaults(func=env_cmds.remote)
+    remote_list_parser.set_defaults(func=env_cmds.remote)
 
     # Node management subcommands
     node_parser = subparsers.add_parser("node", help="Manage custom nodes")
     node_subparsers = node_parser.add_subparsers(dest="node_command", help="Node commands")
+    node_parser.set_defaults(func=_make_help_func(node_parser))
 
     # node add
     node_add_parser = node_subparsers.add_parser("add", help="Add custom node(s)")
@@ -597,6 +614,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     # Workflow management subcommands
     workflow_parser = subparsers.add_parser("workflow", help="Manage workflows")
     workflow_subparsers = workflow_parser.add_subparsers(dest="workflow_command", help="Workflow commands")
+    workflow_parser.set_defaults(func=_make_help_func(workflow_parser))
 
     # workflow list
     workflow_list_parser = workflow_subparsers.add_parser("list", help="List all workflows with sync status")
@@ -619,6 +637,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         dest="model_command",
         help="Model management commands"
     )
+    workflow_importance_parser.set_defaults(func=_make_help_func(workflow_importance_parser))
 
     importance_parser = workflow_model_subparsers.add_parser(
         "importance",
@@ -645,6 +664,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     # Constraint management subcommands
     constraint_parser = subparsers.add_parser("constraint", help="Manage UV constraint dependencies")
     constraint_subparsers = constraint_parser.add_subparsers(dest="constraint_command", help="Constraint commands")
+    constraint_parser.set_defaults(func=_make_help_func(constraint_parser))
 
     # constraint add
     constraint_add_parser = constraint_subparsers.add_parser("add", help="Add constraint dependencies")
@@ -663,6 +683,7 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     # Python dependency management subcommands
     py_parser = subparsers.add_parser("py", help="Manage Python dependencies")
     py_subparsers = py_parser.add_subparsers(dest="py_command", help="Python dependency commands")
+    py_parser.set_defaults(func=_make_help_func(py_parser))
 
     # py add
     py_add_parser = py_subparsers.add_parser("add", help="Add Python dependencies")
