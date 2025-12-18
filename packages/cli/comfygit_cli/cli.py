@@ -283,24 +283,6 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     config_parser.add_argument("--show", action="store_true", help="Show current configuration")
     config_parser.set_defaults(func=global_cmds.config)
 
-    # config torch-backend - Manage PyTorch backend settings
-    config_torch_parser = config_subparsers.add_parser("torch-backend", help="Manage PyTorch backend settings")
-    config_torch_subparsers = config_torch_parser.add_subparsers(dest="torch_command", help="PyTorch backend commands")
-    config_torch_parser.set_defaults(func=_make_help_func(config_torch_parser))
-
-    # config torch-backend show
-    config_torch_show_parser = config_torch_subparsers.add_parser("show", help="Show current PyTorch backend")
-    config_torch_show_parser.set_defaults(func=global_cmds.config_torch_show)
-
-    # config torch-backend set <backend>
-    config_torch_set_parser = config_torch_subparsers.add_parser("set", help="Set PyTorch backend")
-    config_torch_set_parser.add_argument("backend", help="Backend to set (e.g., cu128, cpu, rocm6.3, xpu)")
-    config_torch_set_parser.set_defaults(func=global_cmds.config_torch_set)
-
-    # config torch-backend detect
-    config_torch_detect_parser = config_torch_subparsers.add_parser("detect", help="Auto-detect and show recommended backend")
-    config_torch_detect_parser.set_defaults(func=global_cmds.config_torch_detect)
-
     # debug - Show application logs for debugging
     debug_parser = subparsers.add_parser("debug", help="Show application debug logs")
     debug_parser.add_argument("-n", "--lines", type=int, default=200, help="Number of lines to show (default: 200)")
@@ -407,17 +389,40 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
 
     # Environment Operation Commands (operate IN environments, require -e or active)
 
+    # env-config - Environment-scoped configuration (requires -e or active env)
+    env_config_parser = subparsers.add_parser("env-config", help="Manage environment-specific configuration")
+    env_config_subparsers = env_config_parser.add_subparsers(dest="env_config_command", help="Environment config commands")
+    env_config_parser.set_defaults(func=_make_help_func(env_config_parser))
+
+    # env-config torch-backend - Manage PyTorch backend for this environment
+    env_config_torch_parser = env_config_subparsers.add_parser("torch-backend", help="Manage PyTorch backend settings")
+    env_config_torch_subparsers = env_config_torch_parser.add_subparsers(dest="torch_command", help="PyTorch backend commands")
+    env_config_torch_parser.set_defaults(func=_make_help_func(env_config_torch_parser))
+
+    # env-config torch-backend show
+    env_config_torch_show_parser = env_config_torch_subparsers.add_parser("show", help="Show current PyTorch backend")
+    env_config_torch_show_parser.set_defaults(func=env_cmds.env_config_torch_show)
+
+    # env-config torch-backend set <backend>
+    env_config_torch_set_parser = env_config_torch_subparsers.add_parser("set", help="Set PyTorch backend")
+    env_config_torch_set_parser.add_argument("backend", help="Backend to set (e.g., cu128, cpu, rocm6.3, xpu)")
+    env_config_torch_set_parser.set_defaults(func=env_cmds.env_config_torch_set)
+
+    # env-config torch-backend detect
+    env_config_torch_detect_parser = env_config_torch_subparsers.add_parser("detect", help="Auto-detect and show recommended backend")
+    env_config_torch_detect_parser.set_defaults(func=env_cmds.env_config_torch_detect)
+
     # run - Run ComfyUI (special handling for ComfyUI args)
     run_parser = subparsers.add_parser("run", help="Run ComfyUI")
     run_parser.add_argument("--no-sync", action="store_true", help="Skip environment sync before running")
     run_parser.add_argument(
         "--torch-backend",
-        default="auto",
+        default=None,
         metavar="BACKEND",
         help=(
-            "PyTorch backend for sync. Examples: auto (detect GPU), cpu, "
+            "PyTorch backend override (one-time, not saved). Examples: cpu, "
             "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
-            "Default: auto"
+            "Reads from .pytorch-backend file if not specified."
         ),
     )
     run_parser.set_defaults(func=env_cmds.run, args=[])
@@ -449,12 +454,12 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     sync_parser = subparsers.add_parser("sync", help="Sync environment packages and dependencies")
     sync_parser.add_argument(
         "--torch-backend",
-        default="auto",
+        default=None,
         metavar="BACKEND",
         help=(
-            "PyTorch backend. Examples: auto (detect GPU), cpu, "
+            "PyTorch backend override (one-time, not saved). Examples: cpu, "
             "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
-            "Default: auto"
+            "Reads from .pytorch-backend file if not specified."
         ),
     )
     sync_parser.add_argument(
@@ -562,12 +567,12 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     pull_parser.add_argument(
         "--torch-backend",
-        default="auto",
+        default=None,
         metavar="BACKEND",
         help=(
-            "PyTorch backend for repair. Examples: auto (detect GPU), cpu, "
+            "PyTorch backend override (one-time, not saved). Examples: cpu, "
             "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
-            "Default: auto"
+            "Reads from .pytorch-backend file if not specified."
         ),
     )
     pull_parser.set_defaults(func=env_cmds.pull)

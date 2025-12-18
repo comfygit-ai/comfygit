@@ -257,6 +257,26 @@ class Environment:
             missing_models=missing_models
         )
 
+    def _ensure_schema_migrated(self) -> bool:
+        """Migrate pyproject schema v1 → v2 if needed.
+
+        Schema v1 has PyTorch config embedded in [tool.uv] section.
+        Schema v2 stores PyTorch backend in .pytorch-backend file and
+        injects config at runtime.
+
+        This migration:
+        1. Extracts torch_backend from pyproject.toml to .pytorch-backend
+        2. Strips embedded [tool.uv] PyTorch config
+        3. Updates schema_version to 2
+
+        Returns:
+            True if migration was performed, False if already migrated
+        """
+        migrated = self.pyproject.migrate_pytorch_config(self.cec_path)
+        if migrated:
+            logger.info("Migrated environment to schema v2 (extracted PyTorch config)")
+        return migrated
+
     def sync(
         self,
         dry_run: bool = False,
@@ -288,6 +308,10 @@ class Environment:
             UVCommandError: If sync fails
         """
         result = SyncResult()
+
+        # Migrate schema v1 → v2 if needed (extracts embedded PyTorch config to .pytorch-backend)
+        # This ensures old environments get migrated on first sync with new code
+        self._ensure_schema_migrated()
 
         logger.info("Syncing environment...")
 

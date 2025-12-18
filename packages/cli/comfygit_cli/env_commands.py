@@ -270,6 +270,68 @@ class EnvironmentCommands:
 
     # === Commands that operate IN environments ===
 
+    # === Environment Configuration ===
+
+    @with_env_logging("env-config torch-backend show")
+    def env_config_torch_show(self, args: argparse.Namespace, logger=None) -> None:
+        """Show current PyTorch backend setting for this environment."""
+        env = self._get_env(args)
+
+        backend = env.pytorch_manager.get_backend()
+        backend_file = env.pytorch_manager.backend_file
+
+        print(f"PyTorch Backend: {backend}")
+
+        if backend_file.exists():
+            print(f"   Source: {backend_file}")
+        else:
+            print("   Source: auto-detected (no .pytorch-backend file)")
+            print()
+            print(f"💡 To save this setting: cg env-config torch-backend set {backend}")
+
+    @with_env_logging("env-config torch-backend set")
+    def env_config_torch_set(self, args: argparse.Namespace, logger=None) -> None:
+        """Set PyTorch backend for this environment."""
+        env = self._get_env(args)
+        backend = args.backend
+
+        # Validate backend format
+        if not env.pytorch_manager.is_valid_backend(backend):
+            print(f"✗ Invalid backend: {backend}")
+            print()
+            print("Valid formats:")
+            print("  • cu118, cu121, cu124, cu126, cu128 (CUDA)")
+            print("  • cpu")
+            print("  • rocm6.2, rocm6.3 (AMD)")
+            print("  • xpu (Intel)")
+            sys.exit(1)
+
+        env.pytorch_manager.set_backend(backend)
+        print(f"✓ PyTorch backend set to: {backend}")
+        print()
+        print("Run 'cg sync' to apply the new backend configuration.")
+
+    @with_env_logging("env-config torch-backend detect")
+    def env_config_torch_detect(self, args: argparse.Namespace, logger=None) -> None:
+        """Auto-detect recommended PyTorch backend."""
+        env = self._get_env(args)
+
+        detected = env.pytorch_manager.detect_backend()
+        current = env.pytorch_manager.get_backend()
+        backend_file = env.pytorch_manager.backend_file
+
+        print(f"Detected backend: {detected}")
+        print(f"Current backend:  {current}")
+
+        if backend_file.exists():
+            print(f"   Source: {backend_file}")
+        else:
+            print("   Source: auto-detected (no .pytorch-backend file)")
+
+        if detected != current:
+            print()
+            print(f"💡 Consider updating: cg env-config torch-backend set {detected}")
+
     @with_env_logging("run")
     def run(self, args: argparse.Namespace) -> None:
         """Run ComfyUI in the specified environment."""
@@ -277,6 +339,20 @@ class EnvironmentCommands:
         env = self._get_env(args)
         comfyui_args = args.args if hasattr(args, 'args') else []
         no_sync = getattr(args, 'no_sync', False)
+
+        # Handle torch-backend: read from file or use explicit override
+        torch_backend_override = getattr(args, 'torch_backend', None)
+
+        if torch_backend_override:
+            torch_backend = torch_backend_override
+            print(f"🔧 Using PyTorch backend override: {torch_backend}")
+        else:
+            torch_backend = env.pytorch_manager.get_backend()
+            if not env.pytorch_manager.backend_file.exists():
+                print(f"⚠️  No PyTorch backend configured. Auto-detecting: {torch_backend}")
+                print(f"   Run 'cg env-config torch-backend set {torch_backend}' to save this choice.")
+            else:
+                print(f"🔧 Using PyTorch backend: {torch_backend}")
 
         current_branch = env.get_current_branch()
         branch_display = f" (on {current_branch})" if current_branch else " (detached HEAD)"
@@ -305,19 +381,24 @@ class EnvironmentCommands:
         """Sync environment packages and dependencies."""
         env = self._get_env(args)
 
-        # Handle torch-backend: 'auto' means detect, otherwise use specified
-        torch_backend = getattr(args, 'torch_backend', 'auto')
-        if torch_backend == 'auto':
-            torch_backend = env.pytorch_manager.detect_backend()
-            print(f"🔍 Auto-detected PyTorch backend: {torch_backend}")
-        else:
-            print(f"🔧 Using PyTorch backend: {torch_backend}")
+        # Handle torch-backend: read from file or use explicit override
+        torch_backend_override = getattr(args, 'torch_backend', None)
 
-        # Update backend file if different from current
-        current_backend = env.pytorch_manager.get_backend()
-        if torch_backend != current_backend:
-            env.pytorch_manager.set_backend(torch_backend)
-            print(f"   Updated .pytorch-backend: {current_backend} → {torch_backend}")
+        if torch_backend_override:
+            # Explicit override - use it, don't write to file
+            torch_backend = torch_backend_override
+            print(f"🔧 Using PyTorch backend override: {torch_backend}")
+        else:
+            # Read from file (get_backend auto-detects if file missing)
+            torch_backend = env.pytorch_manager.get_backend()
+            if not env.pytorch_manager.backend_file.exists():
+                # File didn't exist, was auto-detected
+                print(f"⚠️  No PyTorch backend configured. Auto-detecting: {torch_backend}")
+                print(f"   Run 'cg env-config torch-backend set {torch_backend}' to save this choice.")
+            else:
+                print(f"🔧 Using PyTorch backend: {torch_backend}")
+
+        # NOTE: No file write here! Override is one-time, config write is via env-config
 
         print(f"\n🔄 Syncing environment: {env.name}")
 

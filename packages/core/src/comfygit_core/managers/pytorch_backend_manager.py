@@ -56,11 +56,47 @@ class PyTorchBackendManager:
     def set_backend(self, backend: str) -> None:
         """Write backend to file.
 
+        Also ensures .pytorch-backend is in .gitignore (for migration from
+        older environments that don't have this entry).
+
         Args:
             backend: Backend string (e.g., 'cu128', 'cpu')
         """
         self.backend_file.write_text(backend)
         logger.info(f"Set PyTorch backend: {backend}")
+
+        # Ensure .gitignore has this entry (migration support)
+        self._ensure_gitignore_entry()
+
+    def _ensure_gitignore_entry(self) -> None:
+        """Ensure .pytorch-backend is in .gitignore.
+
+        This supports migration from older environments that were created
+        before .pytorch-backend was added to the default .gitignore template.
+        """
+        gitignore_path = self.cec_path / ".gitignore"
+        entry = ".pytorch-backend"
+
+        if not gitignore_path.exists():
+            # No .gitignore - unusual, but create with just this entry
+            gitignore_path.write_text(f"# PyTorch backend configuration (machine-specific)\n{entry}\n")
+            logger.debug(f"Created .gitignore with entry: {entry}")
+            return
+
+        current_content = gitignore_path.read_text()
+
+        # Check if entry already exists
+        for line in current_content.split('\n'):
+            stripped = line.split('#')[0].strip()
+            if stripped == entry:
+                return  # Already present
+
+        # Add entry at the end
+        if not current_content.endswith('\n'):
+            current_content += '\n'
+        current_content += f"\n# PyTorch backend configuration (machine-specific)\n{entry}\n"
+        gitignore_path.write_text(current_content)
+        logger.info(f"Added {entry} to .gitignore (migration)")
 
     def detect_backend(self) -> str:
         """Auto-detect appropriate backend for current system.

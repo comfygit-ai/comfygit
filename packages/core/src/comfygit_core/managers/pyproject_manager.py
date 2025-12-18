@@ -478,6 +478,10 @@ class PyprojectManager:
         This extracts the torch_backend to .pytorch-backend file and strips
         PyTorch config from pyproject.toml.
 
+        The backend is extracted from (in order of priority):
+        1. [tool.comfygit] torch_backend field (explicit config)
+        2. [tool.uv] constraint-dependencies torch version suffix (e.g., torch==2.9.1+cu129)
+
         Args:
             cec_path: Path to the .cec directory
 
@@ -485,6 +489,7 @@ class PyprojectManager:
             True if migration was performed, False if already migrated
         """
         from .pytorch_backend_manager import PyTorchBackendManager
+        from ..utils.pytorch import extract_backend_from_version
 
         config = self.load()
         comfygit_config = config.get('tool', {}).get('comfygit', {})
@@ -495,8 +500,22 @@ class PyprojectManager:
             logger.debug("Already at schema v2+, skipping migration")
             return False
 
-        # Extract torch_backend before stripping
+        # Extract torch_backend before stripping - try multiple sources
         torch_backend = comfygit_config.get('torch_backend')
+
+        # If not in comfygit config, try to extract from constraint-dependencies
+        if not torch_backend:
+            uv_config = config.get('tool', {}).get('uv', {})
+            constraints = uv_config.get('constraint-dependencies', [])
+            for constraint in constraints:
+                if constraint.startswith('torch==') or constraint.startswith('torch>='):
+                    # Extract version from constraint (e.g., "torch==2.9.1+cu129")
+                    version_part = constraint.split('==')[-1].split('>=')[-1]
+                    torch_backend = extract_backend_from_version(version_part)
+                    if torch_backend:
+                        logger.info(f"Extracted backend from constraint-dependencies: {torch_backend}")
+                        break
+
         if torch_backend:
             # Write to .pytorch-backend file
             pytorch_manager = PyTorchBackendManager(cec_path)

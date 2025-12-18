@@ -185,3 +185,67 @@ class TestPyTorchBackendValidation:
 
         for backend in ["invalid", "cuda12", "rocm", "", "123"]:
             assert not manager.is_valid_backend(backend)
+
+
+class TestGitignoreUpdate:
+    """Tests for .gitignore migration support."""
+
+    @pytest.fixture
+    def temp_cec(self):
+        """Create a temporary .cec directory for testing."""
+        with TemporaryDirectory() as tmpdir:
+            cec_path = Path(tmpdir) / ".cec"
+            cec_path.mkdir()
+            yield cec_path
+
+    def test_set_backend_adds_gitignore_entry_when_missing(self, temp_cec):
+        """set_backend should add .pytorch-backend to .gitignore if missing."""
+        # Create .gitignore without .pytorch-backend entry
+        gitignore = temp_cec / ".gitignore"
+        gitignore.write_text("# Existing entries\nstaging/\n__pycache__/\n")
+
+        manager = PyTorchBackendManager(temp_cec)
+        manager.set_backend("cu128")
+
+        # Should have added .pytorch-backend
+        content = gitignore.read_text()
+        assert ".pytorch-backend" in content
+
+    def test_set_backend_does_not_duplicate_gitignore_entry(self, temp_cec):
+        """set_backend should not duplicate .pytorch-backend if already present."""
+        # Create .gitignore WITH .pytorch-backend entry
+        gitignore = temp_cec / ".gitignore"
+        original_content = "# Existing entries\nstaging/\n.pytorch-backend\n__pycache__/\n"
+        gitignore.write_text(original_content)
+
+        manager = PyTorchBackendManager(temp_cec)
+        manager.set_backend("cu128")
+
+        # Should not have added duplicate
+        content = gitignore.read_text()
+        assert content.count(".pytorch-backend") == 1
+
+    def test_set_backend_creates_gitignore_if_missing(self, temp_cec):
+        """set_backend should create .gitignore if it doesn't exist."""
+        gitignore = temp_cec / ".gitignore"
+        assert not gitignore.exists()
+
+        manager = PyTorchBackendManager(temp_cec)
+        manager.set_backend("cu128")
+
+        # Should have created .gitignore with the entry
+        assert gitignore.exists()
+        content = gitignore.read_text()
+        assert ".pytorch-backend" in content
+
+    def test_set_backend_handles_gitignore_with_comment(self, temp_cec):
+        """set_backend should recognize entry even with trailing comment."""
+        gitignore = temp_cec / ".gitignore"
+        gitignore.write_text(".pytorch-backend # machine-specific\n")
+
+        manager = PyTorchBackendManager(temp_cec)
+        manager.set_backend("cu128")
+
+        # Should not have added duplicate
+        content = gitignore.read_text()
+        assert content.count(".pytorch-backend") == 1

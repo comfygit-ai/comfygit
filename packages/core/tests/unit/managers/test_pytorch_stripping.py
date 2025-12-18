@@ -365,3 +365,74 @@ class TestMigratePytorchConfig:
         # Assert: No changes made
         assert result is False, "Should return False when already migrated"
         assert legacy_pyproject["pyproject_path"].read_text() == original_content
+
+
+class TestMigrateFromConstraintDependencies:
+    """Tests for extracting backend from constraint-dependencies during migration."""
+
+    @pytest.fixture
+    def pyproject_with_constraints(self, tmp_path):
+        """Create a pyproject with PyTorch in constraint-dependencies but NO torch_backend field."""
+        cec_path = tmp_path / ".cec"
+        cec_path.mkdir()
+        pyproject_path = cec_path / "pyproject.toml"
+
+        # This mimics old environments that had PyTorch configured via constraint-dependencies
+        # but never had an explicit torch_backend field
+        config = {
+            "project": {"name": "test-env", "version": "0.1.0"},
+            "tool": {
+                "comfygit": {
+                    "comfyui_version": "v0.4.0",
+                    "python_version": "3.12",
+                    # NOTE: No torch_backend field!
+                },
+                "uv": {
+                    "constraint-dependencies": [
+                        "torch==2.9.1+cu129",
+                        "torchvision==0.24.1+cu129",
+                        "torchaudio==2.9.1+cu129",
+                    ],
+                    "index": [
+                        {"name": "pytorch-cu129", "url": "https://download.pytorch.org/whl/cu129", "explicit": True}
+                    ],
+                    "sources": {
+                        "torch": {"index": "pytorch-cu129"},
+                        "torchvision": {"index": "pytorch-cu129"},
+                        "torchaudio": {"index": "pytorch-cu129"},
+                    },
+                },
+            },
+        }
+
+        with open(pyproject_path, 'w') as f:
+            tomlkit.dump(config, f)
+
+        yield {"cec_path": cec_path, "pyproject_path": pyproject_path}
+
+    def test_migrate_extracts_backend_from_constraints(self, pyproject_with_constraints):
+        """Migration should extract backend from constraint-dependencies when torch_backend missing."""
+        pyproject = PyprojectManager(pyproject_with_constraints["pyproject_path"])
+
+        # Act
+        pyproject.migrate_pytorch_config(pyproject_with_constraints["cec_path"])
+
+        # Assert: .pytorch-backend file exists with cu129 (extracted from constraints)
+        backend_file = pyproject_with_constraints["cec_path"] / ".pytorch-backend"
+        assert backend_file.exists(), ".pytorch-backend file should be created"
+        assert backend_file.read_text().strip() == "cu129"
+
+    def test_migrate_strips_constraint_dependencies(self, pyproject_with_constraints):
+        """Migration should strip PyTorch config including constraint-dependencies."""
+        pyproject = PyprojectManager(pyproject_with_constraints["pyproject_path"])
+
+        # Act
+        pyproject.migrate_pytorch_config(pyproject_with_constraints["cec_path"])
+
+        # Assert: PyTorch config removed
+        config = pyproject.load()
+        uv_config = config.get("tool", {}).get("uv", {})
+        constraints = uv_config.get("constraint-dependencies", [])
+
+        # Should not have torch constraints anymore
+        assert not any("torch" in c for c in constraints)
