@@ -333,7 +333,8 @@ class TestGitSyncStatus:
         (remote_repo / "new-file.txt").write_text("new content")
         subprocess.run(["git", "add", "."], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "commit", "-m", "New commit"], cwd=remote_repo, check=True, capture_output=True)
-        subprocess.run(["git", "push", path_to_git_url(bare_remote)], cwd=remote_repo, check=True, capture_output=True)
+        # Push to bare remote - need to specify branch explicitly
+        subprocess.run(["git", "push", path_to_git_url(bare_remote), "main"], cwd=remote_repo, check=True, capture_output=True)
 
         # Fetch to get the new commit
         env.git_manager.fetch("origin")
