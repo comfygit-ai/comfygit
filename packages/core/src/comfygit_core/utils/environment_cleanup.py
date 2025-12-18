@@ -1,33 +1,13 @@
 """Cross-platform environment directory cleanup utilities."""
-import os
-import platform
-import shutil
-import stat
-import time
 from pathlib import Path
 
 from ..logging.logging_config import get_logger
+from .filesystem import rmtree
 
 logger = get_logger(__name__)
 
 # Marker file indicating environment creation completed successfully
 COMPLETION_MARKER = ".complete"
-
-
-def _handle_remove_readonly(func, path, exc_info):
-    """Handle Windows readonly/locked files during deletion.
-
-    Args:
-        func: Function that failed (e.g., os.unlink)
-        path: Path that couldn't be removed
-        exc_info: Exception info tuple
-    """
-    try:
-        os.chmod(path, stat.S_IWRITE)
-        time.sleep(0.05)  # Brief delay for handle release
-        func(path)
-    except Exception:
-        pass  # Let rmtree handle final error
 
 
 def remove_environment_directory(env_path: Path) -> None:
@@ -47,10 +27,7 @@ def remove_environment_directory(env_path: Path) -> None:
         return
 
     try:
-        if platform.system() == "Windows":
-            shutil.rmtree(env_path, onexc=_handle_remove_readonly)
-        else:
-            shutil.rmtree(env_path)
+        rmtree(env_path)
         logger.debug(f"Removed environment directory: {env_path}")
     except PermissionError as e:
         raise PermissionError(

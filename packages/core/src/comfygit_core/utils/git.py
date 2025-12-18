@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -486,7 +487,6 @@ def git_clone_subdirectory(
         OSError: If git clone fails
         ValueError: If subdirectory doesn't exist in repository
     """
-    import shutil
     import tempfile
 
     # Clone to temporary directory

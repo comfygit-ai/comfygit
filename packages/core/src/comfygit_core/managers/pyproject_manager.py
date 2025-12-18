@@ -185,7 +185,7 @@ class PyprojectManager:
             # Ensure parent directory exists
             self.path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.path, 'w') as f:
+            with open(self.path, 'w', encoding='utf-8') as f:
                 tomlkit.dump(config, f)
         except OSError as e:
             raise CDPyprojectError(f"Failed to write pyproject.toml to {self.path}: {e}")

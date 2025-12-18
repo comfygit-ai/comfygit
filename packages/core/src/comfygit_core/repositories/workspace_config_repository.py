@@ -35,7 +35,7 @@ class WorkspaceConfigRepository:
             )
 
         try:
-            with self.config_file_path.open("r") as f:
+            with self.config_file_path.open("r", encoding='utf-8') as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
             raise ComfyDockError(
@@ -64,7 +64,7 @@ class WorkspaceConfigRepository:
         """Save config atomically (write to temp, then rename)."""
         data_dict = WorkspaceConfig.to_dict(data)
         temp_path = self.config_file_path.with_suffix(".tmp")
-        with temp_path.open("w") as f:
+        with temp_path.open("w", encoding='utf-8') as f:
             json.dump(data_dict, f, indent=2)
         temp_path.replace(self.config_file_path)  # Atomic on POSIX
 

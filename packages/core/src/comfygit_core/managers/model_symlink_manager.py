@@ -1,11 +1,11 @@
 """ModelSymlinkManager - Creates and manages symlink from ComfyUI/models to global models directory."""
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from ..logging.logging_config import get_logger
 from ..models.exceptions import CDEnvironmentError
+from ..utils.filesystem import rmtree
 from ..utils.symlink_utils import (
     is_link,
     create_platform_link,
@@ -63,7 +63,7 @@ class ModelSymlinkManager:
                     logger.info(
                         "Removing ComfyUI default models/ directory (empty or placeholder files only)"
                     )
-                    shutil.rmtree(self.models_link_path)
+                    rmtree(self.models_link_path)
                 else:
                     raise CDEnvironmentError(
                         f"models/ directory exists with content: {self.models_link_path}\n"

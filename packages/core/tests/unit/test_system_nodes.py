@@ -33,18 +33,18 @@ class TestSystemCustomNodesConstant:
 class TestWorkspacePathsSystemNodes:
     """Tests for WorkspacePaths.system_nodes property."""
 
-    def test_workspace_paths_has_system_nodes_property(self):
+    def test_workspace_paths_has_system_nodes_property(self, tmp_path):
         """WorkspacePaths should have system_nodes property."""
         from comfygit_core.core.workspace import WorkspacePaths
-        paths = WorkspacePaths(Path("/tmp/test"))
+        paths = WorkspacePaths(tmp_path)
         # Property should exist and be accessible
         assert hasattr(paths, 'system_nodes')
 
-    def test_system_nodes_path_is_under_metadata(self):
+    def test_system_nodes_path_is_under_metadata(self, tmp_path):
         """system_nodes path should be under .metadata directory."""
         from comfygit_core.core.workspace import WorkspacePaths
-        paths = WorkspacePaths(Path("/tmp/test"))
-        assert paths.system_nodes == Path("/tmp/test/.metadata/system_nodes")
+        paths = WorkspacePaths(tmp_path)
+        assert paths.system_nodes == tmp_path / ".metadata" / "system_nodes"
 
     def test_ensure_directories_creates_system_nodes(self, tmp_path):
         """ensure_directories should create system_nodes directory."""

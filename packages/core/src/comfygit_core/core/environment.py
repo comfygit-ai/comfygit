@@ -34,6 +34,7 @@ from ..models.shared import (
 from ..models.sync import SyncResult
 from ..strategies.confirmation import ConfirmationStrategy
 from ..utils.common import run_command
+from ..utils.filesystem import rmtree
 from ..utils.pytorch import extract_pip_show_package_version
 from ..validation.resolution_tester import ResolutionTester
 
@@ -302,7 +303,6 @@ class Environment:
         # Handle version mismatches by removing nodes with wrong versions
         # They will be reinstalled by sync_nodes_to_filesystem
         if not dry_run:
-            import shutil
             try:
                 # Get current status to find version mismatches
                 current_status = self.status()
@@ -311,7 +311,7 @@ class Environment:
                     node_path = self.custom_nodes_path / node_name
                     if node_path.exists():
                         logger.info(f"Removing node with wrong version: {node_name} ({mismatch['actual']} → {mismatch['expected']})")
-                        shutil.rmtree(node_path)
+                        rmtree(node_path)
             except Exception as e:
                 logger.warning(f"Could not check/fix version mismatches: {e}")
 
@@ -1789,19 +1789,19 @@ class Environment:
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = self.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
-            shutil.rmtree(models_dir)
+            rmtree(models_dir)
 
         # Remove ComfyUI's default input/output directories (will be replaced with symlinks)
         from ..utils.symlink_utils import is_link
 
         input_dir = self.comfyui_path / "input"
         if input_dir.exists() and not is_link(input_dir):
-            shutil.rmtree(input_dir)
+            rmtree(input_dir)
             logger.debug("Removed ComfyUI's default input directory during import")
 
         output_dir = self.comfyui_path / "output"
         if output_dir.exists() and not is_link(output_dir):
-            shutil.rmtree(output_dir)
+            rmtree(output_dir)
             logger.debug("Removed ComfyUI's default output directory during import")
 
         # Create symlinks for user content and system nodes

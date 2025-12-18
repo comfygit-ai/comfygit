@@ -14,6 +14,7 @@ from ..models.exceptions import (
 )
 from ..utils.comfyui_ops import clone_comfyui
 from ..utils.environment_cleanup import mark_environment_complete
+from ..utils.filesystem import rmtree
 from ..utils.pytorch import extract_pip_show_package_version
 
 if TYPE_CHECKING:
@@ -170,7 +171,7 @@ class EnvironmentFactory:
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = env.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
-            shutil.rmtree(models_dir)
+            rmtree(models_dir)
             logger.debug("Removed ComfyUI's default models directory")
 
         # Remove ComfyUI's default input/output directories (will be replaced with symlinks)
@@ -178,12 +179,12 @@ class EnvironmentFactory:
 
         input_dir = env.comfyui_path / "input"
         if input_dir.exists() and not is_link(input_dir):
-            shutil.rmtree(input_dir)
+            rmtree(input_dir)
             logger.debug("Removed ComfyUI's default input directory")
 
         output_dir = env.comfyui_path / "output"
         if output_dir.exists() and not is_link(output_dir):
-            shutil.rmtree(output_dir)
+            rmtree(output_dir)
             logger.debug("Removed ComfyUI's default output directory")
 
         # Create workspace directories and symlinks for user content

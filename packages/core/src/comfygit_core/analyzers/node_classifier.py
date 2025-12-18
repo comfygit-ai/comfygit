@@ -40,7 +40,7 @@ class NodeClassifier:
             builtins_file = cec_path / "comfyui_builtins.json"
             if builtins_file.exists():
                 try:
-                    with open(builtins_file, 'r') as f:
+                    with open(builtins_file, 'r', encoding='utf-8') as f:
                         data = json.load(f)
                         nodes = set(data["all_builtin_nodes"])
                         version = data.get('metadata', {}).get('comfyui_version', 'unknown')

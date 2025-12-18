@@ -11,6 +11,7 @@ from comfygit_core.models.shared import NodeInfo
 
 from ..logging.logging_config import get_logger
 from ..utils.common import format_size
+from ..utils.filesystem import rmtree
 from .base import ContentCacheBase
 
 logger = get_logger(__name__)
@@ -234,7 +235,7 @@ class CustomNodeCacheManager(ContentCacheBase):
 
             # Remove destination if it exists
             if dest_path.exists():
-                shutil.rmtree(dest_path)
+                rmtree(dest_path)
 
             # Check if cached content has a single root directory that matches a pattern
             # This handles cases like "ComfyUI-Manager-3.35" inside the cache
@@ -306,7 +307,7 @@ class CustomNodeCacheManager(ContentCacheBase):
         for cache_key, _ in entries_to_clear:
             cache_dir = self.store_dir / cache_key
             if cache_dir.exists():
-                shutil.rmtree(cache_dir)
+                rmtree(cache_dir)
 
             del self.node_index[cache_key]
             cleared += 1
