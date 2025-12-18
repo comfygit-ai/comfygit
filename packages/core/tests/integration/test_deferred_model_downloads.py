@@ -66,7 +66,7 @@ class TestDeferredModelDownloads:
         model = workflow_models[0]
         assert model.status == "unresolved", "Status should be unresolved (no hash yet)"
         assert model.sources == [download_url], "Should store download URL in sources"
-        assert model.relative_path == str(target_path), "Should store target path"
+        assert model.relative_path == target_path.as_posix(), "Should store target path"
         assert model.hash is None, "Hash should be None until downloaded"
 
     def test_download_intent_resume_after_interrupt(self, test_env):
@@ -257,7 +257,7 @@ class TestDeferredModelDownloads:
         assert model_a is not None, "Model A should be in pyproject"
         assert model_a.status == "unresolved"
         assert model_a.sources == [download_url_a], "Model A should have download URL"
-        assert model_a.relative_path == str(target_path_a), "Model A should have target path"
+        assert model_a.relative_path == target_path_a.as_posix(), "Model A should have target path"
 
         # ASSERT 2: Model B is unresolved (no sources)
         model_b = next((m for m in workflow_models if m.filename == "model_b.safetensors"), None)
@@ -301,13 +301,13 @@ class TestDeferredModelDownloads:
         model_a_after = next((m for m in workflow_models_after if m.filename == "model_a.safetensors"), None)
         assert model_a_after is not None, "Model A should still be in pyproject"
         assert model_a_after.sources == [download_url_a], "Model A download URL should be preserved"
-        assert model_a_after.relative_path == str(target_path_a), "Model A target path should be preserved"
+        assert model_a_after.relative_path == target_path_a.as_posix(), "Model A target path should be preserved"
         assert model_a_after.status == "unresolved", "Model A should still be unresolved"
 
         model_b_after = next((m for m in workflow_models_after if m.filename == "model_b.safetensors"), None)
         assert model_b_after is not None, "Model B should be in pyproject"
         assert model_b_after.sources == [download_url_b], "Model B should have download URL"
-        assert model_b_after.relative_path == str(target_path_b), "Model B should have target path"
+        assert model_b_after.relative_path == target_path_b.as_posix(), "Model B should have target path"
 
         # ASSERT: Both should appear as download intents
         download_intents = [m for m in result2.models_resolved if m.match_type == "download_intent"]

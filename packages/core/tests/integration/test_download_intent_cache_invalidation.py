@@ -82,7 +82,7 @@ class TestDownloadIntentCacheInvalidation:
         assert model.filename == "missing_model.safetensors"
         assert model.status == "unresolved"
         assert model.sources == [download_url], "Download URL should be saved"
-        assert model.relative_path == str(target_path), "Target path should be saved"
+        assert model.relative_path == target_path.as_posix(), "Target path should be saved"
 
         # ACT 3 - Second status check (simulates: cfd status after queuing download)
         # BUG: Cache should invalidate but doesn't!
