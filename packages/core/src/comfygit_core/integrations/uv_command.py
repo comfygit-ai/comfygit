@@ -134,6 +134,7 @@ class UVCommand:
             'no_deps': '--no-deps',
             'compile_bytecode': '--compile-bytecode',
             'quiet': '--quiet',
+            'reinstall_package': '--reinstall-package',
         }
 
         for key, value in options.items():

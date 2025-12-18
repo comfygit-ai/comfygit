@@ -173,12 +173,19 @@ class UVProjectManager:
             pytorch_manager: Optional PyTorch backend manager for temporary injection.
                             If provided, PyTorch config is injected before sync and
                             restored after (regardless of success/failure).
+                            Also forces reinstall of PyTorch packages to ensure correct backend.
             **flags: Additional uv sync flags
 
         Returns:
             UV command stdout
         """
         if pytorch_manager:
+            from ..constants import PYTORCH_CORE_PACKAGES
+
+            # Force reinstall of PyTorch packages to ensure correct backend is used
+            # Without this, uv may skip reinstall if torch is already installed
+            flags['reinstall_package'] = list(PYTORCH_CORE_PACKAGES)
+
             # Use PyprojectManager's injection context (from Phase 2)
             with self.pyproject.pytorch_injection_context(pytorch_manager):
                 result = self.uv.sync(verbose=verbose, **flags)

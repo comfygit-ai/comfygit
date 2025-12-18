@@ -261,20 +261,24 @@ class Environment:
         """Migrate pyproject schema v1 → v2 if needed.
 
         Schema v1 has PyTorch config embedded in [tool.uv] section.
-        Schema v2 stores PyTorch backend in .pytorch-backend file and
-        injects config at runtime.
+        Schema v2 uses runtime injection from .pytorch-backend file.
 
         This migration:
-        1. Extracts torch_backend from pyproject.toml to .pytorch-backend
-        2. Strips embedded [tool.uv] PyTorch config
-        3. Updates schema_version to 2
+        1. Strips embedded [tool.uv] PyTorch config
+        2. Updates schema_version to 2
+
+        Note: Does NOT persist .pytorch-backend. User must explicitly
+        set backend with 'cg env-config torch-backend set'.
 
         Returns:
             True if migration was performed, False if already migrated
         """
-        migrated = self.pyproject.migrate_pytorch_config(self.cec_path)
+        migrated = self.pyproject.migrate_pytorch_config()
         if migrated:
-            logger.info("Migrated environment to schema v2 (extracted PyTorch config)")
+            logger.info("Migrated environment to schema v2 (stripped PyTorch config)")
+            # Print so user sees it in CLI output
+            import sys
+            print("📦 Migrated environment to schema v2 (stripped embedded PyTorch config)", file=sys.stderr)
         return migrated
 
     def sync(
@@ -309,7 +313,7 @@ class Environment:
         """
         result = SyncResult()
 
-        # Migrate schema v1 → v2 if needed (extracts embedded PyTorch config to .pytorch-backend)
+        # Migrate schema v1 → v2 if needed (strips embedded PyTorch config)
         # This ensures old environments get migrated on first sync with new code
         self._ensure_schema_migrated()
 
@@ -1886,8 +1890,8 @@ class Environment:
 
             from ..managers.pytorch_backend_manager import PyTorchBackendManager
 
-            # Migrate schema v1 environments (strips PyTorch config, writes .pytorch-backend)
-            migrated = self.pyproject.migrate_pytorch_config(self.cec_path)
+            # Migrate schema v1 environments (strips embedded PyTorch config)
+            migrated = self.pyproject.migrate_pytorch_config()
             if migrated:
                 logger.info("Migrated imported environment to schema v2")
 

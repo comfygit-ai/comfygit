@@ -288,24 +288,23 @@ class TestMigratePytorchConfig:
                 "pyproject_path": pyproject_path,
             }
 
-    def test_migrate_creates_backend_file(self, legacy_pyproject):
-        """Migration should create .pytorch-backend file from torch_backend."""
+    def test_migrate_does_not_create_backend_file(self, legacy_pyproject):
+        """Migration should NOT create .pytorch-backend file (user must set explicitly)."""
         pyproject = PyprojectManager(legacy_pyproject["pyproject_path"])
 
         # Act: Run migration
-        pyproject.migrate_pytorch_config(legacy_pyproject["cec_path"])
+        pyproject.migrate_pytorch_config()
 
-        # Assert: .pytorch-backend file exists with correct content
+        # Assert: .pytorch-backend file should NOT exist
         backend_file = legacy_pyproject["cec_path"] / ".pytorch-backend"
-        assert backend_file.exists(), ".pytorch-backend file should be created"
-        assert backend_file.read_text().strip() == "cu121"
+        assert not backend_file.exists(), ".pytorch-backend should NOT be created by migration"
 
     def test_migrate_strips_pytorch_from_pyproject(self, legacy_pyproject):
         """Migration should remove PyTorch config from pyproject.toml."""
         pyproject = PyprojectManager(legacy_pyproject["pyproject_path"])
 
         # Act
-        pyproject.migrate_pytorch_config(legacy_pyproject["cec_path"])
+        pyproject.migrate_pytorch_config()
 
         # Assert: PyTorch config removed
         config = pyproject.load()
@@ -328,7 +327,7 @@ class TestMigratePytorchConfig:
         pyproject = PyprojectManager(legacy_pyproject["pyproject_path"])
 
         # Act
-        pyproject.migrate_pytorch_config(legacy_pyproject["cec_path"])
+        pyproject.migrate_pytorch_config()
 
         # Assert
         config = pyproject.load()
@@ -339,10 +338,10 @@ class TestMigratePytorchConfig:
         pyproject = PyprojectManager(legacy_pyproject["pyproject_path"])
 
         # Act: Run migration twice
-        pyproject.migrate_pytorch_config(legacy_pyproject["cec_path"])
+        pyproject.migrate_pytorch_config()
         first_content = legacy_pyproject["pyproject_path"].read_text()
 
-        pyproject.migrate_pytorch_config(legacy_pyproject["cec_path"])
+        pyproject.migrate_pytorch_config()
         second_content = legacy_pyproject["pyproject_path"].read_text()
 
         # Assert: Content unchanged after second migration
@@ -360,7 +359,7 @@ class TestMigratePytorchConfig:
         original_content = legacy_pyproject["pyproject_path"].read_text()
 
         # Act
-        result = pyproject.migrate_pytorch_config(legacy_pyproject["cec_path"])
+        result = pyproject.migrate_pytorch_config()
 
         # Assert: No changes made
         assert result is False, "Should return False when already migrated"
@@ -368,7 +367,7 @@ class TestMigratePytorchConfig:
 
 
 class TestMigrateFromConstraintDependencies:
-    """Tests for extracting backend from constraint-dependencies during migration."""
+    """Tests for stripping embedded constraint-dependencies during migration."""
 
     @pytest.fixture
     def pyproject_with_constraints(self, tmp_path):
@@ -385,7 +384,7 @@ class TestMigrateFromConstraintDependencies:
                 "comfygit": {
                     "comfyui_version": "v0.4.0",
                     "python_version": "3.12",
-                    # NOTE: No torch_backend field!
+                    # NOTE: No torch_backend or schema_version!
                 },
                 "uv": {
                     "constraint-dependencies": [
@@ -410,24 +409,23 @@ class TestMigrateFromConstraintDependencies:
 
         yield {"cec_path": cec_path, "pyproject_path": pyproject_path}
 
-    def test_migrate_extracts_backend_from_constraints(self, pyproject_with_constraints):
-        """Migration should extract backend from constraint-dependencies when torch_backend missing."""
+    def test_migrate_does_not_create_backend_file(self, pyproject_with_constraints):
+        """Migration should NOT create .pytorch-backend file (user must set explicitly)."""
         pyproject = PyprojectManager(pyproject_with_constraints["pyproject_path"])
 
         # Act
-        pyproject.migrate_pytorch_config(pyproject_with_constraints["cec_path"])
+        pyproject.migrate_pytorch_config()
 
-        # Assert: .pytorch-backend file exists with cu129 (extracted from constraints)
+        # Assert: .pytorch-backend file should NOT exist
         backend_file = pyproject_with_constraints["cec_path"] / ".pytorch-backend"
-        assert backend_file.exists(), ".pytorch-backend file should be created"
-        assert backend_file.read_text().strip() == "cu129"
+        assert not backend_file.exists(), ".pytorch-backend should NOT be created by migration"
 
     def test_migrate_strips_constraint_dependencies(self, pyproject_with_constraints):
         """Migration should strip PyTorch config including constraint-dependencies."""
         pyproject = PyprojectManager(pyproject_with_constraints["pyproject_path"])
 
         # Act
-        pyproject.migrate_pytorch_config(pyproject_with_constraints["cec_path"])
+        pyproject.migrate_pytorch_config()
 
         # Assert: PyTorch config removed
         config = pyproject.load()
@@ -436,3 +434,21 @@ class TestMigrateFromConstraintDependencies:
 
         # Should not have torch constraints anymore
         assert not any("torch" in c for c in constraints)
+
+    def test_migrate_handles_missing_schema_version(self, pyproject_with_constraints):
+        """Migration should treat missing schema_version as v1 and migrate."""
+        pyproject = PyprojectManager(pyproject_with_constraints["pyproject_path"])
+
+        # Verify schema_version is NOT in the config (the fixture doesn't include it)
+        config = pyproject.load()
+        assert "schema_version" not in config["tool"]["comfygit"]
+
+        # Act
+        result = pyproject.migrate_pytorch_config()
+
+        # Assert: Migration should run (missing schema_version = v1)
+        assert result is True
+
+        # Assert: schema_version now set to 2
+        config = pyproject.load()
+        assert config["tool"]["comfygit"]["schema_version"] == 2

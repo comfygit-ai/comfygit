@@ -472,25 +472,24 @@ class PyprojectManager:
         self.save(config)
         logger.debug("Stripped PyTorch config from pyproject.toml")
 
-    def migrate_pytorch_config(self, cec_path: Path) -> bool:
-        """Migrate from schema v1 to v2 by extracting PyTorch config.
+    def migrate_pytorch_config(self) -> bool:
+        """Migrate from schema v1 to v2 by stripping embedded PyTorch config.
 
-        This extracts the torch_backend to .pytorch-backend file and strips
-        PyTorch config from pyproject.toml.
+        Schema v1 had PyTorch config embedded in [tool.uv] section.
+        Schema v2 uses runtime injection from .pytorch-backend file.
 
-        The backend is extracted from (in order of priority):
-        1. [tool.comfygit] torch_backend field (explicit config)
-        2. [tool.uv] constraint-dependencies torch version suffix (e.g., torch==2.9.1+cu129)
+        This migration:
+        1. Strips embedded [tool.uv] PyTorch config (indexes, sources, constraints)
+        2. Removes torch_backend field from [tool.comfygit] if present
+        3. Sets schema_version = 2
 
-        Args:
-            cec_path: Path to the .cec directory
+        Note: This does NOT create .pytorch-backend file. The user should
+        explicitly set their preferred backend with 'cg env-config torch-backend set'.
+        Until then, auto-detection will be used.
 
         Returns:
             True if migration was performed, False if already migrated
         """
-        from .pytorch_backend_manager import PyTorchBackendManager
-        from ..utils.pytorch import extract_backend_from_version
-
         config = self.load()
         comfygit_config = config.get('tool', {}).get('comfygit', {})
 
@@ -500,37 +499,28 @@ class PyprojectManager:
             logger.debug("Already at schema v2+, skipping migration")
             return False
 
-        # Extract torch_backend before stripping - try multiple sources
-        torch_backend = comfygit_config.get('torch_backend')
+        logger.info(f"Migrating pyproject from schema v{schema_version} to v2...")
 
-        # If not in comfygit config, try to extract from constraint-dependencies
-        if not torch_backend:
-            uv_config = config.get('tool', {}).get('uv', {})
-            constraints = uv_config.get('constraint-dependencies', [])
-            for constraint in constraints:
-                if constraint.startswith('torch==') or constraint.startswith('torch>='):
-                    # Extract version from constraint (e.g., "torch==2.9.1+cu129")
-                    version_part = constraint.split('==')[-1].split('>=')[-1]
-                    torch_backend = extract_backend_from_version(version_part)
-                    if torch_backend:
-                        logger.info(f"Extracted backend from constraint-dependencies: {torch_backend}")
-                        break
-
-        if torch_backend:
-            # Write to .pytorch-backend file
-            pytorch_manager = PyTorchBackendManager(cec_path)
-            pytorch_manager.set_backend(torch_backend)
-            logger.info(f"Migrated torch_backend to .pytorch-backend: {torch_backend}")
-
-        # Strip PyTorch config
+        # Strip PyTorch config from pyproject.toml
         self.strip_pytorch_config()
 
-        # Bump schema version
-        config = self.load()
+        # Bump schema version - reload to get the stripped config
+        config = self.load(force_reload=True)
+        if 'tool' not in config:
+            config['tool'] = tomlkit.table()
+        if 'comfygit' not in config['tool']:
+            config['tool']['comfygit'] = tomlkit.table()
         config['tool']['comfygit']['schema_version'] = 2
         self.save(config)
 
-        logger.info("Migrated pyproject.toml to schema v2")
+        # Verify the save worked
+        verify_config = self.load(force_reload=True)
+        saved_version = verify_config.get('tool', {}).get('comfygit', {}).get('schema_version')
+        if saved_version != 2:
+            logger.error(f"Migration verification FAILED: schema_version is {saved_version}, expected 2")
+        else:
+            logger.info("Migrated pyproject.toml to schema v2")
+
         return True
 
     def _inject_pytorch_config(self, config: dict, pytorch_config: dict) -> None:
