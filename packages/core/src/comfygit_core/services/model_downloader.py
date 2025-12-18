@@ -340,7 +340,7 @@ class ModelDownloader:
             self.repository.add_location(
                 model_hash=short_hash,
                 base_directory=self.models_dir,
-                relative_path=str(relative_path),
+                relative_path=relative_path.as_posix(),
                 filename=request.target_path.name,
                 mtime=mtime
             )
@@ -359,7 +359,7 @@ class ModelDownloader:
                 file_size=file_size,
                 blake3_hash=blake3_hash,
                 sha256_hash=None,
-                relative_path=str(relative_path),
+                relative_path=relative_path.as_posix(),
                 filename=request.target_path.name,
                 mtime=mtime,
                 last_seen=int(mtime),

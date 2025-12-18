@@ -123,7 +123,7 @@ class ModelScanner:
         # Process each model file
         for idx, file_path in enumerate(model_files, 1):
             try:
-                relative_path = str(file_path.relative_to(models_dir))
+                relative_path = file_path.relative_to(models_dir).as_posix()
                 file_stat = file_path.stat()
 
                 # Check if file has changed
@@ -177,7 +177,7 @@ class ModelScanner:
         try:
             # Get file info
             file_stat = file_path.stat()
-            relative_path = str(file_path.relative_to(models_dir))
+            relative_path = file_path.relative_to(models_dir).as_posix()
             filename = file_path.name
 
             # Calculate hash
