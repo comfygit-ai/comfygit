@@ -300,6 +300,54 @@ class EnvironmentCommands:
 
             sys.exit(result.returncode)
 
+    @with_env_logging("sync")
+    def sync(self, args: argparse.Namespace, logger=None) -> None:
+        """Sync environment packages and dependencies."""
+        env = self._get_env(args)
+
+        # Handle torch-backend: 'auto' means detect, otherwise use specified
+        torch_backend = getattr(args, 'torch_backend', 'auto')
+        if torch_backend == 'auto':
+            torch_backend = env.pytorch_manager.detect_backend()
+            print(f"🔍 Auto-detected PyTorch backend: {torch_backend}")
+        else:
+            print(f"🔧 Using PyTorch backend: {torch_backend}")
+
+        # Update backend file if different from current
+        current_backend = env.pytorch_manager.get_backend()
+        if torch_backend != current_backend:
+            env.pytorch_manager.set_backend(torch_backend)
+            print(f"   Updated .pytorch-backend: {current_backend} → {torch_backend}")
+
+        print(f"\n🔄 Syncing environment: {env.name}")
+
+        verbose = getattr(args, 'verbose', False)
+
+        try:
+            result = env.sync(
+                dry_run=False,
+                model_strategy="skip",  # Sync command focuses on packages
+                remove_extra_nodes=False,  # Don't remove nodes, just sync
+                verbose=verbose,
+            )
+
+            if result.success:
+                print("\n✓ Sync complete")
+                if result.packages_synced:
+                    print(f"   Packages synced: {result.packages_synced}")
+                if result.dependency_groups_installed:
+                    print(f"   Dependency groups: {', '.join(result.dependency_groups_installed)}")
+            else:
+                print("\n⚠️  Sync completed with warnings")
+                for error in result.errors:
+                    print(f"   • {error}")
+
+        except Exception as e:
+            if logger:
+                logger.error(f"Sync failed: {e}", exc_info=True)
+            print(f"\n✗ Sync failed: {e}", file=sys.stderr)
+            sys.exit(1)
+
     def manifest(self, args: argparse.Namespace) -> None:
         """Show environment manifest (pyproject.toml configuration)."""
         env = self._get_env(args)

@@ -274,11 +274,32 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     registry_update_parser = registry_subparsers.add_parser("update", help="Update registry data from GitHub")
     registry_update_parser.set_defaults(func=global_cmds.registry_update)
 
-    # Config management
+    # Config management - now with subcommands
     config_parser = subparsers.add_parser("config", help="Manage configuration settings")
+    config_subparsers = config_parser.add_subparsers(dest="config_command", help="Configuration commands")
+
+    # Legacy flags - still supported at root level for backward compatibility
     config_parser.add_argument("--civitai-key", type=str, help="Set Civitai API key (use empty string to clear)")
     config_parser.add_argument("--show", action="store_true", help="Show current configuration")
     config_parser.set_defaults(func=global_cmds.config)
+
+    # config torch-backend - Manage PyTorch backend settings
+    config_torch_parser = config_subparsers.add_parser("torch-backend", help="Manage PyTorch backend settings")
+    config_torch_subparsers = config_torch_parser.add_subparsers(dest="torch_command", help="PyTorch backend commands")
+    config_torch_parser.set_defaults(func=_make_help_func(config_torch_parser))
+
+    # config torch-backend show
+    config_torch_show_parser = config_torch_subparsers.add_parser("show", help="Show current PyTorch backend")
+    config_torch_show_parser.set_defaults(func=global_cmds.config_torch_show)
+
+    # config torch-backend set <backend>
+    config_torch_set_parser = config_torch_subparsers.add_parser("set", help="Set PyTorch backend")
+    config_torch_set_parser.add_argument("backend", help="Backend to set (e.g., cu128, cpu, rocm6.3, xpu)")
+    config_torch_set_parser.set_defaults(func=global_cmds.config_torch_set)
+
+    # config torch-backend detect
+    config_torch_detect_parser = config_torch_subparsers.add_parser("detect", help="Auto-detect and show recommended backend")
+    config_torch_detect_parser.set_defaults(func=global_cmds.config_torch_detect)
 
     # debug - Show application logs for debugging
     debug_parser = subparsers.add_parser("debug", help="Show application debug logs")
@@ -389,6 +410,16 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     # run - Run ComfyUI (special handling for ComfyUI args)
     run_parser = subparsers.add_parser("run", help="Run ComfyUI")
     run_parser.add_argument("--no-sync", action="store_true", help="Skip environment sync before running")
+    run_parser.add_argument(
+        "--torch-backend",
+        default="auto",
+        metavar="BACKEND",
+        help=(
+            "PyTorch backend for sync. Examples: auto (detect GPU), cpu, "
+            "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
+            "Default: auto"
+        ),
+    )
     run_parser.set_defaults(func=env_cmds.run, args=[])
 
     # status - Show environment status
@@ -413,6 +444,25 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Model download strategy: all (default), required only, or skip"
     )
     repair_parser.set_defaults(func=env_cmds.repair)
+
+    # sync - Sync environment (packages, nodes, models)
+    sync_parser = subparsers.add_parser("sync", help="Sync environment packages and dependencies")
+    sync_parser.add_argument(
+        "--torch-backend",
+        default="auto",
+        metavar="BACKEND",
+        help=(
+            "PyTorch backend. Examples: auto (detect GPU), cpu, "
+            "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
+            "Default: auto"
+        ),
+    )
+    sync_parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show full UV output during sync"
+    )
+    sync_parser.set_defaults(func=env_cmds.sync)
 
     # log - Show commit history
     log_parser = subparsers.add_parser("log", help="Show commit history")
@@ -509,6 +559,16 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         "--auto-resolve",
         choices=["mine", "theirs"],
         help="Auto-resolve conflicts: 'mine' keeps local, 'theirs' takes incoming"
+    )
+    pull_parser.add_argument(
+        "--torch-backend",
+        default="auto",
+        metavar="BACKEND",
+        help=(
+            "PyTorch backend for repair. Examples: auto (detect GPU), cpu, "
+            "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
+            "Default: auto"
+        ),
     )
     pull_parser.set_defaults(func=env_cmds.pull)
 
