@@ -211,14 +211,13 @@ class EnvironmentFactory:
 
         _complete("configure_environment")
 
-        # Create initial pyproject.toml
+        # Create initial pyproject.toml (torch_backend stored in .pytorch-backend file, not here)
         config = EnvironmentFactory._create_initial_pyproject(
             name,
             python_version,
             version_to_clone,
             version_type,
             commit_sha,
-            torch_backend,
             system_node_requirements=system_node_requirements,
         )
         env.pyproject.save(config)
@@ -243,8 +242,8 @@ class EnvironmentFactory:
         # Phase: Configure PyTorch (70-75%)
         _progress("configure_pytorch", "Configuring PyTorch backend", 70)
 
-        from ..constants import PYTORCH_CORE_PACKAGES
-        from ..utils.pytorch import extract_backend_from_version, get_pytorch_index_url
+        from ..managers.pytorch_backend_manager import PyTorchBackendManager
+        from ..utils.pytorch import extract_backend_from_version
 
         # Get first package version to extract backend
         first_version = extract_pip_show_package_version(
@@ -256,29 +255,11 @@ class EnvironmentFactory:
             backend = extract_backend_from_version(first_version)
             logger.info(f"Detected PyTorch backend from installed version: {backend}")
 
-            # Configure PyTorch index for uv sync (works for any backend)
+            # Write backend to .pytorch-backend file (not tracked in git)
             if backend:
-                index_name = f"pytorch-{backend}"
-                env.pyproject.uv_config.add_index(
-                    name=index_name,
-                    url=get_pytorch_index_url(backend),
-                    explicit=True
-                )
-
-                # Add sources for PyTorch packages
-                for pkg in PYTORCH_CORE_PACKAGES:
-                    env.pyproject.uv_config.add_source(pkg, {"index": index_name})
-
-                logger.info(f"Configured PyTorch index: {index_name}")
-
-        # Add constraints for all PyTorch packages
-        for pkg in PYTORCH_CORE_PACKAGES:
-            version = extract_pip_show_package_version(
-                env.uv_manager.show_package(pkg, env.uv_manager.python_executable)
-            )
-            if version:
-                env.pyproject.uv_config.add_constraint(f"{pkg}=={version}")
-                logger.info(f"Pinned {pkg}=={version}")
+                pytorch_manager = PyTorchBackendManager(cec_path)
+                pytorch_manager.set_backend(backend)
+                logger.info(f"Saved PyTorch backend to .pytorch-backend: {backend}")
 
         _complete("configure_pytorch")
 
@@ -486,10 +467,13 @@ class EnvironmentFactory:
         comfyui_version: str,
         comfyui_version_type: str = "branch",
         comfyui_commit_sha: str | None = None,
-        torch_backend: str = "auto",
         system_node_requirements: list[str] | None = None,
     ) -> dict:
-        """Create the initial pyproject.toml."""
+        """Create the initial pyproject.toml.
+
+        Note: torch_backend is NOT stored in pyproject.toml (schema v2+).
+        It's stored in .pytorch-backend file which is gitignored.
+        """
         import os
 
         from ..constants import PYPROJECT_SCHEMA_VERSION
@@ -508,7 +492,6 @@ class EnvironmentFactory:
                     "comfyui_version_type": comfyui_version_type,
                     "comfyui_commit_sha": comfyui_commit_sha,
                     "python_version": python_version,
-                    "torch_backend": torch_backend,
                     "nodes": {}
                 }
             }

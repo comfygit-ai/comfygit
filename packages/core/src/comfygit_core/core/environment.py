@@ -1851,30 +1851,12 @@ class Environment:
             if callbacks:
                 callbacks.on_phase("configure_pytorch", f"Configuring PyTorch backend: {self.torch_backend}")
 
-            # Strip imported PyTorch config BEFORE venv creation to avoid platform conflicts
-            from ..constants import PYTORCH_CORE_PACKAGES
+            from ..managers.pytorch_backend_manager import PyTorchBackendManager
 
-            logger.info("Stripping imported PyTorch configuration...")
-            config = self.pyproject.load()
-            if "tool" in config and "uv" in config["tool"]:
-                # Remove PyTorch indexes
-                indexes = config["tool"]["uv"].get("index", [])
-                if isinstance(indexes, list):
-                    config["tool"]["uv"]["index"] = [
-                        idx for idx in indexes
-                        if not any(p in idx.get("name", "").lower() for p in ["pytorch-", "torch-"])
-                    ]
-
-                # Remove PyTorch sources
-                sources = config.get("tool", {}).get("uv", {}).get("sources", {})
-                for pkg in PYTORCH_CORE_PACKAGES:
-                    sources.pop(pkg, None)
-
-                self.pyproject.save(config)
-
-            # Remove PyTorch constraints
-            for pkg in PYTORCH_CORE_PACKAGES:
-                self.pyproject.uv_config.remove_constraint(pkg)
+            # Migrate schema v1 environments (strips PyTorch config, writes .pytorch-backend)
+            migrated = self.pyproject.migrate_pytorch_config(self.cec_path)
+            if migrated:
+                logger.info("Migrated imported environment to schema v2")
 
             logger.info(f"Creating venv with Python {python_version}")
             self.uv_manager.create_venv(self.venv_path, python_version=python_version, seed=True)
@@ -1887,8 +1869,8 @@ class Environment:
                 verbose=True
             )
 
-            # Detect installed backend and configure pyproject
-            from ..utils.pytorch import extract_backend_from_version, get_pytorch_index_url
+            # Detect installed backend and write to .pytorch-backend file
+            from ..utils.pytorch import extract_backend_from_version
 
             first_version = extract_pip_show_package_version(
                 self.uv_manager.show_package("torch", self.uv_manager.python_executable)
@@ -1898,39 +1880,11 @@ class Environment:
                 backend = extract_backend_from_version(first_version)
                 logger.info(f"Detected PyTorch backend from installed version: {backend}")
 
-                # Store resolved backend (never "auto")
-                config = self.pyproject.load()
-                if "tool" not in config:
-                    config["tool"] = {}
-                if "comfygit" not in config["tool"]:
-                    config["tool"]["comfygit"] = {}
-                config["tool"]["comfygit"]["torch_backend"] = backend if backend else "cpu"
-                self.pyproject.save(config)
-                logger.info(f"Stored resolved torch_backend: {backend if backend else 'cpu'}")
-
+                # Write resolved backend to .pytorch-backend (not tracked in git)
                 if backend:
-                    # Add new index for detected backend
-                    index_name = f"pytorch-{backend}"
-                    self.pyproject.uv_config.add_index(
-                        name=index_name,
-                        url=get_pytorch_index_url(backend),
-                        explicit=True
-                    )
-
-                    # Add sources pointing to new index
-                    for pkg in PYTORCH_CORE_PACKAGES:
-                        self.pyproject.uv_config.add_source(pkg, {"index": index_name})
-
-                    logger.info(f"Configured PyTorch index: {index_name}")
-
-            # Add constraints for installed versions
-            for pkg in PYTORCH_CORE_PACKAGES:
-                version = extract_pip_show_package_version(
-                    self.uv_manager.show_package(pkg, self.uv_manager.python_executable)
-                )
-                if version:
-                    self.pyproject.uv_config.add_constraint(f"{pkg}=={version}")
-                    logger.info(f"Added constraint: {pkg}=={version}")
+                    pytorch_manager = PyTorchBackendManager(self.cec_path)
+                    pytorch_manager.set_backend(backend)
+                    logger.info(f"Saved PyTorch backend to .pytorch-backend: {backend}")
 
         # Phase 2: Setup git repository
         # For git imports: .git already exists with remote, just ensure gitignore

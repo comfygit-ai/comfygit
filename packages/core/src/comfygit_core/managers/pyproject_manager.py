@@ -413,6 +413,107 @@ class PyprojectManager:
 
         return _injection_context()
 
+    def strip_pytorch_config(self) -> None:
+        """Remove PyTorch-specific configuration from pyproject.toml.
+
+        Removes:
+            - PyTorch indexes from tool.uv.index (names containing 'pytorch')
+            - PyTorch sources from tool.uv.sources (torch, torchvision, torchaudio)
+            - PyTorch constraints from tool.uv.constraint-dependencies
+            - torch_backend from tool.comfygit
+
+        This is used during environment creation to ensure PyTorch config is not
+        tracked in git, and during migration from schema v1 to v2.
+        """
+        from ..constants import PYTORCH_CORE_PACKAGES
+
+        config = self.load()
+
+        # Remove torch_backend from tool.comfygit
+        if 'tool' in config and 'comfygit' in config['tool']:
+            config['tool']['comfygit'].pop('torch_backend', None)
+
+        # Remove PyTorch config from tool.uv
+        if 'tool' in config and 'uv' in config['tool']:
+            uv_config = config['tool']['uv']
+
+            # Remove PyTorch indexes
+            if 'index' in uv_config:
+                indexes = uv_config['index']
+                if isinstance(indexes, list):
+                    uv_config['index'] = [
+                        idx for idx in indexes
+                        if 'pytorch' not in idx.get('name', '').lower()
+                    ]
+                    if not uv_config['index']:
+                        del uv_config['index']
+
+            # Remove PyTorch sources
+            if 'sources' in uv_config:
+                for pkg in PYTORCH_CORE_PACKAGES:
+                    uv_config['sources'].pop(pkg, None)
+                if not uv_config['sources']:
+                    del uv_config['sources']
+
+            # Remove PyTorch constraints
+            if 'constraint-dependencies' in uv_config:
+                constraints = uv_config['constraint-dependencies']
+                uv_config['constraint-dependencies'] = [
+                    c for c in constraints
+                    if not any(pkg in c.lower() for pkg in PYTORCH_CORE_PACKAGES)
+                ]
+                if not uv_config['constraint-dependencies']:
+                    del uv_config['constraint-dependencies']
+
+            # Clean up empty uv section
+            if not uv_config:
+                del config['tool']['uv']
+
+        self.save(config)
+        logger.debug("Stripped PyTorch config from pyproject.toml")
+
+    def migrate_pytorch_config(self, cec_path: Path) -> bool:
+        """Migrate from schema v1 to v2 by extracting PyTorch config.
+
+        This extracts the torch_backend to .pytorch-backend file and strips
+        PyTorch config from pyproject.toml.
+
+        Args:
+            cec_path: Path to the .cec directory
+
+        Returns:
+            True if migration was performed, False if already migrated
+        """
+        from .pytorch_backend_manager import PyTorchBackendManager
+
+        config = self.load()
+        comfygit_config = config.get('tool', {}).get('comfygit', {})
+
+        # Check if already migrated (schema v2+)
+        schema_version = comfygit_config.get('schema_version', 1)
+        if schema_version >= 2:
+            logger.debug("Already at schema v2+, skipping migration")
+            return False
+
+        # Extract torch_backend before stripping
+        torch_backend = comfygit_config.get('torch_backend')
+        if torch_backend:
+            # Write to .pytorch-backend file
+            pytorch_manager = PyTorchBackendManager(cec_path)
+            pytorch_manager.set_backend(torch_backend)
+            logger.info(f"Migrated torch_backend to .pytorch-backend: {torch_backend}")
+
+        # Strip PyTorch config
+        self.strip_pytorch_config()
+
+        # Bump schema version
+        config = self.load()
+        config['tool']['comfygit']['schema_version'] = 2
+        self.save(config)
+
+        logger.info("Migrated pyproject.toml to schema v2")
+        return True
+
     def _inject_pytorch_config(self, config: dict, pytorch_config: dict) -> None:
         """Inject PyTorch-specific configuration into pyproject.toml config.
 

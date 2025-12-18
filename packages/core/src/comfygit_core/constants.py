@@ -74,7 +74,9 @@ SYSTEM_CUSTOM_NODES = {
 
 # Schema version for environment pyproject.toml format.
 # Increment when making breaking changes to the pyproject.toml structure.
-PYPROJECT_SCHEMA_VERSION = 1
+# v1: Original format with inline PyTorch config (indexes, sources, constraints)
+# v2: PyTorch config moved to .pytorch-backend file, injected at sync time
+PYPROJECT_SCHEMA_VERSION = 2
 
 # Default values
 DEFAULT_REGISTRY_URL = "https://api.comfy.org"
