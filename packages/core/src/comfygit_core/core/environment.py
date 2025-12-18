@@ -18,6 +18,7 @@ from ..managers.git_manager import GitManager
 from ..managers.model_symlink_manager import ModelSymlinkManager
 from ..managers.node_manager import NodeManager
 from ..managers.pyproject_manager import PyprojectManager
+from ..managers.pytorch_backend_manager import PyTorchBackendManager
 from ..managers.system_node_symlink_manager import SystemNodeSymlinkManager
 from ..managers.user_content_symlink_manager import UserContentSymlinkManager
 from ..managers.uv_project_manager import UVProjectManager
@@ -118,6 +119,10 @@ class Environment:
         return PyprojectManager(self.pyproject_path)
 
     @cached_property
+    def pytorch_manager(self) -> PyTorchBackendManager:
+        return PyTorchBackendManager(self.cec_path)
+
+    @cached_property
     def node_lookup(self) -> NodeLookupService:
         from ..services.node_lookup_service import NodeLookupService
         return NodeLookupService(
@@ -138,7 +143,8 @@ class Environment:
             self.node_lookup,
             self.resolution_tester,
             self.custom_nodes_path,
-            self.node_mapping_repository
+            self.node_mapping_repository,
+            self.pytorch_manager
         )
 
     @cached_property
@@ -204,6 +210,7 @@ class Environment:
             pyproject_manager=self.pyproject,
             uv_manager=self.uv_manager,
             workflow_manager=self.workflow_manager,
+            pytorch_manager=self.pytorch_manager,
         )
 
     @cached_property
@@ -230,7 +237,8 @@ class Environment:
             comfyui_path=self.comfyui_path,
             venv_path=self.venv_path,
             uv=self.uv_manager,
-            pyproject=self.pyproject
+            pyproject=self.pyproject,
+            pytorch_manager=self.pytorch_manager,
         )
         comparison = scanner.get_full_comparison()
 
@@ -283,12 +291,13 @@ class Environment:
 
         logger.info("Syncing environment...")
 
-        # Sync packages with UV - progressive installation
+        # Sync packages with UV - progressive installation with PyTorch injection
         try:
             sync_result = self.uv_manager.sync_dependencies_progressive(
                 dry_run=dry_run,
                 callbacks=sync_callbacks,
-                verbose=verbose
+                verbose=verbose,
+                pytorch_manager=self.pytorch_manager
             )
             result.packages_synced = sync_result["packages_synced"]
             result.dependency_groups_installed.extend(sync_result["dependency_groups_installed"])

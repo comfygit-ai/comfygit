@@ -227,3 +227,134 @@ class TestPyTorchInjectionEdgeCases:
             content = temp_env["pyproject_path"].read_text()
             # Should have some pytorch config (likely cpu since no CUDA in test env)
             assert "pytorch" in content.lower()
+
+
+class TestSyncProjectWithPyTorchManager:
+    """Tests for sync_project with pytorch_manager parameter."""
+
+    @pytest.fixture
+    def temp_env(self):
+        """Create a temporary environment with pyproject.toml and .cec dir."""
+        with TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir)
+            cec_path = env_path / ".cec"
+            cec_path.mkdir()
+
+            # Create pyproject.toml
+            pyproject_path = cec_path / "pyproject.toml"
+            initial_config = {
+                "project": {
+                    "name": "test-env",
+                    "version": "0.1.0",
+                    "requires-python": ">=3.11",
+                    "dependencies": [],
+                },
+            }
+            with open(pyproject_path, 'w') as f:
+                tomlkit.dump(initial_config, f)
+
+            # Create .pytorch-backend file
+            backend_file = cec_path / ".pytorch-backend"
+            backend_file.write_text("cu128")
+
+            yield {
+                "env_path": env_path,
+                "cec_path": cec_path,
+                "pyproject_path": pyproject_path,
+                "backend_file": backend_file,
+            }
+
+    def test_sync_project_without_pytorch_manager_no_injection(self, temp_env):
+        """sync_project without pytorch_manager should not inject config."""
+        from unittest.mock import MagicMock
+        from comfygit_core.managers.uv_project_manager import UVProjectManager
+
+        pyproject = PyprojectManager(temp_env["pyproject_path"])
+
+        # Mock UVCommand to avoid actual uv calls
+        mock_uv_command = MagicMock()
+        mock_result = MagicMock()
+        mock_result.stdout = ""
+        mock_uv_command.sync.return_value = mock_result
+
+        # Create UVProjectManager with mock
+        uv_manager = UVProjectManager(
+            uv_command=mock_uv_command,
+            pyproject_manager=pyproject,
+        )
+
+        # Sync without pytorch_manager
+        uv_manager.sync_project()
+
+        # Should NOT have PyTorch config
+        content = temp_env["pyproject_path"].read_text()
+        assert "pytorch" not in content.lower()
+
+    def test_sync_project_with_pytorch_manager_injects_and_restores(self, temp_env):
+        """sync_project with pytorch_manager should inject and restore config."""
+        from unittest.mock import MagicMock
+        from comfygit_core.managers.uv_project_manager import UVProjectManager
+
+        pyproject = PyprojectManager(temp_env["pyproject_path"])
+        pytorch_manager = PyTorchBackendManager(temp_env["cec_path"])
+
+        original_content = temp_env["pyproject_path"].read_text()
+
+        # Track pyproject content during sync
+        injected_content = None
+        pyproject_path = temp_env["pyproject_path"]
+
+        def capture_content(*args, **kwargs):
+            nonlocal injected_content
+            injected_content = pyproject_path.read_text()
+            mock_result = MagicMock()
+            mock_result.stdout = ""
+            return mock_result
+
+        # Mock UVCommand
+        mock_uv_command = MagicMock()
+        mock_uv_command.sync.side_effect = capture_content
+
+        uv_manager = UVProjectManager(
+            uv_command=mock_uv_command,
+            pyproject_manager=pyproject,
+        )
+
+        # Sync with pytorch_manager
+        uv_manager.sync_project(pytorch_manager=pytorch_manager)
+
+        # During sync, should have had PyTorch config
+        assert injected_content is not None
+        assert "pytorch-cu128" in injected_content
+
+        # After sync, should be restored to original
+        restored_content = temp_env["pyproject_path"].read_text()
+        assert restored_content == original_content
+
+    def test_sync_project_restores_on_sync_error(self, temp_env):
+        """sync_project should restore config even when uv sync fails."""
+        from unittest.mock import MagicMock
+        from comfygit_core.managers.uv_project_manager import UVProjectManager
+        from comfygit_core.models.exceptions import UVCommandError
+
+        pyproject = PyprojectManager(temp_env["pyproject_path"])
+        pytorch_manager = PyTorchBackendManager(temp_env["cec_path"])
+
+        original_content = temp_env["pyproject_path"].read_text()
+
+        # Mock UVCommand to raise error
+        mock_uv_command = MagicMock()
+        mock_uv_command.sync.side_effect = UVCommandError("Sync failed", returncode=1)
+
+        uv_manager = UVProjectManager(
+            uv_command=mock_uv_command,
+            pyproject_manager=pyproject,
+        )
+
+        # Sync should raise error
+        with pytest.raises(UVCommandError):
+            uv_manager.sync_project(pytorch_manager=pytorch_manager)
+
+        # After error, should still be restored to original
+        restored_content = temp_env["pyproject_path"].read_text()
+        assert restored_content == original_content

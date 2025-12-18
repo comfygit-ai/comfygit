@@ -28,6 +28,7 @@ from ..utils.git import git_clone, is_github_url, normalize_github_url
 from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
+    from ..managers.pytorch_backend_manager import PyTorchBackendManager
     from ..repositories.node_mappings_repository import NodeMappingsRepository
 
 logger = get_logger(__name__)
@@ -44,6 +45,7 @@ class NodeManager:
         resolution_tester: ResolutionTester,
         custom_nodes_path: Path,
         node_repository: NodeMappingsRepository,
+        pytorch_manager: PyTorchBackendManager | None = None,
     ):
         self.pyproject = pyproject
         self.uv = uv
@@ -51,6 +53,7 @@ class NodeManager:
         self.resolution_tester = resolution_tester
         self.custom_nodes_path = custom_nodes_path
         self.node_repository = node_repository
+        self.pytorch_manager = pytorch_manager
 
     def _find_node_by_name(self, name: str) -> tuple[str, NodeInfo] | None:
         """Find a node by name across all identifiers (case-insensitive).
@@ -121,7 +124,7 @@ class NodeManager:
             self.add_node_package(node_package)
 
             # STEP 3: Environment sync (quiet - users see our high-level messages)
-            self.uv.sync_project(quiet=True, all_groups=True)
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         except Exception as e:
             # === ROLLBACK ===
@@ -403,7 +406,7 @@ class NodeManager:
             self.add_node_package(node_package)
 
             # STEP 3: Environment sync (quiet - users see our high-level messages)
-            self.uv.sync_project(quiet=True, all_groups=True)
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         except Exception as e:
             # === ROLLBACK ===
@@ -539,7 +542,7 @@ class NodeManager:
             self.pyproject.uv_config.cleanup_orphaned_sources(removed_sources)
 
         # Sync Python environment to remove orphaned packages (quiet - users see our high-level messages)
-        self.uv.sync_project(quiet=True, all_groups=True)
+        self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         logger.info(f"Removed node '{actual_identifier}' from tracking")
 
@@ -1181,7 +1184,7 @@ class NodeManager:
         result.message = f"Updated requirements: +{len(added)} -{len(removed)}"
 
         # Sync Python environment to apply requirement changes (quiet - users see our high-level messages)
-        self.uv.sync_project(quiet=True, all_groups=True)
+        self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         logger.info(f"Updated dev node '{node_info.name}': {result.message}")
         return result
@@ -1239,7 +1242,7 @@ class NodeManager:
 
             # STEP 2: Remove old node from tracking
             self.pyproject.nodes.remove(identifier)
-            self.uv.sync_project(quiet=True, all_groups=True)
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
             # STEP 3: Get complete version data with downloadUrl from install endpoint
             complete_version = self.node_lookup.registry_client.install_node(
@@ -1291,7 +1294,7 @@ class NodeManager:
 
             # 4. Sync environment to restore old dependencies
             try:
-                self.uv.sync_project(quiet=True, all_groups=True)
+                self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
             except Exception:
                 pass  # Best effort
 
@@ -1361,7 +1364,7 @@ class NodeManager:
 
             # STEP 2: Remove old node from tracking
             self.pyproject.nodes.remove(identifier)
-            self.uv.sync_project(quiet=True, all_groups=True)
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
             # STEP 3: Create fresh node info from GitHub API response
             fresh_node_info = NodeInfo(
@@ -1408,7 +1411,7 @@ class NodeManager:
 
             # 4. Sync environment to restore old dependencies
             try:
-                self.uv.sync_project(quiet=True, all_groups=True)
+                self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
             except Exception:
                 pass  # Best effort
 

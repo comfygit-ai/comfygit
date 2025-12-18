@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .git_manager import GitManager
     from .node_manager import NodeManager
     from .pyproject_manager import PyprojectManager
+    from .pytorch_backend_manager import PyTorchBackendManager
     from .uv_project_manager import UVProjectManager
     from .workflow_manager import WorkflowManager
 
@@ -39,12 +40,14 @@ class EnvironmentGitOrchestrator:
         pyproject_manager: PyprojectManager,
         uv_manager: UVProjectManager,
         workflow_manager: WorkflowManager,
+        pytorch_manager: PyTorchBackendManager | None = None,
     ):
         self.git = git_manager
         self.node_manager = node_manager
         self.pyproject = pyproject_manager
         self.uv = uv_manager
         self.workflow_manager = workflow_manager
+        self.pytorch_manager = pytorch_manager
 
     def checkout(
         self,
@@ -314,8 +317,8 @@ class EnvironmentGitOrchestrator:
         # Reconcile nodes
         self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
 
-        # Sync Python environment
-        self.uv.sync_project(all_groups=True)
+        # Sync Python environment with PyTorch injection
+        self.uv.sync_project(all_groups=True, pytorch_manager=self.pytorch_manager)
 
         # Restore workflows
         self.workflow_manager.restore_all_from_cec(preserve_uncommitted=preserve_uncommitted)

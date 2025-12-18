@@ -11,6 +11,7 @@ from ..models.exceptions import CDPyprojectError, UVCommandError
 
 if TYPE_CHECKING:
     from ..managers.pyproject_manager import PyprojectManager
+    from ..managers.pytorch_backend_manager import PyTorchBackendManager
 
 logger = get_logger(__name__)
 
@@ -159,9 +160,32 @@ class UVProjectManager:
             'skipped': missing_packages
         }
 
-    def sync_project(self, verbose: bool = False, **flags) -> str:
-        result = self.uv.sync(verbose=verbose, **flags)
-        return result.stdout
+    def sync_project(
+        self,
+        verbose: bool = False,
+        pytorch_manager: PyTorchBackendManager | None = None,
+        **flags
+    ) -> str:
+        """Sync project dependencies.
+
+        Args:
+            verbose: Show uv output in real-time
+            pytorch_manager: Optional PyTorch backend manager for temporary injection.
+                            If provided, PyTorch config is injected before sync and
+                            restored after (regardless of success/failure).
+            **flags: Additional uv sync flags
+
+        Returns:
+            UV command stdout
+        """
+        if pytorch_manager:
+            # Use PyprojectManager's injection context (from Phase 2)
+            with self.pyproject.pytorch_injection_context(pytorch_manager):
+                result = self.uv.sync(verbose=verbose, **flags)
+                return result.stdout
+        else:
+            result = self.uv.sync(verbose=verbose, **flags)
+            return result.stdout
 
     def lock_project(self, **flags) -> str:
         result = self.uv.lock(**flags)
@@ -465,7 +489,8 @@ class UVProjectManager:
         self,
         dry_run: bool = False,
         callbacks = None,
-        verbose: bool = False
+        verbose: bool = False,
+        pytorch_manager: PyTorchBackendManager | None = None
     ) -> dict:
         """Install dependencies progressively with graceful optional group handling.
 
@@ -483,6 +508,7 @@ class UVProjectManager:
             dry_run: If True, don't actually install
             callbacks: Optional callbacks for progress reporting
             verbose: If True, show uv output in real-time
+            pytorch_manager: Optional PyTorch backend manager for temporary injection
 
         Returns:
             Dict with keys:
@@ -512,14 +538,24 @@ class UVProjectManager:
                     # Install base + all groups together
                     group_list = list(dep_groups.keys())
                     logger.debug(f"Syncing with groups: {group_list}")
-                    self.sync_project(group=group_list, dry_run=dry_run, verbose=verbose)
+                    self.sync_project(
+                        group=group_list,
+                        dry_run=dry_run,
+                        verbose=verbose,
+                        pytorch_manager=pytorch_manager
+                    )
 
                     # Track successful installations
                     result["dependency_groups_installed"].extend(group_list)
                 else:
                     # No groups - just sync base dependencies
                     logger.debug("No dependency groups, syncing base only")
-                    self.sync_project(dry_run=dry_run, no_default_groups=True, verbose=verbose)
+                    self.sync_project(
+                        dry_run=dry_run,
+                        no_default_groups=True,
+                        verbose=verbose,
+                        pytorch_manager=pytorch_manager
+                    )
 
                 result["packages_synced"] = True
                 break  # Success - exit loop
