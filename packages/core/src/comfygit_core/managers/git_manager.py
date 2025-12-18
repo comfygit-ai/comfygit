@@ -63,6 +63,9 @@ __pycache__/
 
 # Runtime marker (created after successful environment initialization)
 .complete
+
+# PyTorch backend configuration (machine-specific)
+.pytorch-backend
 """
 
     def ensure_git_identity(self) -> None:

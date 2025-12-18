@@ -20,6 +20,7 @@ from ..models.exceptions import CDPyprojectError, CDPyprojectInvalidError, CDPyp
 
 if TYPE_CHECKING:
     from ..models.shared import NodeInfo
+    from .pytorch_backend_manager import PyTorchBackendManager
 
 from ..utils.dependency_parser import parse_dependency_string
 
@@ -355,6 +356,127 @@ class PyprojectManager:
         # Reset lazy handlers so they reload from restored state
         self.reset_lazy_handlers()
         logger.debug("Restored pyproject.toml from snapshot")
+
+    def pytorch_injection_context(self, pytorch_manager: PyTorchBackendManager):
+        """Context manager that temporarily injects PyTorch config during sync.
+
+        This pattern allows syncing with platform-specific PyTorch configuration
+        without persisting it to the tracked pyproject.toml.
+
+        Usage:
+            with pyproject.pytorch_injection_context(pytorch_manager):
+                uv.sync_project()  # Sync happens with PyTorch config injected
+
+        Args:
+            pytorch_manager: PyTorchBackendManager instance for config generation
+
+        Yields:
+            None - the context manager just handles inject/restore
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _injection_context():
+            # Capture original content before any modifications
+            original_content = self.path.read_text()
+
+            try:
+                # Get PyTorch config from manager
+                pytorch_config = pytorch_manager.get_pytorch_config()
+
+                # Load current config and inject PyTorch settings
+                config = self.load()
+                self._inject_pytorch_config(config, pytorch_config)
+                self.save(config)
+
+                logger.debug(f"Injected PyTorch config for backend: {pytorch_manager.get_backend()}")
+
+                yield
+
+            except Exception:
+                # Log full injected config for debugging on failure
+                logger.error("=== PyTorch Sync Failure ===")
+                logger.error(f"Backend: {pytorch_manager.get_backend()}")
+                try:
+                    logger.error(f"Injected config:\n{self.path.read_text()}")
+                except Exception:
+                    pass
+                raise
+
+            finally:
+                # ALWAYS restore original content
+                self.path.write_text(original_content)
+                # Invalidate cache to ensure fresh reads
+                self._config_cache = None
+                self._cache_mtime = None
+                logger.debug("Restored original pyproject.toml after PyTorch injection")
+
+        return _injection_context()
+
+    def _inject_pytorch_config(self, config: dict, pytorch_config: dict) -> None:
+        """Inject PyTorch-specific configuration into pyproject.toml config.
+
+        Args:
+            config: The pyproject.toml config dict to modify
+            pytorch_config: PyTorch config from PyTorchBackendManager.get_pytorch_config()
+        """
+        # Ensure tool.uv section exists
+        if 'tool' not in config:
+            config['tool'] = tomlkit.table()
+        if 'uv' not in config['tool']:
+            config['tool']['uv'] = tomlkit.table()
+
+        uv_config = config['tool']['uv']
+
+        # Inject indexes
+        existing_indexes = uv_config.get('index', [])
+        if not isinstance(existing_indexes, list):
+            existing_indexes = [existing_indexes] if existing_indexes else []
+
+        for new_index in pytorch_config.get('indexes', []):
+            # Check if index already exists by name
+            exists = any(
+                idx.get('name') == new_index['name']
+                for idx in existing_indexes
+            )
+            if not exists:
+                # Create tomlkit table for proper formatting
+                index_table = tomlkit.table()
+                index_table['name'] = new_index['name']
+                index_table['url'] = new_index['url']
+                index_table['explicit'] = new_index.get('explicit', True)
+                existing_indexes.append(index_table)
+
+        # Use array-of-tables format
+        if existing_indexes:
+            aot = tomlkit.aot()
+            for idx in existing_indexes:
+                if hasattr(idx, 'items'):
+                    aot.append(idx)
+                else:
+                    tbl = tomlkit.table()
+                    for k, v in idx.items():
+                        tbl[k] = v
+                    aot.append(tbl)
+            uv_config['index'] = aot
+
+        # Inject sources
+        if 'sources' not in uv_config:
+            uv_config['sources'] = tomlkit.table()
+
+        for package_name, source in pytorch_config.get('sources', {}).items():
+            # Only add if not already present
+            if package_name not in uv_config['sources']:
+                uv_config['sources'][package_name] = source
+
+        # Inject constraints (if any)
+        constraints = pytorch_config.get('constraints', [])
+        if constraints:
+            existing_constraints = uv_config.get('constraint-dependencies', [])
+            for constraint in constraints:
+                if constraint not in existing_constraints:
+                    existing_constraints.append(constraint)
+            uv_config['constraint-dependencies'] = existing_constraints
 
 
 class BaseHandler:
