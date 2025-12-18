@@ -401,7 +401,7 @@ def mock_github_api(monkeypatch):
     class FakeRepositoryInfo:
         def __init__(self):
             self.latest_release = "v0.3.20"
-            self.default_branch = "master"
+            self.default_branch = "main"
 
     class FakeRelease:
         def __init__(self, tag_name: str):
