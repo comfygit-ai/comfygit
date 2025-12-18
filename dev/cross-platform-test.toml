@@ -1,0 +1,80 @@
+# Cross-Platform Test Configuration (Template)
+# Used by dev/scripts/cross-platform-test.py
+#
+# LOCAL OVERRIDES: Create dev/cross-platform-test.local.toml with your
+# machine-specific settings (SSH hosts, usernames, paths). That file is
+# gitignored and will override values from this template.
+
+[settings]
+# Default test command (can be overridden per-platform)
+test_command = "uv run pytest packages/core/tests -v"
+
+# Timeout for remote tests in seconds
+timeout = 600
+
+# Whether to sync code before running tests on remote platforms
+sync_before_test = true
+
+# Sync method: "git" (git pull) or "rsync"
+sync_method = "git"
+
+# ============================================================================
+# Platform Definitions
+# ============================================================================
+
+[platforms.linux]
+# Local Linux environment (WSL or native)
+type = "local"
+enabled = true
+
+[platforms.windows]
+# Remote Windows machine via SSH
+# Configure in cross-platform-test.local.toml
+type = "ssh"
+enabled = false  # Enable in local.toml after configuring
+
+host = ""        # Set in local.toml (e.g., "172.30.208.1" for WSL)
+user = ""        # Set in local.toml (your Windows username)
+port = 22
+repo_path = ""   # Set in local.toml (e.g., "C:/code/comfygit")
+
+[platforms.windows-wsl]
+# Alternative: Run Windows tests from WSL using cmd.exe interop
+# This avoids SSH setup but only works from within WSL
+type = "wsl-interop"
+enabled = false
+
+windows_repo_path = ""  # Set in local.toml (e.g., "C:\\code\\comfygit")
+
+[platforms.macos]
+# Remote macOS machine via SSH
+type = "ssh"
+enabled = false
+
+host = ""        # Set in local.toml
+user = ""        # Set in local.toml
+port = 22
+repo_path = ""   # Set in local.toml
+
+# ============================================================================
+# Setup Instructions
+# ============================================================================
+#
+# 1. Copy the example local config:
+#    cp dev/cross-platform-test.local.example.toml dev/cross-platform-test.local.toml
+#
+# 2. Edit dev/cross-platform-test.local.toml with your settings
+#
+# 3. Test: make test-platforms
+#
+# Windows SSH Setup:
+# 1. Enable OpenSSH Server: Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+# 2. Start service: Start-Service sshd
+# 3. Auto-start: Set-Service -Name sshd -StartupType Automatic
+# 4. Add SSH key to C:\ProgramData\ssh\administrators_authorized_keys
+# 5. Fix permissions: icacls "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+# 6. Get WSL->Windows IP: ip route show | grep default | awk '{print $3}'
+#
+# macOS SSH Setup:
+# 1. Enable Remote Login in System Preferences > Sharing
+# 2. Copy SSH key: ssh-copy-id user@mac-mini.local

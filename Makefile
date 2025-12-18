@@ -4,6 +4,7 @@
 .PHONY: build-core build-cli build-all
 .PHONY: docs-serve docs-build docs-deploy docs-clean
 .PHONY: merge-and-sync
+.PHONY: test-cross-platform test-linux test-windows test-platforms
 
 # Default target
 help:
@@ -12,10 +13,16 @@ help:
 	@echo "General Commands:"
 	@echo "  make install      - Install all packages in development mode"
 	@echo "  make dev          - Start development environment"
-	@echo "  make test         - Run all tests"
+	@echo "  make test         - Run all tests (local)"
 	@echo "  make lint         - Run linting"
 	@echo "  make format       - Format code"
 	@echo "  make clean        - Clean build artifacts"
+	@echo ""
+	@echo "Cross-Platform Testing:"
+	@echo "  make test-cross-platform  - Run tests on all enabled platforms"
+	@echo "  make test-linux           - Run tests on Linux only"
+	@echo "  make test-windows         - Run tests on Windows (via SSH)"
+	@echo "  make test-platforms       - List available test platforms"
 	@echo ""
 	@echo "Docker Commands:"
 	@echo "  make docker-build - Build all Docker images"
@@ -64,11 +71,24 @@ dev: docker-up
 	@echo "  - Server: http://localhost:8000"
 	@echo "  - Frontend: http://localhost:5173"
 
-# Run all tests
+# Run all tests (local)
 test:
 	uv run pytest packages/core/tests
 	uv run pytest packages/cec/tests
 	uv run pytest packages/server/tests
+
+# Cross-platform testing
+test-cross-platform:
+	@python3 dev/scripts/cross-platform-test.py
+
+test-linux:
+	@python3 dev/scripts/cross-platform-test.py --platforms linux
+
+test-windows:
+	@python3 dev/scripts/cross-platform-test.py --platforms windows
+
+test-platforms:
+	@python3 dev/scripts/cross-platform-test.py --list
 
 # Run linting
 lint:

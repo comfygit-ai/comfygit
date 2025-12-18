@@ -66,6 +66,7 @@ tmp/
 
 # Local configuration
 local_config.json
+dev/cross-platform-test.local.toml
 
 # LLMD files:
 *llm-context.md
