@@ -70,6 +70,40 @@ make test
 make lint
 ```
 
+### Cross-Platform Testing
+Run tests across Linux, Windows, and macOS using `dev/scripts/cross-platform-test.py`.
+
+```bash
+# Run on all enabled platforms
+python dev/scripts/cross-platform-test.py
+
+# Run on specific platforms
+python dev/scripts/cross-platform-test.py --platforms linux,windows
+
+# Run specific test directory
+python dev/scripts/cross-platform-test.py --test-path packages/core/tests/unit
+
+# Pass pytest arguments after -- (full pytest control)
+python dev/scripts/cross-platform-test.py -- -k "test_workspace" -x
+python dev/scripts/cross-platform-test.py -- -k "test_git" --tb=short
+python dev/scripts/cross-platform-test.py --test-path packages/core/tests -- -k "test_env" -x
+
+# Common pytest flags:
+#   -k "pattern"  - Run tests matching pattern
+#   -x            - Stop on first failure
+#   --lf          - Run last failed tests
+#   -m "marker"   - Run tests with marker
+#   --tb=short    - Shorter traceback format
+
+# Other options
+python dev/scripts/cross-platform-test.py --list        # List available platforms
+python dev/scripts/cross-platform-test.py --no-sync     # Skip git sync on remote
+python dev/scripts/cross-platform-test.py --sequential  # Run sequentially (not parallel)
+python dev/scripts/cross-platform-test.py --verbose     # Full output for failures
+```
+
+Configuration: `dev/cross-platform-test.toml` (defaults) and `dev/cross-platform-test.local.toml` (your overrides, gitignored).
+
 ### Version Management Workflow
 1. Make your changes across core and/or CLI
 2. Run tests: `make test`

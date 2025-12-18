@@ -12,6 +12,11 @@ Usage:
     python cross-platform-test.py --no-sync    # Skip git sync on remote
     python cross-platform-test.py --test-path packages/core/tests/unit  # Custom test path
 
+    # Pass arbitrary pytest arguments after --
+    python cross-platform-test.py -- -k "test_workspace" -x
+    python cross-platform-test.py --test-path packages/core/tests -- -k "test_git" --tb=short
+    python cross-platform-test.py -- packages/core/tests/unit -k "test_env" -x
+
 Configuration:
     - dev/cross-platform-test.toml - Template with defaults (checked into git)
     - dev/cross-platform-test.local.toml - Your local overrides (gitignored)
@@ -289,6 +294,7 @@ def run_platform_tests(
     sync: bool,
     branch: str,
     test_path: str | None,
+    pytest_args: list[str] | None = None,
 ) -> TestResult:
     """Run tests on a single platform."""
     # Determine test command
@@ -300,6 +306,10 @@ def run_platform_tests(
     if test_path:
         # Replace the test path in the command
         test_command = f"uv run pytest {test_path} -v"
+
+    # Append any additional pytest arguments
+    if pytest_args:
+        test_command = f"{test_command} {' '.join(pytest_args)}"
 
     timeout = settings.get("timeout", 600)
 
@@ -415,8 +425,18 @@ def main():
         action="store_true",
         help="Run tests sequentially instead of in parallel",
     )
+    parser.add_argument(
+        "pytest_args",
+        nargs=argparse.REMAINDER,
+        help="Additional pytest arguments (after --). Example: -- -k 'test_name' -x",
+    )
 
     args = parser.parse_args()
+
+    # Clean up pytest_args - remove leading '--' if present
+    pytest_args = args.pytest_args
+    if pytest_args and pytest_args[0] == "--":
+        pytest_args = pytest_args[1:]
 
     # Find config file
     script_dir = Path(__file__).parent
@@ -461,6 +481,8 @@ def main():
     print(f"Sync: {'yes' if sync else 'no'}")
     if args.test_path:
         print(f"Test path: {args.test_path}")
+    if pytest_args:
+        print(f"Pytest args: {' '.join(pytest_args)}")
     print()
 
     # Run tests
@@ -470,7 +492,7 @@ def main():
         # Sequential execution
         for platform in enabled_platforms:
             result = run_platform_tests(
-                platform, settings, sync, branch, args.test_path
+                platform, settings, sync, branch, args.test_path, pytest_args
             )
             results.append(result)
             status = "\u2713" if result.success else "\u2717"
@@ -486,6 +508,7 @@ def main():
                     sync,
                     branch,
                     args.test_path,
+                    pytest_args,
                 ): platform
                 for platform in enabled_platforms
             }
