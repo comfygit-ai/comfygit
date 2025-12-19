@@ -349,6 +349,26 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     orch_logs_parser.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to show (default: 50)")
     orch_logs_parser.set_defaults(func=global_cmds.orch_logs)
 
+    # pytorch-cache - Manage PyTorch version cache
+    pytorch_cache_parser = subparsers.add_parser(
+        "pytorch-cache",
+        help="Manage PyTorch version cache"
+    )
+    pytorch_cache_subparsers = pytorch_cache_parser.add_subparsers(
+        dest="pytorch_cache_command",
+        help="PyTorch cache commands"
+    )
+    pytorch_cache_parser.set_defaults(func=_make_help_func(pytorch_cache_parser))
+
+    # pytorch-cache show
+    pytorch_cache_show_parser = pytorch_cache_subparsers.add_parser("show", help="Show cached PyTorch versions")
+    pytorch_cache_show_parser.set_defaults(func=global_cmds.pytorch_cache_show)
+
+    # pytorch-cache clear
+    pytorch_cache_clear_parser = pytorch_cache_subparsers.add_parser("clear", help="Clear cached PyTorch versions")
+    pytorch_cache_clear_parser.add_argument("--backend", help="Only clear specific backend (e.g., cu128)")
+    pytorch_cache_clear_parser.set_defaults(func=global_cmds.pytorch_cache_clear)
+
 
 def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     """Add environment-specific commands."""

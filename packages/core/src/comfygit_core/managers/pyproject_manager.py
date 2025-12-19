@@ -285,7 +285,7 @@ class PyprojectManager:
         new_table = tomlkit.table()
 
         # Add metadata fields first
-        for key in ['comfyui_version', 'python_version', 'manifest_state']:
+        for key in ['schema_version', 'comfyui_version', 'python_version', 'manifest_state']:
             if key in comfydock:
                 new_table[key] = comfydock[key]
 
@@ -357,18 +357,23 @@ class PyprojectManager:
         self.reset_lazy_handlers()
         logger.debug("Restored pyproject.toml from snapshot")
 
-    def pytorch_injection_context(self, pytorch_manager: PyTorchBackendManager):
+    def pytorch_injection_context(
+        self,
+        pytorch_manager: PyTorchBackendManager,
+        python_version: str | None = None,
+    ):
         """Context manager that temporarily injects PyTorch config during sync.
 
         This pattern allows syncing with platform-specific PyTorch configuration
         without persisting it to the tracked pyproject.toml.
 
         Usage:
-            with pyproject.pytorch_injection_context(pytorch_manager):
+            with pyproject.pytorch_injection_context(pytorch_manager, python_version="3.12"):
                 uv.sync_project()  # Sync happens with PyTorch config injected
 
         Args:
             pytorch_manager: PyTorchBackendManager instance for config generation
+            python_version: Python version for constraint lookup (enables version probing)
 
         Yields:
             None - the context manager just handles inject/restore
@@ -381,8 +386,8 @@ class PyprojectManager:
             original_content = self.path.read_text()
 
             try:
-                # Get PyTorch config from manager
-                pytorch_config = pytorch_manager.get_pytorch_config()
+                # Get PyTorch config from manager (with constraints if python_version provided)
+                pytorch_config = pytorch_manager.get_pytorch_config(python_version)
 
                 # Load current config and inject PyTorch settings
                 config = self.load()

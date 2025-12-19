@@ -120,7 +120,7 @@ class Environment:
 
     @cached_property
     def pytorch_manager(self) -> PyTorchBackendManager:
-        return PyTorchBackendManager(self.cec_path)
+        return PyTorchBackendManager(self.cec_path, self.workspace_paths.root)
 
     @cached_property
     def node_lookup(self) -> NodeLookupService:

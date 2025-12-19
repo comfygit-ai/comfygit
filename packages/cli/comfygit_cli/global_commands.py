@@ -1808,3 +1808,69 @@ class GlobalCommands:
                 print("".join(lines))
             else:
                 print("(empty log file)")
+
+    # -------------------------------------------------------------------------
+    # PyTorch Cache Commands
+    # -------------------------------------------------------------------------
+
+    @with_workspace_logging("pytorch-cache show")
+    def pytorch_cache_show(self, args: argparse.Namespace) -> None:
+        """Show cached PyTorch versions."""
+        from comfygit_core.caching.pytorch_version_cache import PyTorchVersionCache
+
+        cache = PyTorchVersionCache(self.workspace.path)
+        entries = cache.get_all_entries()
+
+        if not entries:
+            print("No cached PyTorch versions found.")
+            print("\nVersions are cached when you first run 'cg sync' with --torch-backend")
+            print("or when using 'cg env-config torch-backend set <backend>'")
+            return
+
+        print(f"PyTorch Version Cache ({cache.cache_file})\n")
+
+        # Group by Python version
+        by_python: dict[str, list[dict]] = {}
+        for entry in entries:
+            py_ver = entry["python_version"]
+            if py_ver not in by_python:
+                by_python[py_ver] = []
+            by_python[py_ver].append(entry)
+
+        for py_ver in sorted(by_python.keys(), reverse=True):
+            print(f"Python {py_ver}:")
+            for entry in sorted(by_python[py_ver], key=lambda e: e["backend"]):
+                backend = entry["backend"]
+                versions = entry["versions"]
+                discovered = entry.get("discovered", "")
+
+                print(f"  + {backend}:")
+                for pkg, ver in sorted(versions.items()):
+                    print(f"      {pkg}=={ver}")
+
+                if discovered:
+                    # Parse and format timestamp
+                    try:
+                        from datetime import datetime
+                        dt = datetime.fromisoformat(discovered.replace("Z", "+00:00"))
+                        print(f"      (discovered: {dt.strftime('%Y-%m-%d %H:%M')})")
+                    except Exception:
+                        pass
+            print()
+
+    @with_workspace_logging("pytorch-cache clear")
+    def pytorch_cache_clear(self, args: argparse.Namespace) -> None:
+        """Clear cached PyTorch versions."""
+        from comfygit_core.caching.pytorch_version_cache import PyTorchVersionCache
+
+        cache = PyTorchVersionCache(self.workspace.path)
+        backend = getattr(args, 'backend', None)
+
+        if backend:
+            cache.clear_backend(backend)
+            print(f"✓ Cleared cached PyTorch versions for backend: {backend}")
+        else:
+            cache.clear_all()
+            print("✓ Cleared all cached PyTorch versions")
+
+        print("\nNext 'cg sync' will probe for fresh PyTorch versions.")

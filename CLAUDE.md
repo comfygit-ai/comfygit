@@ -2,10 +2,34 @@
 
 ComfyGit is a monorepo workspace using uv for Python package management. It provides unified environment management for ComfyUI through multiple coordinated packages.
 
-### Codebase Maps
-- @docs/codebase-map.md
-- @packages/core/docs/codebase-map.md
-- @packages/cli/docs/codebase-map.md
+### Codebase Navigation
+
+**For implementation tasks**, read the relevant architecture overview first:
+- @packages/core/docs/architecture.md - Core library: layers, managers, services, protocols
+- @packages/cli/docs/architecture.md - CLI: command handlers, strategies, formatters
+- @packages/deploy/docs/architecture.md - Deploy: providers, worker server, async patterns
+
+Use `/map` to regenerate architecture docs after major refactors.
+
+**Then use pyast** for specific symbol lookups:
+```bash
+# Structure overview
+pyast overview packages/core/src/comfygit_core/
+
+# Find existing utilities before implementing
+pyast search "retry" packages/core/src/comfygit_core/
+pyast search "download" packages/core/src/comfygit_core/
+
+# Check what's in a module
+pyast symbols packages/core/src/comfygit_core/utils/
+
+# Understand dependencies before modifying
+pyast deps "Environment.sync" packages/core/src/comfygit_core/core/environment.py
+```
+
+**Key utility locations** (check before reimplementing):
+- `packages/core/src/comfygit_core/utils/` - git, filesystem, retry, parsing helpers
+- `packages/core/src/comfygit_core/services/` - downloads, lookups, registry
 
 ## Version Management Strategy
 

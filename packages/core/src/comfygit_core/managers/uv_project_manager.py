@@ -164,6 +164,7 @@ class UVProjectManager:
         self,
         verbose: bool = False,
         pytorch_manager: PyTorchBackendManager | None = None,
+        python_version: str | None = None,
         **flags
     ) -> str:
         """Sync project dependencies.
@@ -174,6 +175,8 @@ class UVProjectManager:
                             If provided, PyTorch config is injected before sync and
                             restored after (regardless of success/failure).
                             Also forces reinstall of PyTorch packages to ensure correct backend.
+            python_version: Python version for PyTorch constraint probing (e.g., "3.12").
+                           If not provided, extracted from pyproject.toml [tool.comfygit]
             **flags: Additional uv sync flags
 
         Returns:
@@ -186,8 +189,17 @@ class UVProjectManager:
             # Without this, uv may skip reinstall if torch is already installed
             flags['reinstall_package'] = list(PYTORCH_CORE_PACKAGES)
 
+            # Auto-extract python_version from pyproject.toml if not provided
+            effective_python_version = python_version
+            if effective_python_version is None:
+                try:
+                    config = self.pyproject.load()
+                    effective_python_version = config.get('tool', {}).get('comfygit', {}).get('python_version')
+                except Exception:
+                    pass  # If we can't read it, proceed without constraints
+
             # Use PyprojectManager's injection context (from Phase 2)
-            with self.pyproject.pytorch_injection_context(pytorch_manager):
+            with self.pyproject.pytorch_injection_context(pytorch_manager, effective_python_version):
                 result = self.uv.sync(verbose=verbose, **flags)
                 return result.stdout
         else:
