@@ -88,6 +88,45 @@ class EnvironmentCommands:
             sys.exit(1)
         return active
 
+    def _get_or_probe_backend(
+        self, env: Environment, override: str | None = None
+    ) -> tuple[str, bool]:
+        """Get torch backend from file or probe if missing.
+
+        Args:
+            env: Environment to get backend for
+            override: Optional explicit backend override
+
+        Returns:
+            Tuple of (backend_string, was_probed) where was_probed is True
+            if we had to auto-probe because no backend was configured.
+        """
+        if override:
+            return override, False
+
+        if env.pytorch_manager.has_backend():
+            return env.pytorch_manager.get_backend(), False
+
+        # No backend configured - probe and set it
+        print("⚠️  No PyTorch backend configured. Auto-detecting...")
+        try:
+            # Read Python version from .python-version file
+            python_version_file = env.cec_path / ".python-version"
+            python_version = (
+                python_version_file.read_text(encoding="utf-8").strip()
+                if python_version_file.exists()
+                else "3.12"
+            )
+            backend = env.pytorch_manager.probe_and_set_backend(
+                python_version,
+                backend="auto",
+            )
+            return backend, True
+        except Exception as e:
+            print(f"✗ Error probing PyTorch backend: {e}")
+            print("   Try setting it explicitly: cg env-config torch-backend set <backend>")
+            sys.exit(1)
+
     def _format_size(self, size_bytes: int) -> str:
         """Format bytes as human-readable size."""
         for unit in ("B", "KB", "MB", "GB"):
@@ -313,12 +352,35 @@ class EnvironmentCommands:
 
     @with_env_logging("env-config torch-backend detect")
     def env_config_torch_detect(self, args: argparse.Namespace, logger=None) -> None:
-        """Auto-detect recommended PyTorch backend."""
-        env = self._get_env(args)
+        """Auto-detect recommended PyTorch backend using uv probe."""
+        from comfygit_core.utils.pytorch_prober import PyTorchProbeError, probe_pytorch_versions
 
-        detected = env.pytorch_manager.detect_backend()
-        current = env.pytorch_manager.get_backend()
+        env = self._get_env(args)
         backend_file = env.pytorch_manager.backend_file
+
+        # Read python version from file
+        python_version_file = env.cec_path / ".python-version"
+        python_version = (
+            python_version_file.read_text(encoding="utf-8").strip()
+            if python_version_file.exists()
+            else "3.12"
+        )
+
+        # Probe for recommended backend
+        print(f"🔍 Probing PyTorch compatibility for Python {python_version}...")
+        try:
+            _, detected = probe_pytorch_versions(
+                python_version, "auto", self.workspace.path
+            )
+        except PyTorchProbeError as e:
+            print(f"✗ Error probing PyTorch: {e}")
+            sys.exit(1)
+
+        # Get current backend (if any)
+        if env.pytorch_manager.has_backend():
+            current = env.pytorch_manager.get_backend()
+        else:
+            current = "(not configured)"
 
         print(f"Detected backend: {detected}")
         print(f"Current backend:  {current}")
@@ -326,11 +388,14 @@ class EnvironmentCommands:
         if backend_file.exists():
             print(f"   Source: {backend_file}")
         else:
-            print("   Source: auto-detected (no .pytorch-backend file)")
+            print("   Source: not configured")
 
-        if detected != current:
+        if current != detected and current != "(not configured)":
             print()
             print(f"💡 Consider updating: cg env-config torch-backend set {detected}")
+        elif current == "(not configured)":
+            print()
+            print(f"💡 Set the backend: cg env-config torch-backend set {detected}")
 
     @with_env_logging("run")
     def run(self, args: argparse.Namespace) -> None:
@@ -340,31 +405,31 @@ class EnvironmentCommands:
         comfyui_args = args.args if hasattr(args, 'args') else []
         no_sync = getattr(args, 'no_sync', False)
 
-        # Handle torch-backend: read from file or use explicit override
+        # Handle torch-backend: use override, read from file, or probe if missing
         torch_backend_override = getattr(args, 'torch_backend', None)
+        torch_backend, was_probed = self._get_or_probe_backend(env, torch_backend_override)
 
         if torch_backend_override:
-            torch_backend = torch_backend_override
             print(f"🔧 Using PyTorch backend override: {torch_backend}")
+        elif was_probed:
+            print(f"✓ Backend detected and saved: {torch_backend}")
+            print(f"   To change: cg env-config torch-backend set <backend>")
         else:
-            torch_backend = env.pytorch_manager.get_backend()
-            if not env.pytorch_manager.backend_file.exists():
-                print(f"⚠️  No PyTorch backend configured. Auto-detecting: {torch_backend}")
-                print(f"   Run 'cg env-config torch-backend set {torch_backend}' to save this choice.")
-            else:
-                print(f"🔧 Using PyTorch backend: {torch_backend}")
+            print(f"🔧 Using PyTorch backend: {torch_backend}")
 
         current_branch = env.get_current_branch()
         branch_display = f" (on {current_branch})" if current_branch else " (detached HEAD)"
 
         while True:
             # Sync before running (unless --no-sync)
+            # Use explicit override if provided, otherwise None (backend is now in file)
             if not no_sync:
                 print(f"🔄 Syncing environment: {env.name}")
                 env.sync(
                     preserve_workflows=True,
                     remove_extra_nodes=False,
-                    backend_override=torch_backend_override,
+                    backend_override=torch_backend_override if torch_backend_override else None,
+                    verbose=True,
                 )
 
             print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
@@ -385,36 +450,30 @@ class EnvironmentCommands:
         """Sync environment packages and dependencies."""
         env = self._get_env(args)
 
-        # Handle torch-backend: read from file or use explicit override
+        # Handle torch-backend: use override, read from file, or probe if missing
         torch_backend_override = getattr(args, 'torch_backend', None)
+        torch_backend, was_probed = self._get_or_probe_backend(env, torch_backend_override)
 
         if torch_backend_override:
-            # Explicit override - use it, don't write to file
-            torch_backend = torch_backend_override
             print(f"🔧 Using PyTorch backend override: {torch_backend}")
+        elif was_probed:
+            print(f"✓ Backend detected and saved: {torch_backend}")
+            print(f"   To change: cg env-config torch-backend set <backend>")
         else:
-            # Read from file (get_backend auto-detects if file missing)
-            torch_backend = env.pytorch_manager.get_backend()
-            if not env.pytorch_manager.backend_file.exists():
-                # File didn't exist, was auto-detected
-                print(f"⚠️  No PyTorch backend configured. Auto-detecting: {torch_backend}")
-                print(f"   Run 'cg env-config torch-backend set {torch_backend}' to save this choice.")
-            else:
-                print(f"🔧 Using PyTorch backend: {torch_backend}")
-
-        # NOTE: No file write here! Override is one-time, config write is via env-config
+            print(f"🔧 Using PyTorch backend: {torch_backend}")
 
         print(f"\n🔄 Syncing environment: {env.name}")
 
         verbose = getattr(args, 'verbose', False)
 
         try:
+            # Use explicit override if provided, otherwise None (backend is now in file)
             result = env.sync(
                 dry_run=False,
                 model_strategy="skip",  # Sync command focuses on packages
                 remove_extra_nodes=False,  # Don't remove nodes, just sync
                 verbose=verbose,
-                backend_override=torch_backend_override,
+                backend_override=torch_backend_override if torch_backend_override else None,
             )
 
             if result.success:

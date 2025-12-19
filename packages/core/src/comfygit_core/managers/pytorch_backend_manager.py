@@ -27,19 +27,17 @@ class PyTorchBackendManager:
         r'^xpu$',  # Intel XPU
     ]
 
-    def __init__(self, cec_path: Path, workspace_path: Path | None = None):
+    def __init__(self, cec_path: Path):
         """Initialize manager.
 
         Args:
             cec_path: Path to the .cec directory
-            workspace_path: Path to workspace root (needed for version cache)
         """
         self.cec_path = cec_path
-        self.workspace_path = workspace_path
         self.backend_file = cec_path / ".pytorch-backend"
 
     def get_backend(self) -> str:
-        """Read backend from file.
+        """Read backend from file (first line only).
 
         Returns:
             Backend string (e.g., 'cu128', 'cpu')
@@ -48,8 +46,9 @@ class PyTorchBackendManager:
             ValueError: If .pytorch-backend file doesn't exist or is empty
         """
         if self.backend_file.exists():
-            backend = self.backend_file.read_text().strip()
-            if backend:
+            lines = self.backend_file.read_text().strip().split('\n')
+            if lines and lines[0]:
+                backend = lines[0].strip()
                 logger.debug(f"Read PyTorch backend from file: {backend}")
                 return backend
 
@@ -58,16 +57,24 @@ class PyTorchBackendManager:
             "Run probe_and_set_backend() first."
         )
 
-    def set_backend(self, backend: str) -> None:
-        """Write backend to file.
+    def set_backend(self, backend: str, versions: dict[str, str] | None = None) -> None:
+        """Write backend and optional versions to file.
 
-        Also ensures .pytorch-backend is in .gitignore (for migration from
-        older environments that don't have this entry).
+        File format:
+            cu128
+            torch=2.9.1+cu128
+            torchvision=0.24.1+cu128
+            torchaudio=2.9.1+cu128
 
         Args:
             backend: Backend string (e.g., 'cu128', 'cpu')
+            versions: Optional dict mapping package name to version
         """
-        self.backend_file.write_text(backend)
+        content = backend
+        if versions:
+            for pkg, version in versions.items():
+                content += f"\n{pkg}={version}"
+        self.backend_file.write_text(content)
         logger.info(f"Set PyTorch backend: {backend}")
 
         # Ensure .gitignore has this entry (migration support)
@@ -80,8 +87,7 @@ class PyTorchBackendManager:
     ) -> str:
         """Probe PyTorch versions and set backend.
 
-        Uses uv's dry-run probing to detect the appropriate backend
-        and cache version information.
+        Uses uv's dry-run probing to detect the appropriate backend.
 
         Args:
             python_version: Python version (e.g., "3.12")
@@ -95,16 +101,11 @@ class PyTorchBackendManager:
         """
         from ..utils.pytorch_prober import probe_pytorch_versions
 
-        if not self.workspace_path:
-            raise ValueError("workspace_path required for probing")
+        # Probe versions
+        versions, resolved_backend = probe_pytorch_versions(python_version, backend)
 
-        # Probe versions (also caches them)
-        _, resolved_backend = probe_pytorch_versions(
-            python_version, backend, self.workspace_path
-        )
-
-        # Write resolved backend to file
-        self.set_backend(resolved_backend)
+        # Write backend AND versions to file
+        self.set_backend(resolved_backend, versions)
 
         return resolved_backend
 
@@ -113,6 +114,27 @@ class PyTorchBackendManager:
         if not self.backend_file.exists():
             return False
         return bool(self.backend_file.read_text().strip())
+
+    def get_versions(self) -> dict[str, str]:
+        """Read PyTorch versions from .pytorch-backend file.
+
+        Returns:
+            Dict mapping package name to version (e.g., {"torch": "2.9.1+cu128"})
+            Empty dict if no versions stored or file missing.
+        """
+        if not self.backend_file.exists():
+            return {}
+
+        lines = self.backend_file.read_text().strip().split('\n')
+        versions = {}
+
+        # Skip first line (backend), parse remaining as pkg=version
+        for line in lines[1:]:
+            if '=' in line:
+                pkg, version = line.split('=', 1)
+                versions[pkg.strip()] = version.strip()
+
+        return versions
 
     def _ensure_gitignore_entry(self) -> None:
         """Ensure .pytorch-backend is in .gitignore."""
@@ -159,22 +181,17 @@ class PyTorchBackendManager:
 
     def get_pytorch_config(
         self,
-        python_version: str | None = None,
         backend_override: str | None = None,
     ) -> dict:
         """Generate PyTorch uv config for current backend.
 
-        When python_version is provided and workspace_path is set, includes
-        constraint-dependencies with exact PyTorch versions from cache.
-
         Args:
-            python_version: Python version for constraint lookup (e.g., "3.12")
             backend_override: Override backend instead of reading from file (e.g., "cu128")
 
         Returns dict with:
             - indexes: List of index configs (name, url, explicit)
             - sources: Dict mapping package names to index names
-            - constraints: List of constraint strings (e.g., ["torch==2.9.1+cu128"])
+            - constraints: List of version constraints (e.g., ["torch==2.9.1+cu128"])
 
         Returns:
             Configuration dict for PyTorch packages
@@ -184,21 +201,20 @@ class PyTorchBackendManager:
         index_name = f"pytorch-{backend}"
 
         sources: dict[str, dict[str, str]] = {}
-        constraints: list[str] = []
 
         # Map all PyTorch core packages to the index
         for package in PYTORCH_CORE_PACKAGES:
             sources[package] = {"index": index_name}
 
-        # Add constraints from cache (probing should have happened earlier)
-        if python_version and self.workspace_path:
-            versions = self._get_cached_versions(python_version, backend)
-            if versions:
-                constraints = [
-                    f"{pkg}=={version}"
-                    for pkg, version in versions.items()
-                    if pkg in PYTORCH_CORE_PACKAGES
-                ]
+        # Generate constraints from stored versions (only when not overriding)
+        constraints: list[str] = []
+        if not backend_override:
+            versions = self.get_versions()
+            constraints = [
+                f"{pkg}=={version}"
+                for pkg, version in versions.items()
+                if pkg in PYTORCH_CORE_PACKAGES
+            ]
 
         config = {
             "indexes": [
@@ -214,39 +230,3 @@ class PyTorchBackendManager:
 
         logger.debug(f"Generated PyTorch config for backend {backend}: {config}")
         return config
-
-    def _get_cached_versions(
-        self, python_version: str, backend: str
-    ) -> dict[str, str] | None:
-        """Get PyTorch versions from cache only.
-
-        Args:
-            python_version: Python version (may be "3.12" or "3.12.11")
-            backend: PyTorch backend (e.g., "cu128")
-
-        Returns:
-            Dict of package versions, or None if not cached
-        """
-        from ..caching.pytorch_version_cache import PyTorchVersionCache
-        from ..utils.pytorch_prober import PyTorchProbeError, get_exact_python_version
-
-        if not self.workspace_path:
-            return None
-
-        # Get exact Python version for cache key
-        try:
-            exact_py = get_exact_python_version(python_version)
-        except PyTorchProbeError as e:
-            logger.warning(f"Could not determine exact Python version: {e}")
-            exact_py = python_version
-
-        # Check cache only - no probing here
-        cache = PyTorchVersionCache(self.workspace_path)
-        versions = cache.get_versions(exact_py, backend)
-
-        if versions:
-            logger.debug(f"Using cached PyTorch versions for {exact_py}+{backend}")
-        else:
-            logger.debug(f"No cached PyTorch versions for {exact_py}+{backend}")
-
-        return versions

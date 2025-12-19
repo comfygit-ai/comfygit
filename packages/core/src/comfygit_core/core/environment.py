@@ -119,7 +119,7 @@ class Environment:
 
     @cached_property
     def pytorch_manager(self) -> PyTorchBackendManager:
-        return PyTorchBackendManager(self.cec_path, self.workspace_paths.root)
+        return PyTorchBackendManager(self.cec_path)
 
     @cached_property
     def node_lookup(self) -> NodeLookupService:
@@ -1897,8 +1897,8 @@ class Environment:
             if migrated:
                 logger.info("Migrated imported environment to schema v2")
 
-            # Use dry-run probe to detect backend and cache versions
-            pytorch_manager = PyTorchBackendManager(self.cec_path, workspace_path=self.workspace_paths.root)
+            # Use dry-run probe to detect backend
+            pytorch_manager = PyTorchBackendManager(self.cec_path)
             resolved_backend = pytorch_manager.probe_and_set_backend(python_version, self.torch_backend)
 
             if self.torch_backend == "auto":

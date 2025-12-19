@@ -80,7 +80,7 @@ class EnvironmentFactory:
 
         from ..managers.pytorch_backend_manager import PyTorchBackendManager
 
-        pytorch_manager = PyTorchBackendManager(cec_path, workspace_path=workspace.paths.root)
+        pytorch_manager = PyTorchBackendManager(cec_path)
         resolved_backend = pytorch_manager.probe_and_set_backend(python_version, torch_backend)
 
         if torch_backend == "auto":

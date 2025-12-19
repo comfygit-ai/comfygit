@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
-from pathlib import Path
 
 from ..logging.logging_config import get_logger
 from .common import run_command
@@ -67,7 +66,6 @@ def get_exact_python_version(requested_version: str) -> str:
 def probe_pytorch_versions(
     python_version: str,
     backend: str,
-    workspace_path: Path,
 ) -> tuple[dict[str, str], str]:
     """Probe PyTorch versions using uv dry-run.
 
@@ -77,7 +75,6 @@ def probe_pytorch_versions(
     Args:
         python_version: Python version (e.g., "3.12" or "3.12.11")
         backend: PyTorch backend ("auto", "cu128", "cpu", etc.)
-        workspace_path: Path to workspace (for cache storage)
 
     Returns:
         Tuple of (versions_dict, resolved_backend):
@@ -87,21 +84,11 @@ def probe_pytorch_versions(
     Raises:
         PyTorchProbeError: If probing fails
     """
-    from ..caching.pytorch_version_cache import PyTorchVersionCache
-
-    # Get exact Python version for consistent cache keys
+    # Get exact Python version for consistent probing
     try:
         exact_py = get_exact_python_version(python_version)
     except PyTorchProbeError:
         exact_py = python_version  # Fall back to requested version
-
-    # For non-auto backends, check cache first
-    if backend != "auto":
-        cache = PyTorchVersionCache(workspace_path)
-        cached = cache.get_versions(exact_py, backend)
-        if cached:
-            logger.debug(f"Using cached PyTorch versions for {exact_py}+{backend}")
-            return cached, backend
 
     # Create temp probe venv
     temp_dir = tempfile.mkdtemp(prefix=".comfygit-probe-")
@@ -141,16 +128,14 @@ def probe_pytorch_versions(
             )
 
         # 3. Parse output for package versions
-        versions, resolved_backend = _parse_dry_run_output(dry_run_result.stdout)
+        # uv writes dry-run output to stderr, so check both
+        output = dry_run_result.stdout or dry_run_result.stderr
+        versions, resolved_backend = _parse_dry_run_output(output)
 
         if not versions:
             raise PyTorchProbeError(
-                f"Could not parse PyTorch versions from dry-run output:\n{dry_run_result.stdout}"
+                f"Could not parse PyTorch versions from dry-run output:\n{output}"
             )
-
-        # 4. Cache results (use resolved backend, not "auto")
-        cache = PyTorchVersionCache(workspace_path)
-        cache.set_versions(exact_py, resolved_backend, versions)
 
         logger.info(f"Probed PyTorch: torch={versions.get('torch')}, backend={resolved_backend}")
 

@@ -99,6 +99,9 @@ def test_env(test_workspace):
     }
     env.pyproject.save(config)
 
+    # Create .pytorch-backend file for tests that need it
+    (cec_path / ".pytorch-backend").write_text("cu121")
+
     # Initialize git repo
     git_mgr = GitManager(cec_path)
     git_mgr.initialize_environment_repo("Initial test environment")
@@ -401,7 +404,7 @@ def mock_pytorch_probe(monkeypatch):
     This fixture mocks probe_pytorch_versions to return fake versions
     instead of actually probing with uv dry-run.
     """
-    def fake_probe_pytorch_versions(python_version, backend, workspace_path):
+    def fake_probe_pytorch_versions(python_version, backend):
         """Fake probe that returns mock versions without network."""
         # Resolve "auto" to a reasonable default
         resolved_backend = "cu128" if backend == "auto" else backend

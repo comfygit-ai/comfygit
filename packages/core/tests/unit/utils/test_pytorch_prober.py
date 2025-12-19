@@ -1,7 +1,5 @@
 """Tests for PyTorch version prober utilities."""
 
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -102,14 +100,7 @@ Would install 15 packages
 class TestProbePyTorchVersions:
     """Tests for probe_pytorch_versions function."""
 
-    @pytest.fixture
-    def temp_workspace(self):
-        """Create a temporary workspace directory."""
-        with TemporaryDirectory() as tmpdir:
-            workspace_path = Path(tmpdir)
-            yield workspace_path
-
-    def test_probe_returns_versions_and_backend(self, temp_workspace):
+    def test_probe_returns_versions_and_backend(self):
         """Should return tuple of (versions_dict, resolved_backend)."""
         from comfygit_core.utils.pytorch_prober import probe_pytorch_versions
 
@@ -134,7 +125,7 @@ Would install 30 packages
 
         with patch("comfygit_core.utils.pytorch_prober.run_command", side_effect=mock_run_command):
             with patch("shutil.rmtree"):  # Don't actually delete
-                versions, backend = probe_pytorch_versions("3.12.11", "cu128", temp_workspace)
+                versions, backend = probe_pytorch_versions("3.12.11", "cu128")
 
         assert "torch" in versions
         assert versions["torch"] == "2.9.1+cu128"
@@ -142,7 +133,7 @@ Would install 30 packages
         assert versions["torchaudio"] == "2.9.1+cu128"
         assert backend == "cu128"
 
-    def test_probe_with_auto_detects_backend(self, temp_workspace):
+    def test_probe_with_auto_detects_backend(self):
         """Probe with 'auto' should detect and return resolved backend."""
         from comfygit_core.utils.pytorch_prober import probe_pytorch_versions
 
@@ -167,76 +158,12 @@ Would install 30 packages
 
         with patch("comfygit_core.utils.pytorch_prober.run_command", side_effect=mock_run_command):
             with patch("shutil.rmtree"):
-                versions, backend = probe_pytorch_versions("3.12", "auto", temp_workspace)
+                versions, backend = probe_pytorch_versions("3.12", "auto")
 
         assert backend == "cu128"  # Auto-detected from version suffix
         assert versions["torch"] == "2.9.1+cu128"
 
-    def test_probe_updates_cache(self, temp_workspace):
-        """Probe should update the workspace cache with versions."""
-        from comfygit_core.utils.pytorch_prober import probe_pytorch_versions
-        from comfygit_core.caching.pytorch_version_cache import PyTorchVersionCache
-
-        def mock_run_command(cmd, *args, **kwargs):
-            result = MagicMock()
-            result.returncode = 0
-            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-
-            if "python find" in cmd_str:
-                result.stdout = "/path/to/cpython-3.12.11/bin/python"
-            elif "venv" in cmd_str:
-                result.stdout = "Created venv"
-            elif "pip install" in cmd_str and "--dry-run" in cmd_str:
-                result.stdout = """ + torch==2.9.1+cu128
- + torchvision==0.24.1+cu128
- + torchaudio==2.9.1+cu128
-"""
-            else:
-                result.stdout = ""
-            return result
-
-        with patch("comfygit_core.utils.pytorch_prober.run_command", side_effect=mock_run_command):
-            with patch("shutil.rmtree"):
-                probe_pytorch_versions("3.12", "cu128", temp_workspace)
-
-        # Cache should now have the versions
-        cache = PyTorchVersionCache(temp_workspace)
-        cached = cache.get_versions("3.12.11", "cu128")
-        assert cached is not None
-        assert cached["torch"] == "2.9.1+cu128"
-
-    def test_probe_uses_cache_for_non_auto(self, temp_workspace):
-        """For explicit backend, probe should check cache first."""
-        from comfygit_core.utils.pytorch_prober import probe_pytorch_versions
-        from comfygit_core.caching.pytorch_version_cache import PyTorchVersionCache
-
-        # Pre-populate cache
-        cache = PyTorchVersionCache(temp_workspace)
-        cache.set_versions("3.12.11", "cu128", {
-            "torch": "2.9.1+cu128",
-            "torchvision": "0.24.1+cu128",
-            "torchaudio": "2.9.1+cu128",
-        })
-
-        def mock_run_command(cmd, *args, **kwargs):
-            result = MagicMock()
-            result.returncode = 0
-            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
-
-            if "python find" in cmd_str:
-                result.stdout = "/path/to/cpython-3.12.11/bin/python"
-            else:
-                # Should not reach dry-run - cache hit
-                raise AssertionError("Should have used cache!")
-            return result
-
-        with patch("comfygit_core.utils.pytorch_prober.run_command", side_effect=mock_run_command):
-            versions, backend = probe_pytorch_versions("3.12", "cu128", temp_workspace)
-
-        assert versions["torch"] == "2.9.1+cu128"
-        assert backend == "cu128"
-
-    def test_probe_cleans_up_temp_dir(self, temp_workspace):
+    def test_probe_cleans_up_temp_dir(self):
         """Probe should clean up temporary venv directory."""
         from comfygit_core.utils.pytorch_prober import probe_pytorch_versions
 
@@ -262,6 +189,6 @@ Would install 30 packages
 
         with patch("comfygit_core.utils.pytorch_prober.run_command", side_effect=mock_run_command):
             with patch("shutil.rmtree", side_effect=mock_rmtree):
-                probe_pytorch_versions("3.12", "cu128", temp_workspace)
+                probe_pytorch_versions("3.12", "cu128")
 
         assert len(cleanup_called) > 0

@@ -360,7 +360,6 @@ class PyprojectManager:
     def pytorch_injection_context(
         self,
         pytorch_manager: PyTorchBackendManager,
-        python_version: str | None = None,
         backend_override: str | None = None,
     ):
         """Context manager that temporarily injects PyTorch config during sync.
@@ -369,12 +368,11 @@ class PyprojectManager:
         without persisting it to the tracked pyproject.toml.
 
         Usage:
-            with pyproject.pytorch_injection_context(pytorch_manager, python_version="3.12"):
+            with pyproject.pytorch_injection_context(pytorch_manager):
                 uv.sync_project()  # Sync happens with PyTorch config injected
 
         Args:
             pytorch_manager: PyTorchBackendManager instance for config generation
-            python_version: Python version for constraint lookup (enables version probing)
             backend_override: Override backend instead of reading from file (e.g., "cu128")
 
         Yields:
@@ -389,9 +387,9 @@ class PyprojectManager:
             effective_backend = backend_override or "unknown"
 
             try:
-                # Get PyTorch config from manager (with constraints if python_version provided)
+                # Get PyTorch config from manager
                 pytorch_config = pytorch_manager.get_pytorch_config(
-                    python_version, backend_override=backend_override
+                    backend_override=backend_override
                 )
 
                 # Load current config and inject PyTorch settings
