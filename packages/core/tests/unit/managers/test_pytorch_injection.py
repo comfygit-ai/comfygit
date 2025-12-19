@@ -158,6 +158,21 @@ class TestPyTorchInjectionContext:
             assert "pytorch-cpu" in content
             assert "/cpu" in content  # Should have cpu in URL path
 
+    def test_injection_with_backend_override(self, temp_env):
+        """Should use backend_override instead of file content when provided."""
+        # Backend file says cu128
+        temp_env["backend_file"].write_text("cu128")
+
+        pyproject = PyprojectManager(temp_env["pyproject_path"])
+        pytorch_manager = PyTorchBackendManager(temp_env["cec_path"])
+
+        # Override to cu126
+        with pyproject.pytorch_injection_context(pytorch_manager, backend_override="cu126"):
+            content = temp_env["pyproject_path"].read_text()
+            assert "pytorch-cu126" in content
+            assert "cu128" not in content  # Should NOT have original backend
+            assert "/cu126" in content  # Should have override backend in URL path
+
 
 class TestPyTorchInjectionEdgeCases:
     """Tests for edge cases in PyTorch injection."""
@@ -215,18 +230,19 @@ class TestPyTorchInjectionEdgeCases:
             assert "pypi" in index_names
             assert "pytorch-cu128" in index_names
 
-    def test_injection_without_backend_file_auto_detects(self, temp_env):
-        """Should auto-detect backend when .pytorch-backend file is missing."""
+    def test_injection_without_backend_file_raises_error(self, temp_env):
+        """Should raise ValueError when .pytorch-backend file is missing."""
         # Remove backend file
         temp_env["backend_file"].unlink()
 
         pyproject = PyprojectManager(temp_env["pyproject_path"])
         pytorch_manager = PyTorchBackendManager(temp_env["cec_path"])
 
-        with pyproject.pytorch_injection_context(pytorch_manager):
-            content = temp_env["pyproject_path"].read_text()
-            # Should have some pytorch config (likely cpu since no CUDA in test env)
-            assert "pytorch" in content.lower()
+        # get_backend() should raise ValueError when file is missing
+        # The error is raised inside the context manager initialization
+        with pytest.raises(ValueError):
+            with pyproject.pytorch_injection_context(pytorch_manager):
+                pass
 
 
 class TestSyncProjectWithPyTorchManager:

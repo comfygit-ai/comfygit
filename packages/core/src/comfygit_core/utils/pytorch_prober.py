@@ -1,12 +1,12 @@
-"""PyTorch version prober via temporary venv.
+"""PyTorch version prober via uv dry-run.
 
-Creates a temporary virtual environment to discover exact PyTorch versions
-for a given Python version and backend combination.
+Uses uv's --dry-run flag to discover exact PyTorch versions without
+actually installing packages. This is fast and leverages uv's built-in
+backend detection (CUDA, ROCm, CPU, etc.).
 """
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import tempfile
@@ -16,6 +16,9 @@ from ..logging.logging_config import get_logger
 from .common import run_command
 
 logger = get_logger(__name__)
+
+# Timeout for probe operations (seconds)
+PROBE_TIMEOUT = 60
 
 
 class PyTorchProbeError(Exception):
@@ -36,7 +39,6 @@ def get_exact_python_version(requested_version: str) -> str:
     Raises:
         PyTorchProbeError: If version cannot be determined
     """
-    # Use uv python find to get the interpreter path
     result = run_command(["uv", "python", "find", requested_version])
 
     if result.returncode != 0:
@@ -45,7 +47,6 @@ def get_exact_python_version(requested_version: str) -> str:
         )
 
     # Parse output - looks like: /path/to/cpython-3.12.11-linux.../bin/python3.12
-    # We need to extract the full 3-part version from the path
     output = result.stdout.strip()
 
     # Match cpython-X.Y.Z or python-X.Y.Z in path
@@ -67,35 +68,51 @@ def probe_pytorch_versions(
     python_version: str,
     backend: str,
     workspace_path: Path,
-) -> dict[str, str]:
-    """Probe PyTorch versions by creating temp venv and installing.
+) -> tuple[dict[str, str], str]:
+    """Probe PyTorch versions using uv dry-run.
 
-    Creates a temporary virtual environment, installs PyTorch packages,
-    extracts their versions, and caches the results.
+    Creates a temporary venv and uses `uv pip install --dry-run` with
+    `--torch-backend` to discover exact versions without installing.
 
     Args:
-        python_version: Exact Python version (e.g., "3.12.11")
-        backend: PyTorch backend (e.g., "cu128", "cpu")
+        python_version: Python version (e.g., "3.12" or "3.12.11")
+        backend: PyTorch backend ("auto", "cu128", "cpu", etc.)
         workspace_path: Path to workspace (for cache storage)
 
     Returns:
-        Dict mapping package name to version string:
-        {"torch": "2.9.1+cu128", "torchvision": "0.24.1+cu128", ...}
+        Tuple of (versions_dict, resolved_backend):
+        - versions_dict: {"torch": "2.9.1+cu128", "torchvision": "0.24.1+cu128", ...}
+        - resolved_backend: "cu128" (extracted from version suffix)
 
     Raises:
         PyTorchProbeError: If probing fails
     """
     from ..caching.pytorch_version_cache import PyTorchVersionCache
-    from .pytorch import get_pytorch_index_url
 
-    temp_dir = tempfile.mkdtemp(prefix=".comfygit-pytorch-probe-")
+    # Get exact Python version for consistent cache keys
+    try:
+        exact_py = get_exact_python_version(python_version)
+    except PyTorchProbeError:
+        exact_py = python_version  # Fall back to requested version
+
+    # For non-auto backends, check cache first
+    if backend != "auto":
+        cache = PyTorchVersionCache(workspace_path)
+        cached = cache.get_versions(exact_py, backend)
+        if cached:
+            logger.debug(f"Using cached PyTorch versions for {exact_py}+{backend}")
+            return cached, backend
+
+    # Create temp probe venv
+    temp_dir = tempfile.mkdtemp(prefix=".comfygit-probe-")
 
     try:
-        logger.info(f"Probing PyTorch versions for Python {python_version} + {backend}...")
+        logger.info(f"Probing PyTorch versions for Python {exact_py} + {backend}...")
 
-        # 1. Create venv with exact Python version
+        # 1. Create minimal venv
         venv_result = run_command(
-            ["uv", "venv", temp_dir, "--python", python_version]
+            ["uv", "venv", temp_dir, "--python", exact_py],
+            timeout=PROBE_TIMEOUT,
         )
 
         if venv_result.returncode != 0:
@@ -103,65 +120,77 @@ def probe_pytorch_versions(
                 f"Failed to create probe venv: {venv_result.stderr}"
             )
 
-        # 2. Install PyTorch packages from the backend index
-        index_url = get_pytorch_index_url(backend)
-
-        install_result = run_command(
+        # 2. Run dry-run install with --torch-backend
+        dry_run_result = run_command(
             [
-                "uv",
-                "pip",
-                "install",
+                "uv", "pip", "install",
+                "--dry-run",
+                "--reinstall-package", "torch",
+                "--reinstall-package", "torchvision",
+                "--reinstall-package", "torchaudio",
+                f"--torch-backend={backend}",
                 "--python", temp_dir,
-                "--index-url", index_url,
-                "torch",
-                "torchvision",
-                "torchaudio",
-            ]
+                "torch", "torchvision", "torchaudio",
+            ],
+            timeout=PROBE_TIMEOUT,
         )
 
-        if install_result.returncode != 0:
+        if dry_run_result.returncode != 0:
             raise PyTorchProbeError(
-                f"Failed to install PyTorch packages: {install_result.stderr}"
+                f"Dry-run probe failed: {dry_run_result.stderr}"
             )
 
-        # 3. Get installed package versions
-        list_result = run_command(
-            ["uv", "pip", "list", "--python", temp_dir, "--format=json"]
-        )
-
-        if list_result.returncode != 0:
-            raise PyTorchProbeError(
-                f"Failed to list packages: {list_result.stderr}"
-            )
-
-        # 4. Parse JSON output and append backend suffix
-        # uv pip list doesn't include local version suffix (+cuXXX), so we add it
-        packages = json.loads(list_result.stdout)
-        versions = {}
-
-        for pkg in packages:
-            name = pkg.get("name", "").lower()
-            if name in ("torch", "torchvision", "torchaudio"):
-                version = pkg.get("version", "")
-                # Append backend suffix if not already present
-                if version and "+" not in version:
-                    version = f"{version}+{backend}"
-                versions[name] = version
+        # 3. Parse output for package versions
+        versions, resolved_backend = _parse_dry_run_output(dry_run_result.stdout)
 
         if not versions:
-            raise PyTorchProbeError("No PyTorch packages found after install")
+            raise PyTorchProbeError(
+                f"Could not parse PyTorch versions from dry-run output:\n{dry_run_result.stdout}"
+            )
 
-        # 5. Cache the results
+        # 4. Cache results (use resolved backend, not "auto")
         cache = PyTorchVersionCache(workspace_path)
-        cache.set_versions(python_version, backend, versions)
+        cache.set_versions(exact_py, resolved_backend, versions)
 
-        logger.info(f"Probed PyTorch versions: torch={versions.get('torch')}")
+        logger.info(f"Probed PyTorch: torch={versions.get('torch')}, backend={resolved_backend}")
 
-        return versions
+        return versions, resolved_backend
 
     finally:
-        # 6. Clean up temp directory
+        # Clean up temp directory
         try:
             shutil.rmtree(temp_dir)
         except Exception as e:
-            logger.warning(f"Failed to clean up temp dir {temp_dir}: {e}")
+            logger.warning(f"Failed to clean up probe dir {temp_dir}: {e}")
+
+
+def _parse_dry_run_output(output: str) -> tuple[dict[str, str], str]:
+    """Parse uv pip install --dry-run output.
+
+    Looks for lines like:
+        + torch==2.9.1+cu128
+        + torchvision==0.24.1+cu128
+        + torchaudio==2.9.1+cu128
+
+    Args:
+        output: stdout from uv pip install --dry-run
+
+    Returns:
+        Tuple of (versions_dict, resolved_backend)
+    """
+    versions: dict[str, str] = {}
+    resolved_backend = "cpu"  # Default if no suffix found
+
+    # Pattern: " + package==version" or " + package==version+backend"
+    pattern = re.compile(r"^\s*\+\s+(torch(?:vision|audio)?)==(\S+)", re.MULTILINE)
+
+    for match in pattern.finditer(output):
+        package = match.group(1).lower()
+        version = match.group(2)
+        versions[package] = version
+
+        # Extract backend from first package with suffix
+        if "+" in version and resolved_backend == "cpu":
+            resolved_backend = version.split("+")[1]
+
+    return versions, resolved_backend

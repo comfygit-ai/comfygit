@@ -35,15 +35,25 @@ class TestPyTorchBackendManager:
         manager = PyTorchBackendManager(temp_cec)
         assert manager.get_backend() == "cu121"
 
-    def test_get_backend_auto_detects_when_file_missing(self, temp_cec):
-        """Should auto-detect backend when file doesn't exist."""
+    def test_get_backend_raises_when_file_missing(self, temp_cec):
+        """Should raise ValueError when file doesn't exist."""
         manager = PyTorchBackendManager(temp_cec)
-        backend = manager.get_backend()
 
-        # Should return a valid backend (auto-detected)
-        assert backend is not None
-        assert isinstance(backend, str)
-        assert len(backend) > 0
+        with pytest.raises(ValueError, match=".pytorch-backend"):
+            manager.get_backend()
+
+    def test_has_backend_false_when_missing(self, temp_cec):
+        """Should return False when .pytorch-backend file doesn't exist."""
+        manager = PyTorchBackendManager(temp_cec)
+        assert not manager.has_backend()
+
+    def test_has_backend_true_when_exists(self, temp_cec):
+        """Should return True when .pytorch-backend file exists."""
+        backend_file = temp_cec / ".pytorch-backend"
+        backend_file.write_text("cu128")
+
+        manager = PyTorchBackendManager(temp_cec)
+        assert manager.has_backend()
 
     def test_set_backend_writes_file(self, temp_cec):
         """Should write backend to .pytorch-backend file."""
@@ -63,16 +73,6 @@ class TestPyTorchBackendManager:
         manager.set_backend("cu128")
 
         assert backend_file.read_text() == "cu128"
-
-    def test_detect_backend_returns_cpu_on_no_cuda(self, temp_cec):
-        """Should return 'cpu' when no CUDA is available."""
-        manager = PyTorchBackendManager(temp_cec)
-        # In test environment without CUDA, should return cpu
-        backend = manager.detect_backend()
-
-        # Either cpu or a valid CUDA backend
-        assert backend is not None
-        assert isinstance(backend, str)
 
     def test_get_pytorch_config_includes_index(self, temp_cec):
         """Should generate config with PyTorch index."""

@@ -395,6 +395,42 @@ def mock_comfyui_clone(monkeypatch):
     return fake_clone_comfyui
 
 @pytest.fixture
+def mock_pytorch_probe(monkeypatch):
+    """Mock PyTorch probing to avoid network calls and actual venv creation.
+
+    This fixture mocks probe_pytorch_versions to return fake versions
+    instead of actually probing with uv dry-run.
+    """
+    def fake_probe_pytorch_versions(python_version, backend, workspace_path):
+        """Fake probe that returns mock versions without network."""
+        # Resolve "auto" to a reasonable default
+        resolved_backend = "cu128" if backend == "auto" else backend
+
+        # Return fake versions with the resolved backend suffix
+        if resolved_backend == "cpu":
+            versions = {
+                "torch": "2.5.1",
+                "torchvision": "0.20.1",
+                "torchaudio": "2.5.1",
+            }
+        else:
+            versions = {
+                "torch": f"2.5.1+{resolved_backend}",
+                "torchvision": f"0.20.1+{resolved_backend}",
+                "torchaudio": f"2.5.1+{resolved_backend}",
+            }
+
+        return versions, resolved_backend
+
+    monkeypatch.setattr(
+        "comfygit_core.utils.pytorch_prober.probe_pytorch_versions",
+        fake_probe_pytorch_versions
+    )
+
+    return fake_probe_pytorch_versions
+
+
+@pytest.fixture
 def mock_github_api(monkeypatch):
     """Mock GitHub API calls to avoid network requests."""
 

@@ -361,7 +361,11 @@ class EnvironmentCommands:
             # Sync before running (unless --no-sync)
             if not no_sync:
                 print(f"🔄 Syncing environment: {env.name}")
-                env.sync(preserve_workflows=True, remove_extra_nodes=False)
+                env.sync(
+                    preserve_workflows=True,
+                    remove_extra_nodes=False,
+                    backend_override=torch_backend_override,
+                )
 
             print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
             if comfyui_args:
@@ -410,6 +414,7 @@ class EnvironmentCommands:
                 model_strategy="skip",  # Sync command focuses on packages
                 remove_extra_nodes=False,  # Don't remove nodes, just sync
                 verbose=verbose,
+                backend_override=torch_backend_override,
             )
 
             if result.success:

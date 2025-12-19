@@ -36,7 +36,6 @@ from ..models.sync import SyncResult
 from ..strategies.confirmation import ConfirmationStrategy
 from ..utils.common import run_command
 from ..utils.filesystem import rmtree
-from ..utils.pytorch import extract_pip_show_package_version
 from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
@@ -290,7 +289,8 @@ class Environment:
         remove_extra_nodes: bool = True,
         sync_callbacks: SyncCallbacks | None = None,
         verbose: bool = False,
-        preserve_workflows: bool = False
+        preserve_workflows: bool = False,
+        backend_override: str | None = None,
     ) -> SyncResult:
         """Apply changes: sync packages, nodes, workflows, and models with environment.
 
@@ -304,6 +304,7 @@ class Environment:
             preserve_workflows: If True, preserve uncommitted workflows during restore.
                                Use True for runtime restarts (exit code 42) to keep user edits.
                                Use False (default) for git operations and repairs.
+            backend_override: Override PyTorch backend instead of reading from file (e.g., "cu128")
 
         Returns:
             SyncResult with details of what was synced
@@ -325,7 +326,8 @@ class Environment:
                 dry_run=dry_run,
                 callbacks=sync_callbacks,
                 verbose=verbose,
-                pytorch_manager=self.pytorch_manager
+                pytorch_manager=self.pytorch_manager,
+                backend_override=backend_override,
             )
             result.packages_synced = sync_result["packages_synced"]
             result.dependency_groups_installed.extend(sync_result["dependency_groups_installed"])
@@ -1879,49 +1881,30 @@ class Environment:
             self.pyproject.save(config)
             logger.info(f"Updated system-nodes deps: {', '.join(local_requirements)}")
 
-        # Phase 1.5: Create venv and optionally install PyTorch with specific backend
+        # Phase 1.5: Probe PyTorch and configure backend
         # Read Python version from .python-version file
         python_version_file = self.cec_path / ".python-version"
-        python_version = python_version_file.read_text(encoding='utf-8').strip() if python_version_file.exists() else None
+        python_version = python_version_file.read_text(encoding='utf-8').strip() if python_version_file.exists() else "3.12"
 
         if self.torch_backend:
-            if callbacks:
-                callbacks.on_phase("configure_pytorch", f"Configuring PyTorch backend: {self.torch_backend}")
-
             from ..managers.pytorch_backend_manager import PyTorchBackendManager
+
+            if callbacks:
+                callbacks.on_phase("probe_pytorch", "Detecting PyTorch backend...")
 
             # Migrate schema v1 environments (strips embedded PyTorch config)
             migrated = self.pyproject.migrate_pytorch_config()
             if migrated:
                 logger.info("Migrated imported environment to schema v2")
 
-            logger.info(f"Creating venv with Python {python_version}")
-            self.uv_manager.create_venv(self.venv_path, python_version=python_version, seed=True)
+            # Use dry-run probe to detect backend and cache versions
+            pytorch_manager = PyTorchBackendManager(self.cec_path, workspace_path=self.workspace_paths.root)
+            resolved_backend = pytorch_manager.probe_and_set_backend(python_version, self.torch_backend)
 
-            logger.info(f"Installing PyTorch with backend: {self.torch_backend}")
-            self.uv_manager.install_packages(
-                packages=["torch", "torchvision", "torchaudio"],
-                python=self.uv_manager.python_executable,
-                torch_backend=self.torch_backend,
-                verbose=True
-            )
-
-            # Detect installed backend and write to .pytorch-backend file
-            from ..utils.pytorch import extract_backend_from_version
-
-            first_version = extract_pip_show_package_version(
-                self.uv_manager.show_package("torch", self.uv_manager.python_executable)
-            )
-
-            if first_version:
-                backend = extract_backend_from_version(first_version)
-                logger.info(f"Detected PyTorch backend from installed version: {backend}")
-
-                # Write resolved backend to .pytorch-backend (not tracked in git)
-                if backend:
-                    pytorch_manager = PyTorchBackendManager(self.cec_path)
-                    pytorch_manager.set_backend(backend)
-                    logger.info(f"Saved PyTorch backend to .pytorch-backend: {backend}")
+            if self.torch_backend == "auto":
+                logger.info(f"PyTorch backend: auto-detected as {resolved_backend}")
+            else:
+                logger.info(f"PyTorch backend: {resolved_backend}")
 
         # Phase 2: Setup git repository
         # For git imports: .git already exists with remote, just ensure gitignore

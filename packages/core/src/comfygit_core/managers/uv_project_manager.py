@@ -165,6 +165,7 @@ class UVProjectManager:
         verbose: bool = False,
         pytorch_manager: PyTorchBackendManager | None = None,
         python_version: str | None = None,
+        backend_override: str | None = None,
         **flags
     ) -> str:
         """Sync project dependencies.
@@ -177,6 +178,7 @@ class UVProjectManager:
                             Also forces reinstall of PyTorch packages to ensure correct backend.
             python_version: Python version for PyTorch constraint probing (e.g., "3.12").
                            If not provided, extracted from pyproject.toml [tool.comfygit]
+            backend_override: Override PyTorch backend instead of reading from file (e.g., "cu128")
             **flags: Additional uv sync flags
 
         Returns:
@@ -199,7 +201,9 @@ class UVProjectManager:
                     pass  # If we can't read it, proceed without constraints
 
             # Use PyprojectManager's injection context (from Phase 2)
-            with self.pyproject.pytorch_injection_context(pytorch_manager, effective_python_version):
+            with self.pyproject.pytorch_injection_context(
+                pytorch_manager, effective_python_version, backend_override=backend_override
+            ):
                 result = self.uv.sync(verbose=verbose, **flags)
                 return result.stdout
         else:
@@ -509,7 +513,8 @@ class UVProjectManager:
         dry_run: bool = False,
         callbacks = None,
         verbose: bool = False,
-        pytorch_manager: PyTorchBackendManager | None = None
+        pytorch_manager: PyTorchBackendManager | None = None,
+        backend_override: str | None = None,
     ) -> dict:
         """Install dependencies progressively with graceful optional group handling.
 
@@ -528,6 +533,7 @@ class UVProjectManager:
             callbacks: Optional callbacks for progress reporting
             verbose: If True, show uv output in real-time
             pytorch_manager: Optional PyTorch backend manager for temporary injection
+            backend_override: Override PyTorch backend instead of reading from file (e.g., "cu128")
 
         Returns:
             Dict with keys:
@@ -561,7 +567,8 @@ class UVProjectManager:
                         group=group_list,
                         dry_run=dry_run,
                         verbose=verbose,
-                        pytorch_manager=pytorch_manager
+                        pytorch_manager=pytorch_manager,
+                        backend_override=backend_override,
                     )
 
                     # Track successful installations
@@ -573,7 +580,8 @@ class UVProjectManager:
                         dry_run=dry_run,
                         no_default_groups=True,
                         verbose=verbose,
-                        pytorch_manager=pytorch_manager
+                        pytorch_manager=pytorch_manager,
+                        backend_override=backend_override,
                     )
 
                 result["packages_synced"] = True

@@ -386,7 +386,7 @@ class TestEnvironmentFactorySystemNodeDeps:
     """Tests for EnvironmentFactory including system node deps in pyproject.toml."""
 
     def test_create_environment_includes_system_node_deps_in_dependency_group(
-        self, test_workspace, mock_comfyui_clone, mock_github_api
+        self, test_workspace, mock_comfyui_clone, mock_github_api, mock_pytorch_probe
     ):
         """Created environment should have system-nodes dependency group."""
         # Create system node with dependencies
@@ -426,7 +426,7 @@ dependencies = [
         assert "watchdog>=6.0.0" in system_deps
 
     def test_create_environment_includes_schema_version(
-        self, test_workspace, mock_comfyui_clone, mock_github_api
+        self, test_workspace, mock_comfyui_clone, mock_github_api, mock_pytorch_probe
     ):
         """Created environment should have schema_version in tool.comfygit."""
         from comfygit_core.constants import PYPROJECT_SCHEMA_VERSION
@@ -448,7 +448,7 @@ class TestFinalizeImportSystemNodeDeps:
     """Tests for finalize_import reconciling system node deps."""
 
     def test_finalize_import_updates_system_nodes_dependency_group(
-        self, test_workspace, mock_comfyui_clone, mock_github_api
+        self, test_workspace, mock_comfyui_clone, mock_github_api, mock_pytorch_probe
     ):
         """finalize_import should update system-nodes group from local workspace."""
 

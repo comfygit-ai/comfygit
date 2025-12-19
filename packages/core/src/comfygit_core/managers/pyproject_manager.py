@@ -361,6 +361,7 @@ class PyprojectManager:
         self,
         pytorch_manager: PyTorchBackendManager,
         python_version: str | None = None,
+        backend_override: str | None = None,
     ):
         """Context manager that temporarily injects PyTorch config during sync.
 
@@ -374,6 +375,7 @@ class PyprojectManager:
         Args:
             pytorch_manager: PyTorchBackendManager instance for config generation
             python_version: Python version for constraint lookup (enables version probing)
+            backend_override: Override backend instead of reading from file (e.g., "cu128")
 
         Yields:
             None - the context manager just handles inject/restore
@@ -384,24 +386,28 @@ class PyprojectManager:
         def _injection_context():
             # Capture original content before any modifications
             original_content = self.path.read_text()
+            effective_backend = backend_override or "unknown"
 
             try:
                 # Get PyTorch config from manager (with constraints if python_version provided)
-                pytorch_config = pytorch_manager.get_pytorch_config(python_version)
+                pytorch_config = pytorch_manager.get_pytorch_config(
+                    python_version, backend_override=backend_override
+                )
 
                 # Load current config and inject PyTorch settings
                 config = self.load()
                 self._inject_pytorch_config(config, pytorch_config)
                 self.save(config)
 
-                logger.debug(f"Injected PyTorch config for backend: {pytorch_manager.get_backend()}")
+                effective_backend = backend_override or pytorch_manager.get_backend()
+                logger.debug(f"Injected PyTorch config for backend: {effective_backend}")
 
                 yield
 
             except Exception:
                 # Log full injected config for debugging on failure
                 logger.error("=== PyTorch Sync Failure ===")
-                logger.error(f"Backend: {pytorch_manager.get_backend()}")
+                logger.error(f"Backend: {effective_backend}")
                 try:
                     logger.error(f"Injected config:\n{self.path.read_text()}")
                 except Exception:
