@@ -8,10 +8,9 @@ This tests the refined behavior where:
 """
 
 import argparse
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 from comfygit_cli.cli import create_parser
 
 
@@ -189,15 +188,16 @@ class TestSyncBehavior:
         mock_env.pytorch_manager.set_backend.assert_not_called()
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
-    def test_sync_warns_when_no_backend_file(self, mock_get_workspace, capsys):
+    def test_sync_warns_when_no_backend_file(self, mock_get_workspace, capsys, tmp_path):
         """Sync should warn user when .pytorch-backend file doesn't exist."""
         from comfygit_cli.env_commands import EnvironmentCommands
 
-        # Setup mocks - no backend file
+        # Setup mocks - no backend file (has_backend returns False)
         mock_env = MagicMock()
         mock_env.name = "test-env"
-        mock_env.pytorch_manager.backend_file.exists.return_value = False
-        mock_env.pytorch_manager.get_backend.return_value = "cu126"  # Auto-detected
+        mock_env.cec_path = tmp_path  # For .python-version file check
+        mock_env.pytorch_manager.has_backend.return_value = False  # Key fix: mock has_backend()
+        mock_env.pytorch_manager.probe_and_set_backend.return_value = "cu126"  # Auto-detected
         mock_env.sync.return_value = MagicMock(success=True, packages_synced=0, dependency_groups_installed=[], errors=[])
 
         mock_workspace = MagicMock()

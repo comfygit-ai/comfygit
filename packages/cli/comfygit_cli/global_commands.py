@@ -94,7 +94,6 @@ class GlobalCommands:
         - uv_cache/ for package management
         - environments/ for ComfyUI environments
         """
-        from pathlib import Path
 
         # Validate models directory if provided (before creating workspace)
         explicit_models_dir = getattr(args, 'models_dir', None)
@@ -193,7 +192,7 @@ class GlobalCommands:
                 logger.info(f"Installed system node: {node_name}")
             except Exception as e:
                 print(f"   ⚠️  Failed to install {node_name}: {e}")
-                print(f"   You can install it manually later")
+                print("   You can install it manually later")
                 logger.warning(f"Failed to install system node {node_name}: {e}")
 
     def _show_workspace_env_setup(self, workspace_path: Path) -> None:
@@ -231,8 +230,7 @@ class GlobalCommands:
             args: CLI arguments containing models_dir and yes flags
         """
         from pathlib import Path
-        from comfygit_cli.utils.progress import create_model_sync_progress
-        from comfygit_core.utils.common import format_size
+
 
         # Check for explicit flags
         use_interactive = not getattr(args, 'yes', False)
@@ -256,7 +254,7 @@ class GlobalCommands:
         print("\nOptions:")
         print("  1. Point to an existing ComfyUI models directory (recommended)")
         print("     → Access all your existing models immediately")
-        print(f"     → Example: ~/ComfyUI/models")
+        print("     → Example: ~/ComfyUI/models")
         print("\n  2. Use the default empty directory")
         print(f"     → ComfyGit created: {workspace.paths.models}")
         print("     → Download models as needed later")
@@ -296,7 +294,7 @@ class GlobalCommands:
                 # Auto-detect if they entered ComfyUI root instead of models subdir
                 if (models_path / "models").exists() and models_path.name != "models":
                     print(f"\n⚠️  Detected ComfyUI installation at: {models_path}")
-                    use_subdir = input(f"Use models/ subdirectory instead? (Y/n): ").strip().lower()
+                    use_subdir = input("Use models/ subdirectory instead? (Y/n): ").strip().lower()
                     if use_subdir != 'n':
                         models_path = models_path / "models"
                         print(f"Using: {models_path}")
@@ -322,8 +320,9 @@ class GlobalCommands:
             workspace: The workspace instance
             models_path: Path to the models directory to scan
         """
-        from comfygit_cli.utils.progress import create_model_sync_progress
         from comfygit_core.utils.common import format_size
+
+        from comfygit_cli.utils.progress import create_model_sync_progress
 
         try:
             progress = create_model_sync_progress()
@@ -404,7 +403,7 @@ class GlobalCommands:
 
         # Read log lines
         try:
-            with open(log_file, 'r', encoding='utf-8') as f:
+            with open(log_file, encoding='utf-8') as f:
                 lines = f.readlines()
         except Exception as e:
             print(f"✗ Failed to read log file: {e}", file=sys.stderr)
@@ -453,9 +452,9 @@ class GlobalCommands:
             for line in record:
                 print(line.rstrip())
 
-        print(f"\n=== End of logs ===")
+        print("\n=== End of logs ===")
         if not args.full and len(records) == args.lines:
-            print(f"Tip: Use --full to see all logs, or increase --lines to see more")
+            print("Tip: Use --full to see all logs, or increase --lines to see more")
 
     @with_workspace_logging("migrate")
     def migrate(self, args: argparse.Namespace) -> None:
@@ -1519,10 +1518,10 @@ class GlobalCommands:
     def orch_status(self, args: argparse.Namespace) -> None:
         """Show orchestrator status."""
         from .utils.orchestrator import (
+            format_uptime,
+            get_orchestrator_uptime,
             is_orchestrator_running,
             read_switch_status,
-            get_orchestrator_uptime,
-            format_uptime
         )
 
         metadata_dir = self.workspace.path / ".metadata"
@@ -1578,7 +1577,7 @@ class GlobalCommands:
             try:
                 port = control_port_file.read_text().strip()
                 print(f"Control Port:   {port}")
-            except IOError:
+            except OSError:
                 pass
 
         # Check switch status
@@ -1605,6 +1604,7 @@ class GlobalCommands:
     def orch_restart(self, args: argparse.Namespace) -> None:
         """Request orchestrator to restart ComfyUI."""
         import time
+
         from .utils.orchestrator import is_orchestrator_running, safe_write_command
 
         metadata_dir = self.workspace.path / ".metadata"
@@ -1643,11 +1643,12 @@ class GlobalCommands:
     def orch_kill(self, args: argparse.Namespace) -> None:
         """Shutdown orchestrator."""
         import time
+
         from .utils.orchestrator import (
             is_orchestrator_running,
-            safe_write_command,
             kill_orchestrator_process,
-            read_switch_status
+            read_switch_status,
+            safe_write_command,
         )
 
         metadata_dir = self.workspace.path / ".metadata"
@@ -1701,9 +1702,9 @@ class GlobalCommands:
     def orch_clean(self, args: argparse.Namespace) -> None:
         """Clean orchestrator state files."""
         from .utils.orchestrator import (
+            cleanup_orchestrator_state,
             is_orchestrator_running,
             kill_orchestrator_process,
-            cleanup_orchestrator_state
         )
 
         metadata_dir = self.workspace.path / ".metadata"
@@ -1742,7 +1743,7 @@ class GlobalCommands:
             print("\nNote: workspace_config.json will be preserved")
 
             if args.kill:
-                print(f"\n⚠️  --kill flag: Will also terminate orchestrator process")
+                print("\n⚠️  --kill flag: Will also terminate orchestrator process")
 
             response = input("\nContinue? [y/N]: ").strip().lower()
             if response not in ['y', 'yes']:
@@ -1784,6 +1785,7 @@ class GlobalCommands:
     def orch_logs(self, args: argparse.Namespace) -> None:
         """Show orchestrator logs."""
         import subprocess
+
         from .utils.orchestrator import tail_log_file
 
         metadata_dir = self.workspace.path / ".metadata"
@@ -1809,68 +1811,3 @@ class GlobalCommands:
             else:
                 print("(empty log file)")
 
-    # -------------------------------------------------------------------------
-    # PyTorch Cache Commands
-    # -------------------------------------------------------------------------
-
-    @with_workspace_logging("pytorch-cache show")
-    def pytorch_cache_show(self, args: argparse.Namespace) -> None:
-        """Show cached PyTorch versions."""
-        from comfygit_core.caching.pytorch_version_cache import PyTorchVersionCache
-
-        cache = PyTorchVersionCache(self.workspace.path)
-        entries = cache.get_all_entries()
-
-        if not entries:
-            print("No cached PyTorch versions found.")
-            print("\nVersions are cached when you first run 'cg sync' with --torch-backend")
-            print("or when using 'cg env-config torch-backend set <backend>'")
-            return
-
-        print(f"PyTorch Version Cache ({cache.cache_file})\n")
-
-        # Group by Python version
-        by_python: dict[str, list[dict]] = {}
-        for entry in entries:
-            py_ver = entry["python_version"]
-            if py_ver not in by_python:
-                by_python[py_ver] = []
-            by_python[py_ver].append(entry)
-
-        for py_ver in sorted(by_python.keys(), reverse=True):
-            print(f"Python {py_ver}:")
-            for entry in sorted(by_python[py_ver], key=lambda e: e["backend"]):
-                backend = entry["backend"]
-                versions = entry["versions"]
-                discovered = entry.get("discovered", "")
-
-                print(f"  + {backend}:")
-                for pkg, ver in sorted(versions.items()):
-                    print(f"      {pkg}=={ver}")
-
-                if discovered:
-                    # Parse and format timestamp
-                    try:
-                        from datetime import datetime
-                        dt = datetime.fromisoformat(discovered.replace("Z", "+00:00"))
-                        print(f"      (discovered: {dt.strftime('%Y-%m-%d %H:%M')})")
-                    except Exception:
-                        pass
-            print()
-
-    @with_workspace_logging("pytorch-cache clear")
-    def pytorch_cache_clear(self, args: argparse.Namespace) -> None:
-        """Clear cached PyTorch versions."""
-        from comfygit_core.caching.pytorch_version_cache import PyTorchVersionCache
-
-        cache = PyTorchVersionCache(self.workspace.path)
-        backend = getattr(args, 'backend', None)
-
-        if backend:
-            cache.clear_backend(backend)
-            print(f"✓ Cleared cached PyTorch versions for backend: {backend}")
-        else:
-            cache.clear_all()
-            print("✓ Cleared all cached PyTorch versions")
-
-        print("\nNext 'cg sync' will probe for fresh PyTorch versions.")
