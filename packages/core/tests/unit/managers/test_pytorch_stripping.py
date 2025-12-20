@@ -452,3 +452,113 @@ class TestMigrateFromConstraintDependencies:
         # Assert: schema_version now set to 2
         config = pyproject.load()
         assert config["tool"]["comfygit"]["schema_version"] == 2
+
+
+class TestStripPytorchConfigOutOfOrderTables:
+    """Tests for stripping PyTorch config with out-of-order TOML tables.
+
+    When pyproject.toml has split [tool.uv] sections (e.g., sources at top,
+    more sources at bottom), tomlkit uses OutOfOrderTableProxy which has
+    different behavior than regular Container when deleting keys.
+    """
+
+    @pytest.fixture
+    def pyproject_with_out_of_order_tables(self):
+        """Create pyproject.toml with out-of-order tool.uv sections.
+
+        This reproduces the real-world structure where:
+        - [[tool.uv.index]] is defined with AoT syntax
+        - [tool.uv.sources.torch] etc are defined
+        - Later, [tool.uv.sources.comfygit-core] is added separately
+
+        This causes tomlkit to use OutOfOrderTableProxy.
+        """
+        with TemporaryDirectory() as tmpdir:
+            cec_path = Path(tmpdir) / ".cec"
+            cec_path.mkdir()
+            pyproject_path = cec_path / "pyproject.toml"
+
+            # Write TOML as string to preserve exact structure with AoT
+            content = '''[project]
+name = "comfygit-env-test"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["torch", "torchvision", "torchaudio"]
+
+[tool.comfygit]
+comfyui_version = "v0.3.75"
+python_version = "3.12"
+
+[tool.uv]
+constraint-dependencies = ["torch==2.9.1+cu129", "torchvision==0.24.1+cu129", "torchaudio==2.9.1+cu129"]
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[tool.uv.sources.torch]
+index = "pytorch-cu129"
+
+[tool.uv.sources.torchvision]
+index = "pytorch-cu129"
+
+[tool.uv.sources.torchaudio]
+index = "pytorch-cu129"
+
+[dependency-groups]
+system-nodes = ["comfygit-core>=0.3.5"]
+
+[tool.uv.sources.comfygit-core]
+path = "/path/to/local/core"
+editable = true
+'''
+            pyproject_path.write_text(content)
+
+            yield {"cec_path": cec_path, "pyproject_path": pyproject_path}
+
+    def test_strip_handles_out_of_order_aot_tables(self, pyproject_with_out_of_order_tables):
+        """Should not crash when stripping PyTorch config from out-of-order tables.
+
+        Bug: When pyproject.toml has [[tool.uv.index]] (AoT syntax) and out-of-order
+        [tool.uv.sources] sections, tomlkit uses OutOfOrderTableProxy. After filtering
+        the AoT to an empty list and reassigning, `del uv_config['index']` raises
+        NonExistentKey even though `'index' in uv_config` returns True.
+        """
+        pyproject = PyprojectManager(pyproject_with_out_of_order_tables["pyproject_path"])
+
+        # This should NOT raise NonExistentKey
+        pyproject.strip_pytorch_config()
+
+        # Assert: PyTorch config is stripped
+        config = pyproject.load()
+        uv_config = config.get("tool", {}).get("uv", {})
+
+        # Index should be gone (was only pytorch-cu129)
+        assert "index" not in uv_config or len(uv_config.get("index", [])) == 0
+
+        # PyTorch sources should be gone
+        sources = uv_config.get("sources", {})
+        assert "torch" not in sources
+        assert "torchvision" not in sources
+        assert "torchaudio" not in sources
+
+        # Non-PyTorch source should remain
+        assert "comfygit-core" in sources
+
+        # PyTorch constraints should be gone
+        constraints = uv_config.get("constraint-dependencies", [])
+        assert not any("torch" in c for c in constraints)
+
+    def test_migrate_handles_out_of_order_aot_tables(self, pyproject_with_out_of_order_tables):
+        """Migration should work with out-of-order TOML tables."""
+        pyproject = PyprojectManager(pyproject_with_out_of_order_tables["pyproject_path"])
+
+        # This should NOT raise NonExistentKey
+        result = pyproject.migrate_pytorch_config()
+
+        assert result is True
+
+        # Verify schema version updated
+        config = pyproject.load()
+        assert config["tool"]["comfygit"]["schema_version"] == 2

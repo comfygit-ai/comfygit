@@ -182,11 +182,14 @@ class PyTorchBackendManager:
     def get_pytorch_config(
         self,
         backend_override: str | None = None,
+        python_version: str | None = None,
     ) -> dict:
         """Generate PyTorch uv config for current backend.
 
         Args:
             backend_override: Override backend instead of reading from file (e.g., "cu128")
+            python_version: Python version for probing (e.g., "3.12"). Required when
+                           using backend_override to probe correct wheel versions.
 
         Returns dict with:
             - indexes: List of index configs (name, url, explicit)
@@ -206,9 +209,20 @@ class PyTorchBackendManager:
         for package in PYTORCH_CORE_PACKAGES:
             sources[package] = {"index": index_name}
 
-        # Generate constraints from stored versions (only when not overriding)
+        # Generate constraints
         constraints: list[str] = []
-        if not backend_override:
+        if backend_override and python_version:
+            # Probe versions for the override backend to get correct wheel versions
+            from ..utils.pytorch_prober import probe_pytorch_versions
+            versions, _ = probe_pytorch_versions(python_version, backend_override)
+            constraints = [
+                f"{pkg}=={version}"
+                for pkg, version in versions.items()
+                if pkg in PYTORCH_CORE_PACKAGES
+            ]
+            logger.info(f"Probed versions for backend override {backend_override}: {constraints}")
+        elif not backend_override:
+            # Use stored versions from .pytorch-backend file
             versions = self.get_versions()
             constraints = [
                 f"{pkg}=={version}"

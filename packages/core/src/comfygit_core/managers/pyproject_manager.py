@@ -387,9 +387,14 @@ class PyprojectManager:
             effective_backend = backend_override or "unknown"
 
             try:
+                # Extract python_version from pyproject for probing
+                config = self.load()
+                python_version = config.get("tool", {}).get("comfygit", {}).get("python_version")
+
                 # Get PyTorch config from manager
                 pytorch_config = pytorch_manager.get_pytorch_config(
-                    backend_override=backend_override
+                    backend_override=backend_override,
+                    python_version=python_version,
                 )
 
                 # Load current config and inject PyTorch settings
@@ -446,6 +451,15 @@ class PyprojectManager:
         if 'tool' in config and 'uv' in config['tool']:
             uv_config = config['tool']['uv']
 
+            # Helper to safely delete keys from tomlkit containers
+            # OutOfOrderTableProxy can raise NonExistentKey even when key appears present
+            def safe_del(container: dict, key: str) -> None:
+                try:
+                    del container[key]
+                except (KeyError, Exception):
+                    # tomlkit.exceptions.NonExistentKey or similar
+                    pass
+
             # Remove PyTorch indexes
             if 'index' in uv_config:
                 indexes = uv_config['index']
@@ -455,14 +469,14 @@ class PyprojectManager:
                         if 'pytorch' not in idx.get('name', '').lower()
                     ]
                     if not uv_config['index']:
-                        del uv_config['index']
+                        safe_del(uv_config, 'index')
 
             # Remove PyTorch sources
             if 'sources' in uv_config:
                 for pkg in PYTORCH_CORE_PACKAGES:
                     uv_config['sources'].pop(pkg, None)
                 if not uv_config['sources']:
-                    del uv_config['sources']
+                    safe_del(uv_config, 'sources')
 
             # Remove PyTorch constraints
             if 'constraint-dependencies' in uv_config:
@@ -472,11 +486,11 @@ class PyprojectManager:
                     if not any(pkg in c.lower() for pkg in PYTORCH_CORE_PACKAGES)
                 ]
                 if not uv_config['constraint-dependencies']:
-                    del uv_config['constraint-dependencies']
+                    safe_del(uv_config, 'constraint-dependencies')
 
             # Clean up empty uv section
             if not uv_config:
-                del config['tool']['uv']
+                safe_del(config['tool'], 'uv')
 
         self.save(config)
         logger.debug("Stripped PyTorch config from pyproject.toml")

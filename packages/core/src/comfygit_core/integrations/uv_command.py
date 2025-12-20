@@ -130,6 +130,7 @@ class UVCommand:
             'no_default_groups': '--no-default-groups',
             'seed': '--seed',
             'upgrade': '--upgrade',
+            'upgrade_package': '--upgrade-package',
             'no_install_project': '--no-install-project',
             'no_deps': '--no-deps',
             'compile_bytecode': '--compile-bytecode',

@@ -188,7 +188,15 @@ class UVProjectManager:
             # Without this, uv may skip reinstall if torch is already installed
             flags['reinstall_package'] = list(PYTORCH_CORE_PACKAGES)
 
-            # Auto-extract python_version from pyproject.toml if not provided
+            # When overriding backend, delete uv.lock to force complete re-resolution.
+            # The lock file contains platform-specific PyTorch wheel pins that won't
+            # work when switching backends (e.g., cu128 -> cpu has different wheels).
+            if backend_override:
+                lock_file = self.pyproject.path.parent / "uv.lock"
+                if lock_file.exists():
+                    lock_file.unlink()
+                    logger.info(f"Deleted uv.lock for backend override to {backend_override}")
+
             # Use PyprojectManager's injection context
             with self.pyproject.pytorch_injection_context(
                 pytorch_manager, backend_override=backend_override
