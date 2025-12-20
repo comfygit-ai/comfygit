@@ -196,6 +196,9 @@ class PyTorchBackendManager:
             - sources: Dict mapping package names to index names
             - constraints: List of version constraints (e.g., ["torch==2.9.1+cu128"])
 
+        Note: PyPI's Linux wheels include CUDA, so we always use PyTorch's index
+        for all backends (including CPU) to get the correct wheel variants.
+
         Returns:
             Configuration dict for PyTorch packages
         """
@@ -204,8 +207,6 @@ class PyTorchBackendManager:
         index_name = f"pytorch-{backend}"
 
         sources: dict[str, dict[str, str]] = {}
-
-        # Map all PyTorch core packages to the index
         for package in PYTORCH_CORE_PACKAGES:
             sources[package] = {"index": index_name}
 

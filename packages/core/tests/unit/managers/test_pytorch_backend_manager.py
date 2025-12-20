@@ -158,7 +158,7 @@ class TestPyTorchBackendManager:
         manager = PyTorchBackendManager(temp_cec)
         config = manager.get_pytorch_config()
 
-        # CPU should have an index URL too
+        # CPU should have an index URL (PyPI's Linux wheels include CUDA)
         assert "indexes" in config
         assert any("cpu" in idx.get("url", "") for idx in config["indexes"])
 
@@ -205,9 +205,10 @@ class TestPyTorchBackendManager:
         manager = PyTorchBackendManager(temp_cec)
         config = manager.get_pytorch_config(backend_override="cpu")
 
-        # Override should produce empty constraints (fresh probe needed)
+        # Override should produce empty constraints (no stored versions used)
+        # but when python_version is not provided, probing is skipped
         assert config["constraints"] == []
-        # But should use the override backend for index URL
+        # Should use the override backend for index URL
         assert any("cpu" in idx.get("url", "") for idx in config["indexes"])
 
 
