@@ -66,6 +66,9 @@ __pycache__/
 
 # PyTorch backend configuration (machine-specific)
 .pytorch-backend
+
+# Lock file (machine-specific due to PyTorch platform variants)
+uv.lock
 """
 
     def ensure_git_identity(self) -> None:

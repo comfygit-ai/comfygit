@@ -279,8 +279,10 @@ class Environment:
             import sys
             print("📦 Migrated environment to schema v2 (stripped embedded PyTorch config)", file=sys.stderr)
 
-        # Always ensure .pytorch-backend is in .gitignore (handles pulls from older remotes)
+        # Always ensure .pytorch-backend and uv.lock are in .gitignore (handles pulls from older remotes)
         self.pytorch_manager._ensure_gitignore_entry()
+        self.git_manager.ensure_gitignore_entry("uv.lock")
+        self._untrack_uvlock_if_tracked()
 
         return migrated
 
@@ -584,11 +586,7 @@ class Environment:
         from ..models.exceptions import CDEnvironmentError
         from ..utils.git import git_reset_hard, git_rev_parse
 
-        # Clean up regenerated uv.lock before checking for real uncommitted changes
-        # (uv.lock gets regenerated after branch switch and would block the pull)
-        self._cleanup_uvlock_for_git_operation()
-
-        # Check for uncommitted changes (now excluding uv.lock)
+        # Check for uncommitted changes
         if self.git_manager.has_uncommitted_changes():
             if force:
                 # Force mode: discard uncommitted changes
@@ -900,9 +898,6 @@ class Environment:
             node_conflicts=validation.conflicts,
             is_compatible=validation.is_compatible,
         )
-
-        # Remove uv.lock if it would block the merge
-        self.git_orchestrator._cleanup_uvlock_before_git_operation()
 
         # Execute atomic merge
         executor = AtomicMergeExecutor(
@@ -2067,34 +2062,21 @@ class Environment:
                 del sources[pkg_name]
             self.pyproject.save(config)
 
-    def _cleanup_uvlock_for_git_operation(self) -> None:
-        """Remove uv.lock if it would block a git operation.
+    def _untrack_uvlock_if_tracked(self) -> None:
+        """Untrack uv.lock if it was previously tracked in git.
 
-        After branch switch, uv.sync_project() regenerates uv.lock which can
-        differ from the committed version. This creates phantom "dirty" state
-        that blocks merge/pull operations. Since uv.lock gets regenerated
-        after every git operation anyway, we can safely remove it before
-        merge/pull to prevent blocking.
+        uv.lock is now gitignored (platform-specific PyTorch variants).
+        For existing environments where it was tracked, untrack it.
         """
-        from ..utils.git import _git, get_uncommitted_changes
+        from ..utils.git import _git
 
-        uvlock_path = self.cec_path / "uv.lock"
-        if not uvlock_path.exists():
-            return
-
-        # Check if uv.lock is modified (staged or unstaged)
-        changes = get_uncommitted_changes(self.cec_path)
-        if "uv.lock" in changes:
-            logger.debug("Removing regenerated uv.lock before git operation")
-            uvlock_path.unlink()
-            return
-
-        # Check for untracked uv.lock
+        # Check if uv.lock is tracked
         result = _git(
-            ["ls-files", "--others", "--exclude-standard", "uv.lock"],
+            ["ls-files", "uv.lock"],
             self.cec_path,
             check=False
         )
         if result.stdout.strip() == "uv.lock":
-            logger.debug("Removing untracked uv.lock before git operation")
-            uvlock_path.unlink()
+            # Untrack without deleting the file
+            _git(["rm", "--cached", "uv.lock"], self.cec_path, check=False)
+            logger.info("Untracked uv.lock (now gitignored)")
