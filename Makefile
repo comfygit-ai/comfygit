@@ -176,17 +176,19 @@ check-versions:
 	@python3 dev/scripts/check-versions.py
 
 # Bump version for coordinated release (lockstep versioning)
+# Supports PEP 440 versions: X.Y.Z, X.Y.Z.devN, X.Y.ZaN, X.Y.ZbN, X.Y.ZrcN
 bump-version:
 	@if [ -z "$(VERSION)" ]; then \
-		echo "Usage: make bump-version VERSION=0.1.0"; \
+		echo "Usage: make bump-version VERSION=0.3.8"; \
+		echo "       make bump-version VERSION=0.3.8.dev1"; \
 		exit 1; \
 	fi
 	@echo "Bumping all packages to version $(VERSION) (lockstep)..."
-	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION)"/' packages/core/pyproject.toml
-	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION)"/' packages/cli/pyproject.toml
-	@sed -i 's/comfygit-core==[0-9]\+\.[0-9]\+\.[0-9]\+/comfygit-core==$(VERSION)/' packages/cli/pyproject.toml
-	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION)"/' packages/deploy/pyproject.toml
-	@sed -i 's/comfygit==[0-9]\+\.[0-9]\+\.[0-9]\+/comfygit==$(VERSION)/' packages/deploy/pyproject.toml
+	@sed -i 's/^version = "[^"]*"/version = "$(VERSION)"/' packages/core/pyproject.toml
+	@sed -i 's/^version = "[^"]*"/version = "$(VERSION)"/' packages/cli/pyproject.toml
+	@sed -i 's/comfygit-core==[^"]*/comfygit-core==$(VERSION)/' packages/cli/pyproject.toml
+	@sed -i 's/^version = "[^"]*"/version = "$(VERSION)"/' packages/deploy/pyproject.toml
+	@sed -i 's/comfygit==[^"]*/comfygit==$(VERSION)/' packages/deploy/pyproject.toml
 	@echo "✓ Updated all packages to $(VERSION)"
 	@echo "✓ Updated CLI dependency: comfygit-core==$(VERSION)"
 	@echo "✓ Updated deploy dependency: comfygit==$(VERSION)"
@@ -195,7 +197,7 @@ bump-version:
 # Bump major version for all packages
 bump-major:
 	@echo "Bumping to major version $(VERSION).0.0"
-	@sed -i 's/version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "$(VERSION).0.0"/' packages/*/pyproject.toml
+	@sed -i 's/^version = "[^"]*"/version = "$(VERSION).0.0"/' packages/*/pyproject.toml
 	@echo "Don't forget to update dependency constraints!"
 
 # Bump individual package version
