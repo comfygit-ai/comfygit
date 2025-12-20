@@ -89,10 +89,11 @@ class RegistryDataManager:
             # Parse to validate JSON
             mappings = json.loads(data)
 
-            # Write atomically (temp file + rename)
+            # Write atomically (temp file + replace)
+            # Note: replace() works cross-platform, rename() fails on Windows when target exists
             temp_file = self.mappings_file.with_suffix('.tmp')
             temp_file.write_bytes(data)
-            temp_file.rename(self.mappings_file)
+            temp_file.replace(self.mappings_file)
 
             # Update metadata
             self._write_metadata({

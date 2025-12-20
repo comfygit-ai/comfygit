@@ -152,7 +152,7 @@ class WorkflowManager:
                 status="unresolved",  # No hash yet
                 nodes=[model_ref],
                 sources=[resolved.model_source] if resolved.model_source else [],  # URL
-                relative_path=str(resolved.target_path) if resolved.target_path else None  # Target path
+                relative_path=resolved.target_path.as_posix() if resolved.target_path else None  # Target path
             )
             self.pyproject.workflows.add_workflow_model(workflow_name, manifest_model)
 
@@ -252,7 +252,7 @@ class WorkflowManager:
                 status="unresolved",
                 nodes=all_refs,  # ALL REFS!
                 sources=[resolved.model_source] if resolved.model_source else [],
-                relative_path=str(resolved.target_path) if resolved.target_path else None
+                relative_path=resolved.target_path.as_posix() if resolved.target_path else None
             )
             self.pyproject.workflows.add_workflow_model(workflow_name, manifest_model)
 
@@ -1262,7 +1262,7 @@ class WorkflowManager:
                     status="unresolved",
                     nodes=[resolved.reference],
                     sources=[resolved.model_source] if resolved.model_source else [],
-                    relative_path=str(resolved.target_path) if resolved.target_path else None
+                    relative_path=resolved.target_path.as_posix() if resolved.target_path else None
                 )
                 manifest_models.append(manifest_model)
             elif resolved.is_optional:

@@ -42,10 +42,8 @@ class ExportImportManager:
             if pyproject_path.exists():
                 tar.add(pyproject_path, arcname="pyproject.toml")
 
-            # Add uv.lock
-            lock_path = self.cec_path / "uv.lock"
-            if lock_path.exists():
-                tar.add(lock_path, arcname="uv.lock")
+            # Note: uv.lock is NOT exported - it's platform-specific due to PyTorch variants
+            # Each machine re-resolves based on .pytorch-backend
 
             # Add .python-version
             python_version_path = self.cec_path / ".python-version"

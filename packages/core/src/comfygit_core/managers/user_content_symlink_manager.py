@@ -7,6 +7,7 @@ from typing import Tuple
 
 from ..logging.logging_config import get_logger
 from ..models.exceptions import CDEnvironmentError
+from ..utils.filesystem import rmtree
 from ..utils.symlink_utils import (
     is_link,
     create_platform_link,
@@ -141,7 +142,7 @@ class UserContentSymlinkManager:
                         f"Removing ComfyUI default {name}/ directory "
                         f"(empty or placeholder files only)"
                     )
-                    shutil.rmtree(link_path)
+                    rmtree(link_path)
                 else:
                     # Has content - needs migration
                     raise CDEnvironmentError(
@@ -192,7 +193,7 @@ class UserContentSymlinkManager:
                 )
             else:
                 # Just remove empty/placeholder directory
-                shutil.rmtree(self.input_link)
+                rmtree(self.input_link)
 
         # Migrate output
         if self.output_link.exists() and not is_link(self.output_link):
@@ -205,7 +206,7 @@ class UserContentSymlinkManager:
                 )
             else:
                 # Just remove empty/placeholder directory
-                shutil.rmtree(self.output_link)
+                rmtree(self.output_link)
 
         # Create symlinks after migration
         self.create_symlinks()
@@ -234,7 +235,7 @@ class UserContentSymlinkManager:
 
         if item_count == 0:
             logger.debug(f"No files to migrate in {name}/")
-            shutil.rmtree(source_dir)
+            rmtree(source_dir)
             return 0
 
         logger.info(f"Migrating {item_count} items from {name}/ to workspace...")
@@ -252,7 +253,7 @@ class UserContentSymlinkManager:
             logger.debug(f"Moved: {item.name}")
 
         # Remove now-empty source directory
-        shutil.rmtree(source_dir)
+        rmtree(source_dir)
         logger.info(f"Migration complete: {item_count} items moved to {target_dir}")
 
         return item_count
@@ -378,14 +379,14 @@ class UserContentSymlinkManager:
         # Delete input directory
         if self.input_target.exists():
             file_count, _ = self._get_directory_size(self.input_target)
-            shutil.rmtree(self.input_target)
+            rmtree(self.input_target)
             stats["input_files_deleted"] = file_count
             logger.info(f"Deleted {file_count} input files from {self.input_target}")
 
         # Delete output directory
         if self.output_target.exists():
             file_count, _ = self._get_directory_size(self.output_target)
-            shutil.rmtree(self.output_target)
+            rmtree(self.output_target)
             stats["output_files_deleted"] = file_count
             logger.info(f"Deleted {file_count} output files from {self.output_target}")
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..logging.logging_config import get_logger
 from ..models.exceptions import ComfyDockError
+from ..utils.filesystem import rmtree
 
 logger = get_logger(__name__)
 
@@ -167,7 +168,7 @@ class ContentCacheBase(CacheBase):
 
         # Clean up existing cache entry
         if cache_dir.exists():
-            shutil.rmtree(cache_dir)
+            rmtree(cache_dir)
 
         cache_dir.mkdir(parents=True)
 

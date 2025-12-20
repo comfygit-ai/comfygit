@@ -1,9 +1,22 @@
 """Tests for git remote operations."""
+import platform
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+
+def path_to_git_url(path: Path) -> str:
+    """Convert local path to git-compatible URL format.
+
+    On Windows, git push/fetch to local paths works better with file:// URLs.
+    On Unix, plain paths work fine.
+    """
+    if platform.system() == "Windows":
+        # Convert to file:// URL (e.g., file:///C:/Users/...)
+        return path.as_uri()
+    return str(path)
 
 
 class TestGitRemote:
@@ -320,7 +333,8 @@ class TestGitSyncStatus:
         (remote_repo / "new-file.txt").write_text("new content")
         subprocess.run(["git", "add", "."], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "commit", "-m", "New commit"], cwd=remote_repo, check=True, capture_output=True)
-        subprocess.run(["git", "push", str(bare_remote)], cwd=remote_repo, check=True, capture_output=True)
+        # Push to bare remote - need to specify branch explicitly
+        subprocess.run(["git", "push", path_to_git_url(bare_remote), "main"], cwd=remote_repo, check=True, capture_output=True)
 
         # Fetch to get the new commit
         env.git_manager.fetch("origin")

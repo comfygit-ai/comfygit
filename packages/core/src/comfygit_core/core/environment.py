@@ -18,6 +18,7 @@ from ..managers.git_manager import GitManager
 from ..managers.model_symlink_manager import ModelSymlinkManager
 from ..managers.node_manager import NodeManager
 from ..managers.pyproject_manager import PyprojectManager
+from ..managers.pytorch_backend_manager import PyTorchBackendManager
 from ..managers.system_node_symlink_manager import SystemNodeSymlinkManager
 from ..managers.user_content_symlink_manager import UserContentSymlinkManager
 from ..managers.uv_project_manager import UVProjectManager
@@ -34,7 +35,7 @@ from ..models.shared import (
 from ..models.sync import SyncResult
 from ..strategies.confirmation import ConfirmationStrategy
 from ..utils.common import run_command
-from ..utils.pytorch import extract_pip_show_package_version
+from ..utils.filesystem import rmtree
 from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
@@ -117,6 +118,10 @@ class Environment:
         return PyprojectManager(self.pyproject_path)
 
     @cached_property
+    def pytorch_manager(self) -> PyTorchBackendManager:
+        return PyTorchBackendManager(self.cec_path)
+
+    @cached_property
     def node_lookup(self) -> NodeLookupService:
         from ..services.node_lookup_service import NodeLookupService
         return NodeLookupService(
@@ -137,7 +142,8 @@ class Environment:
             self.node_lookup,
             self.resolution_tester,
             self.custom_nodes_path,
-            self.node_mapping_repository
+            self.node_mapping_repository,
+            self.pytorch_manager
         )
 
     @cached_property
@@ -203,6 +209,7 @@ class Environment:
             pyproject_manager=self.pyproject,
             uv_manager=self.uv_manager,
             workflow_manager=self.workflow_manager,
+            pytorch_manager=self.pytorch_manager,
         )
 
     @cached_property
@@ -229,7 +236,8 @@ class Environment:
             comfyui_path=self.comfyui_path,
             venv_path=self.venv_path,
             uv=self.uv_manager,
-            pyproject=self.pyproject
+            pyproject=self.pyproject,
+            pytorch_manager=self.pytorch_manager,
         )
         comparison = scanner.get_full_comparison()
 
@@ -248,6 +256,36 @@ class Environment:
             missing_models=missing_models
         )
 
+    def _ensure_schema_migrated(self) -> bool:
+        """Migrate pyproject schema v1 → v2 if needed.
+
+        Schema v1 has PyTorch config embedded in [tool.uv] section.
+        Schema v2 uses runtime injection from .pytorch-backend file.
+
+        This migration:
+        1. Strips embedded [tool.uv] PyTorch config
+        2. Updates schema_version to 2
+
+        Note: Does NOT persist .pytorch-backend. User must explicitly
+        set backend with 'cg env-config torch-backend set'.
+
+        Returns:
+            True if migration was performed, False if already migrated
+        """
+        migrated = self.pyproject.migrate_pytorch_config()
+        if migrated:
+            logger.info("Migrated environment to schema v2 (stripped PyTorch config)")
+            # Print so user sees it in CLI output
+            import sys
+            print("📦 Migrated environment to schema v2 (stripped embedded PyTorch config)", file=sys.stderr)
+
+        # Always ensure .pytorch-backend and uv.lock are in .gitignore (handles pulls from older remotes)
+        self.pytorch_manager._ensure_gitignore_entry()
+        self.git_manager.ensure_gitignore_entry("uv.lock")
+        self._untrack_uvlock_if_tracked()
+
+        return migrated
+
     def sync(
         self,
         dry_run: bool = False,
@@ -257,7 +295,8 @@ class Environment:
         remove_extra_nodes: bool = True,
         sync_callbacks: SyncCallbacks | None = None,
         verbose: bool = False,
-        preserve_workflows: bool = False
+        preserve_workflows: bool = False,
+        backend_override: str | None = None,
     ) -> SyncResult:
         """Apply changes: sync packages, nodes, workflows, and models with environment.
 
@@ -271,6 +310,7 @@ class Environment:
             preserve_workflows: If True, preserve uncommitted workflows during restore.
                                Use True for runtime restarts (exit code 42) to keep user edits.
                                Use False (default) for git operations and repairs.
+            backend_override: Override PyTorch backend instead of reading from file (e.g., "cu128")
 
         Returns:
             SyncResult with details of what was synced
@@ -280,14 +320,20 @@ class Environment:
         """
         result = SyncResult()
 
+        # Migrate schema v1 → v2 if needed (strips embedded PyTorch config)
+        # This ensures old environments get migrated on first sync with new code
+        self._ensure_schema_migrated()
+
         logger.info("Syncing environment...")
 
-        # Sync packages with UV - progressive installation
+        # Sync packages with UV - progressive installation with PyTorch injection
         try:
             sync_result = self.uv_manager.sync_dependencies_progressive(
                 dry_run=dry_run,
                 callbacks=sync_callbacks,
-                verbose=verbose
+                verbose=verbose,
+                pytorch_manager=self.pytorch_manager,
+                backend_override=backend_override,
             )
             result.packages_synced = sync_result["packages_synced"]
             result.dependency_groups_installed.extend(sync_result["dependency_groups_installed"])
@@ -302,7 +348,6 @@ class Environment:
         # Handle version mismatches by removing nodes with wrong versions
         # They will be reinstalled by sync_nodes_to_filesystem
         if not dry_run:
-            import shutil
             try:
                 # Get current status to find version mismatches
                 current_status = self.status()
@@ -311,7 +356,7 @@ class Environment:
                     node_path = self.custom_nodes_path / node_name
                     if node_path.exists():
                         logger.info(f"Removing node with wrong version: {node_name} ({mismatch['actual']} → {mismatch['expected']})")
-                        shutil.rmtree(node_path)
+                        rmtree(node_path)
             except Exception as e:
                 logger.warning(f"Could not check/fix version mismatches: {e}")
 
@@ -513,6 +558,7 @@ class Environment:
         node_callbacks: NodeInstallCallbacks | None = None,
         strategy_option: str | None = None,
         force: bool = False,
+        backend_override: str | None = None,
     ) -> dict:
         """Pull from remote and auto-repair environment (atomic operation).
 
@@ -527,6 +573,7 @@ class Environment:
             node_callbacks: Optional callbacks for node installation progress
             strategy_option: Optional git merge strategy (e.g., "ours" or "theirs")
             force: If True, discard uncommitted changes and allow unrelated histories
+            backend_override: Override PyTorch backend for sync (e.g., "cu128")
 
         Returns:
             Dict with pull results and sync_result
@@ -539,11 +586,7 @@ class Environment:
         from ..models.exceptions import CDEnvironmentError
         from ..utils.git import git_reset_hard, git_rev_parse
 
-        # Clean up regenerated uv.lock before checking for real uncommitted changes
-        # (uv.lock gets regenerated after branch switch and would block the pull)
-        self._cleanup_uvlock_for_git_operation()
-
-        # Check for uncommitted changes (now excluding uv.lock)
+        # Check for uncommitted changes
         if self.git_manager.has_uncommitted_changes():
             if force:
                 # Force mode: discard uncommitted changes
@@ -593,7 +636,8 @@ class Environment:
             sync_result = self.sync(
                 model_strategy=model_strategy,
                 model_callbacks=model_callbacks,
-                node_callbacks=node_callbacks
+                node_callbacks=node_callbacks,
+                backend_override=backend_override,
             )
 
             # Check for sync failures
@@ -854,9 +898,6 @@ class Environment:
             node_conflicts=validation.conflicts,
             is_compatible=validation.is_compatible,
         )
-
-        # Remove uv.lock if it would block the merge
-        self.git_orchestrator._cleanup_uvlock_before_git_operation()
 
         # Execute atomic merge
         executor = AtomicMergeExecutor(
@@ -1789,19 +1830,19 @@ class Environment:
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = self.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
-            shutil.rmtree(models_dir)
+            rmtree(models_dir)
 
         # Remove ComfyUI's default input/output directories (will be replaced with symlinks)
         from ..utils.symlink_utils import is_link
 
         input_dir = self.comfyui_path / "input"
         if input_dir.exists() and not is_link(input_dir):
-            shutil.rmtree(input_dir)
+            rmtree(input_dir)
             logger.debug("Removed ComfyUI's default input directory during import")
 
         output_dir = self.comfyui_path / "output"
         if output_dir.exists() and not is_link(output_dir):
-            shutil.rmtree(output_dir)
+            rmtree(output_dir)
             logger.debug("Removed ComfyUI's default output directory during import")
 
         # Create symlinks for user content and system nodes
@@ -1842,95 +1883,30 @@ class Environment:
             self.pyproject.save(config)
             logger.info(f"Updated system-nodes deps: {', '.join(local_requirements)}")
 
-        # Phase 1.5: Create venv and optionally install PyTorch with specific backend
+        # Phase 1.5: Probe PyTorch and configure backend
         # Read Python version from .python-version file
         python_version_file = self.cec_path / ".python-version"
-        python_version = python_version_file.read_text(encoding='utf-8').strip() if python_version_file.exists() else None
+        python_version = python_version_file.read_text(encoding='utf-8').strip() if python_version_file.exists() else "3.12"
 
         if self.torch_backend:
+            from ..managers.pytorch_backend_manager import PyTorchBackendManager
+
             if callbacks:
-                callbacks.on_phase("configure_pytorch", f"Configuring PyTorch backend: {self.torch_backend}")
+                callbacks.on_phase("probe_pytorch", "Detecting PyTorch backend...")
 
-            # Strip imported PyTorch config BEFORE venv creation to avoid platform conflicts
-            from ..constants import PYTORCH_CORE_PACKAGES
+            # Migrate schema v1 environments (strips embedded PyTorch config)
+            migrated = self.pyproject.migrate_pytorch_config()
+            if migrated:
+                logger.info("Migrated imported environment to schema v2")
 
-            logger.info("Stripping imported PyTorch configuration...")
-            config = self.pyproject.load()
-            if "tool" in config and "uv" in config["tool"]:
-                # Remove PyTorch indexes
-                indexes = config["tool"]["uv"].get("index", [])
-                if isinstance(indexes, list):
-                    config["tool"]["uv"]["index"] = [
-                        idx for idx in indexes
-                        if not any(p in idx.get("name", "").lower() for p in ["pytorch-", "torch-"])
-                    ]
+            # Use dry-run probe to detect backend
+            pytorch_manager = PyTorchBackendManager(self.cec_path)
+            resolved_backend = pytorch_manager.probe_and_set_backend(python_version, self.torch_backend)
 
-                # Remove PyTorch sources
-                sources = config.get("tool", {}).get("uv", {}).get("sources", {})
-                for pkg in PYTORCH_CORE_PACKAGES:
-                    sources.pop(pkg, None)
-
-                self.pyproject.save(config)
-
-            # Remove PyTorch constraints
-            for pkg in PYTORCH_CORE_PACKAGES:
-                self.pyproject.uv_config.remove_constraint(pkg)
-
-            logger.info(f"Creating venv with Python {python_version}")
-            self.uv_manager.create_venv(self.venv_path, python_version=python_version, seed=True)
-
-            logger.info(f"Installing PyTorch with backend: {self.torch_backend}")
-            self.uv_manager.install_packages(
-                packages=["torch", "torchvision", "torchaudio"],
-                python=self.uv_manager.python_executable,
-                torch_backend=self.torch_backend,
-                verbose=True
-            )
-
-            # Detect installed backend and configure pyproject
-            from ..utils.pytorch import extract_backend_from_version, get_pytorch_index_url
-
-            first_version = extract_pip_show_package_version(
-                self.uv_manager.show_package("torch", self.uv_manager.python_executable)
-            )
-
-            if first_version:
-                backend = extract_backend_from_version(first_version)
-                logger.info(f"Detected PyTorch backend from installed version: {backend}")
-
-                # Store resolved backend (never "auto")
-                config = self.pyproject.load()
-                if "tool" not in config:
-                    config["tool"] = {}
-                if "comfygit" not in config["tool"]:
-                    config["tool"]["comfygit"] = {}
-                config["tool"]["comfygit"]["torch_backend"] = backend if backend else "cpu"
-                self.pyproject.save(config)
-                logger.info(f"Stored resolved torch_backend: {backend if backend else 'cpu'}")
-
-                if backend:
-                    # Add new index for detected backend
-                    index_name = f"pytorch-{backend}"
-                    self.pyproject.uv_config.add_index(
-                        name=index_name,
-                        url=get_pytorch_index_url(backend),
-                        explicit=True
-                    )
-
-                    # Add sources pointing to new index
-                    for pkg in PYTORCH_CORE_PACKAGES:
-                        self.pyproject.uv_config.add_source(pkg, {"index": index_name})
-
-                    logger.info(f"Configured PyTorch index: {index_name}")
-
-            # Add constraints for installed versions
-            for pkg in PYTORCH_CORE_PACKAGES:
-                version = extract_pip_show_package_version(
-                    self.uv_manager.show_package(pkg, self.uv_manager.python_executable)
-                )
-                if version:
-                    self.pyproject.uv_config.add_constraint(f"{pkg}=={version}")
-                    logger.info(f"Added constraint: {pkg}=={version}")
+            if self.torch_backend == "auto":
+                logger.info(f"PyTorch backend: auto-detected as {resolved_backend}")
+            else:
+                logger.info(f"PyTorch backend: {resolved_backend}")
 
         # Phase 2: Setup git repository
         # For git imports: .git already exists with remote, just ensure gitignore
@@ -2086,34 +2062,21 @@ class Environment:
                 del sources[pkg_name]
             self.pyproject.save(config)
 
-    def _cleanup_uvlock_for_git_operation(self) -> None:
-        """Remove uv.lock if it would block a git operation.
+    def _untrack_uvlock_if_tracked(self) -> None:
+        """Untrack uv.lock if it was previously tracked in git.
 
-        After branch switch, uv.sync_project() regenerates uv.lock which can
-        differ from the committed version. This creates phantom "dirty" state
-        that blocks merge/pull operations. Since uv.lock gets regenerated
-        after every git operation anyway, we can safely remove it before
-        merge/pull to prevent blocking.
+        uv.lock is now gitignored (platform-specific PyTorch variants).
+        For existing environments where it was tracked, untrack it.
         """
-        from ..utils.git import _git, get_uncommitted_changes
+        from ..utils.git import _git
 
-        uvlock_path = self.cec_path / "uv.lock"
-        if not uvlock_path.exists():
-            return
-
-        # Check if uv.lock is modified (staged or unstaged)
-        changes = get_uncommitted_changes(self.cec_path)
-        if "uv.lock" in changes:
-            logger.debug("Removing regenerated uv.lock before git operation")
-            uvlock_path.unlink()
-            return
-
-        # Check for untracked uv.lock
+        # Check if uv.lock is tracked
         result = _git(
-            ["ls-files", "--others", "--exclude-standard", "uv.lock"],
+            ["ls-files", "uv.lock"],
             self.cec_path,
             check=False
         )
         if result.stdout.strip() == "uv.lock":
-            logger.debug("Removing untracked uv.lock before git operation")
-            uvlock_path.unlink()
+            # Untrack without deleting the file
+            _git(["rm", "--cached", "uv.lock"], self.cec_path, check=False)
+            logger.info("Untracked uv.lock (now gitignored)")

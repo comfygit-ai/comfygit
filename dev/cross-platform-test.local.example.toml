@@ -1,0 +1,51 @@
+# Cross-Platform Test Local Configuration
+# Copy this file to: cross-platform-test.local.toml
+# That file is gitignored - put your machine-specific settings there.
+#
+# Only include settings you want to override from cross-platform-test.toml
+
+# ============================================================================
+# Example: WSL to Windows (same machine)
+# ============================================================================
+
+[platforms.windows]
+enabled = true
+# Get this IP from WSL: ip route show | grep default | awk '{print $3}'
+host = "172.30.208.1"
+user = "your-windows-username"
+repo_path = "C:/code/comfygit"
+
+# ============================================================================
+# Example: Remote Windows Server
+# ============================================================================
+
+# [platforms.windows]
+# enabled = true
+# host = "192.168.1.100"
+# user = "dev"
+# repo_path = "C:/code/comfygit"
+
+# ============================================================================
+# Example: macOS (Mac Mini)
+# ============================================================================
+
+# [platforms.macos]
+# enabled = true
+# host = "mac-mini.local"
+# user = "dev"
+# repo_path = "/Users/dev/code/comfygit"
+
+# ============================================================================
+# Example: Override test command for a specific platform
+# ============================================================================
+
+# [platforms.windows]
+# test_command = "uv run pytest packages/core/tests/unit -v --tb=short"
+
+# ============================================================================
+# Example: Override global settings
+# ============================================================================
+
+# [settings]
+# timeout = 300
+# sync_before_test = false

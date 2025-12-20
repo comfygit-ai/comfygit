@@ -14,7 +14,7 @@ from ..models.exceptions import (
 )
 from ..utils.comfyui_ops import clone_comfyui
 from ..utils.environment_cleanup import mark_environment_complete
-from ..utils.pytorch import extract_pip_show_package_version
+from ..utils.filesystem import rmtree
 
 if TYPE_CHECKING:
     from comfygit_core.core.workspace import Workspace
@@ -75,22 +75,31 @@ class EnvironmentFactory:
 
         _complete("init_structure")
 
-        # Log torch backend selection
-        if torch_backend == "auto":
-            logger.info("PyTorch backend: auto (will detect GPU)")
-        else:
-            logger.info(f"PyTorch backend: {torch_backend}")
+        # Phase: Probe PyTorch (5-10%) - Use uv's dry-run to detect backend and versions
+        _progress("probe_pytorch", "Detecting PyTorch backend", 5)
 
-        # Initialize environment
+        from ..managers.pytorch_backend_manager import PyTorchBackendManager
+
+        pytorch_manager = PyTorchBackendManager(cec_path)
+        resolved_backend = pytorch_manager.probe_and_set_backend(python_version, torch_backend)
+
+        if torch_backend == "auto":
+            logger.info(f"PyTorch backend: auto-detected as {resolved_backend}")
+        else:
+            logger.info(f"PyTorch backend: {resolved_backend}")
+
+        _complete("probe_pytorch")
+
+        # Initialize environment with resolved backend
         env = Environment(
             name=name,
             path=env_path,
             workspace=workspace,
-            torch_backend=torch_backend,
+            torch_backend=resolved_backend,
         )
 
-        # Phase: Resolve ComfyUI version (5-10%)
-        _progress("resolve_version", "Resolving ComfyUI version", 5)
+        # Phase: Resolve ComfyUI version (10-15%)
+        _progress("resolve_version", "Resolving ComfyUI version", 10)
 
         from ..caching.api_cache import APICacheManager
         from ..caching.comfyui_cache import ComfyUICacheManager, ComfyUISpec
@@ -108,7 +117,7 @@ class EnvironmentFactory:
 
         _complete("resolve_version")
 
-        # Phase: Clone or restore ComfyUI (10-25%)
+        # Phase: Clone or restore ComfyUI (15-30%)
         comfyui_cache = ComfyUICacheManager(cache_base_path=workspace.paths.cache)
         spec = ComfyUISpec(
             version=version_to_clone,
@@ -120,7 +129,7 @@ class EnvironmentFactory:
 
         if cached_path:
             # Restore from cache
-            _progress("restore_comfyui", f"Restoring ComfyUI {version_to_clone} from cache", 10)
+            _progress("restore_comfyui", f"Restoring ComfyUI {version_to_clone} from cache", 15)
             logger.info(f"Restoring ComfyUI {version_type} {version_to_clone} from cache...")
             shutil.copytree(cached_path, env.comfyui_path)
             commit_sha = git_rev_parse(env.comfyui_path, "HEAD")
@@ -129,7 +138,7 @@ class EnvironmentFactory:
             _complete("restore_comfyui")
         else:
             # Clone fresh
-            _progress("clone_comfyui", f"Cloning ComfyUI {version_to_clone}", 10)
+            _progress("clone_comfyui", f"Cloning ComfyUI {version_to_clone}", 15)
             logger.info(f"Cloning ComfyUI {version_type} {version_to_clone}...")
             try:
                 comfyui_version_output = clone_comfyui(env.comfyui_path, version_to_clone)
@@ -153,8 +162,8 @@ class EnvironmentFactory:
                 logger.warning(f"Could not determine commit SHA for ComfyUI {version_type} {version_to_clone}")
             _complete("clone_comfyui")
 
-        # Phase: Configure environment (25-30%)
-        _progress("configure_environment", "Configuring environment", 25)
+        # Phase: Configure environment (30-40%)
+        _progress("configure_environment", "Configuring environment", 30)
 
         # Extract builtin nodes from ComfyUI installation
         from ..utils.builtin_extractor import extract_comfyui_builtins
@@ -170,7 +179,7 @@ class EnvironmentFactory:
         # Remove ComfyUI's default models directory (will be replaced with symlink)
         models_dir = env.comfyui_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
-            shutil.rmtree(models_dir)
+            rmtree(models_dir)
             logger.debug("Removed ComfyUI's default models directory")
 
         # Remove ComfyUI's default input/output directories (will be replaced with symlinks)
@@ -178,12 +187,12 @@ class EnvironmentFactory:
 
         input_dir = env.comfyui_path / "input"
         if input_dir.exists() and not is_link(input_dir):
-            shutil.rmtree(input_dir)
+            rmtree(input_dir)
             logger.debug("Removed ComfyUI's default input directory")
 
         output_dir = env.comfyui_path / "output"
         if output_dir.exists() and not is_link(output_dir):
-            shutil.rmtree(output_dir)
+            rmtree(output_dir)
             logger.debug("Removed ComfyUI's default output directory")
 
         # Create workspace directories and symlinks for user content
@@ -210,92 +219,38 @@ class EnvironmentFactory:
 
         _complete("configure_environment")
 
-        # Create initial pyproject.toml
+        # Create initial pyproject.toml (torch_backend stored in .pytorch-backend file, not here)
         config = EnvironmentFactory._create_initial_pyproject(
             name,
             python_version,
             version_to_clone,
             version_type,
             commit_sha,
-            torch_backend,
             system_node_requirements=system_node_requirements,
         )
         env.pyproject.save(config)
 
-        # Phase: Create virtual environment (30-35%)
-        _progress("create_venv", "Creating virtual environment", 30)
-        logger.info("Creating virtual environment...")
-        env.uv_manager.sync_project(verbose=False)
-        _complete("create_venv")
-
-        # Phase: Install PyTorch (35-70%) - This is the longest phase
-        _progress("install_pytorch", "Installing PyTorch", 35)
-        logger.info(f"Installing PyTorch with backend: {torch_backend}")
-        env.uv_manager.install_packages(
-            packages=["torch", "torchvision", "torchaudio"],
-            python=env.uv_manager.python_executable,
-            torch_backend=torch_backend,
-            verbose=True  # Show progress to user
-        )
-        _complete("install_pytorch")
-
-        # Phase: Configure PyTorch (70-75%)
-        _progress("configure_pytorch", "Configuring PyTorch backend", 70)
-
-        from ..constants import PYTORCH_CORE_PACKAGES
-        from ..utils.pytorch import extract_backend_from_version, get_pytorch_index_url
-
-        # Get first package version to extract backend
-        first_version = extract_pip_show_package_version(
-            env.uv_manager.show_package("torch", env.uv_manager.python_executable)
-        )
-
-        if first_version:
-            # Extract backend from version (e.g., "2.9.0+cu128" -> "cu128")
-            backend = extract_backend_from_version(first_version)
-            logger.info(f"Detected PyTorch backend from installed version: {backend}")
-
-            # Configure PyTorch index for uv sync (works for any backend)
-            if backend:
-                index_name = f"pytorch-{backend}"
-                env.pyproject.uv_config.add_index(
-                    name=index_name,
-                    url=get_pytorch_index_url(backend),
-                    explicit=True
-                )
-
-                # Add sources for PyTorch packages
-                for pkg in PYTORCH_CORE_PACKAGES:
-                    env.pyproject.uv_config.add_source(pkg, {"index": index_name})
-
-                logger.info(f"Configured PyTorch index: {index_name}")
-
-        # Add constraints for all PyTorch packages
-        for pkg in PYTORCH_CORE_PACKAGES:
-            version = extract_pip_show_package_version(
-                env.uv_manager.show_package(pkg, env.uv_manager.python_executable)
-            )
-            if version:
-                env.pyproject.uv_config.add_constraint(f"{pkg}=={version}")
-                logger.info(f"Pinned {pkg}=={version}")
-
-        _complete("configure_pytorch")
-
-        # Phase: Install dependencies (75-95%)
-        _progress("install_dependencies", "Installing ComfyUI dependencies", 75)
-
+        # Add ComfyUI requirements
         comfyui_reqs = env.comfyui_path / "requirements.txt"
         if comfyui_reqs.exists():
             logger.info("Adding ComfyUI requirements...")
             env.uv_manager.add_requirements_with_sources(comfyui_reqs, frozen=True)
 
-        logger.info("Installing dependencies...")
-        env.uv_manager.sync_project(verbose=True, all_groups=True)
+        # Phase: Install dependencies with PyTorch (40-90%)
+        # Single sync handles both PyTorch installation AND ComfyUI dependencies
+        _progress("install_dependencies", "Installing PyTorch and dependencies", 40)
+        logger.info(f"Installing dependencies with PyTorch backend: {resolved_backend}")
+
+        env.uv_manager.sync_project(
+            verbose=True,
+            pytorch_manager=env.pytorch_manager,
+            all_groups=True,
+        )
 
         _complete("install_dependencies")
 
-        # Phase: Finalize environment (95-100%)
-        _progress("finalize", "Finalizing environment", 95)
+        # Phase: Finalize environment (90-100%)
+        _progress("finalize", "Finalizing environment", 90)
 
         # Use GitManager for repository initialization
         git_mgr = GitManager(cec_path)
@@ -485,10 +440,13 @@ class EnvironmentFactory:
         comfyui_version: str,
         comfyui_version_type: str = "branch",
         comfyui_commit_sha: str | None = None,
-        torch_backend: str = "auto",
         system_node_requirements: list[str] | None = None,
     ) -> dict:
-        """Create the initial pyproject.toml."""
+        """Create the initial pyproject.toml.
+
+        Note: torch_backend is NOT stored in pyproject.toml (schema v2+).
+        It's stored in .pytorch-backend file which is gitignored.
+        """
         import os
 
         from ..constants import PYPROJECT_SCHEMA_VERSION
@@ -507,7 +465,6 @@ class EnvironmentFactory:
                     "comfyui_version_type": comfyui_version_type,
                     "comfyui_commit_sha": comfyui_commit_sha,
                     "python_version": python_version,
-                    "torch_backend": torch_backend,
                     "nodes": {}
                 }
             }

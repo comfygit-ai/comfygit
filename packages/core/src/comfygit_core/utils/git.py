@@ -2,6 +2,7 @@
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -297,15 +298,15 @@ def git_remote_get_url(repo_path: Path, remote: str = "origin") -> str | None:
 # =============================================================================
 
 def git_init(repo_path: Path) -> None:
-    """Initialize a git repository.
-    
+    """Initialize a git repository with 'main' as the default branch.
+
     Args:
         repo_path: Path to initialize as git repository
-        
+
     Raises:
         OSError: If git initialization fails
     """
-    _git(["init"], repo_path)
+    _git(["init", "--initial-branch=main"], repo_path)
 
 def git_diff(repo_path: Path, file_path: Path) -> str:
     """Get git diff for a specific file.
@@ -486,7 +487,6 @@ def git_clone_subdirectory(
         OSError: If git clone fails
         ValueError: If subdirectory doesn't exist in repository
     """
-    import shutil
     import tempfile
 
     # Clone to temporary directory

@@ -1,12 +1,50 @@
 """Filesystem manipulation utilities."""
 
 import os
+import platform
 import shutil
+import stat
+import time
 from pathlib import Path
 
 from ..logging.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _handle_remove_readonly(func, path, exc_info):
+    """Handle Windows readonly/locked files during deletion.
+
+    Args:
+        func: Function that failed (e.g., os.unlink)
+        path: Path that couldn't be removed
+        exc_info: Exception info tuple
+    """
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        time.sleep(0.05)  # Brief delay for handle release
+        func(path)
+    except Exception:
+        pass  # Let rmtree handle final error
+
+
+def rmtree(path: Path, ignore_errors: bool = False) -> None:
+    """Cross-platform directory removal with Windows readonly handling.
+
+    On Windows, git directories often have readonly files that cause
+    shutil.rmtree() to fail. This wrapper handles those cases.
+
+    Args:
+        path: Directory to remove
+        ignore_errors: If True, suppress all errors
+    """
+    if not path.exists():
+        return
+
+    if platform.system() == "Windows":
+        shutil.rmtree(path, ignore_errors=ignore_errors, onexc=_handle_remove_readonly)
+    else:
+        shutil.rmtree(path, ignore_errors=ignore_errors)
 
 
 def flatten_if_single_dir(path: Path) -> bool:
@@ -36,7 +74,7 @@ def flatten_if_single_dir(path: Path) -> bool:
                 # Handle conflicts by removing destination first
                 if dest.exists():
                     if dest.is_dir():
-                        shutil.rmtree(dest)
+                        rmtree(dest)
                     else:
                         dest.unlink()
                 shutil.move(str(item), str(dest))
@@ -59,7 +97,7 @@ def ensure_clean_directory(path: Path) -> None:
     """
     if path.exists():
         if path.is_dir():
-            shutil.rmtree(path)
+            rmtree(path)
         else:
             path.unlink()
 
@@ -80,7 +118,7 @@ def safe_copy_tree(src: Path, dest: Path) -> bool:
         # Remove destination if it exists
         if dest.exists():
             if dest.is_dir():
-                shutil.rmtree(dest)
+                rmtree(dest)
             else:
                 dest.unlink()
 

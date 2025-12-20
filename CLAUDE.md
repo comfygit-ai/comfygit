@@ -2,10 +2,34 @@
 
 ComfyGit is a monorepo workspace using uv for Python package management. It provides unified environment management for ComfyUI through multiple coordinated packages.
 
-### Codebase Maps
-- @docs/codebase-map.md
-- @packages/core/docs/codebase-map.md
-- @packages/cli/docs/codebase-map.md
+### Codebase Navigation
+
+**For implementation tasks**, read the relevant architecture overview first:
+- @packages/core/docs/architecture.md - Core library: layers, managers, services, protocols
+- @packages/cli/docs/architecture.md - CLI: command handlers, strategies, formatters
+- @packages/deploy/docs/architecture.md - Deploy: providers, worker server, async patterns
+
+Use `/map` to regenerate architecture docs after major refactors.
+
+**Then use pyast** for specific symbol lookups:
+```bash
+# Structure overview
+pyast overview packages/core/src/comfygit_core/
+
+# Find existing utilities before implementing
+pyast search "retry" packages/core/src/comfygit_core/
+pyast search "download" packages/core/src/comfygit_core/
+
+# Check what's in a module
+pyast symbols packages/core/src/comfygit_core/utils/
+
+# Understand dependencies before modifying
+pyast deps "Environment.sync" packages/core/src/comfygit_core/core/environment.py
+```
+
+**Key utility locations** (check before reimplementing):
+- `packages/core/src/comfygit_core/utils/` - git, filesystem, retry, parsing helpers
+- `packages/core/src/comfygit_core/services/` - downloads, lookups, registry
 
 ## Version Management Strategy
 
@@ -69,6 +93,40 @@ make test
 # Run linting
 make lint
 ```
+
+### Cross-Platform Testing
+Run tests across Linux, Windows, and macOS using `dev/scripts/cross-platform-test.py`.
+
+```bash
+# Run on all enabled platforms
+python dev/scripts/cross-platform-test.py
+
+# Run on specific platforms
+python dev/scripts/cross-platform-test.py --platforms linux,windows
+
+# Run specific test directory
+python dev/scripts/cross-platform-test.py --test-path packages/core/tests/unit
+
+# Pass pytest arguments after -- (full pytest control)
+python dev/scripts/cross-platform-test.py -- -k "test_workspace" -x
+python dev/scripts/cross-platform-test.py -- -k "test_git" --tb=short
+python dev/scripts/cross-platform-test.py --test-path packages/core/tests -- -k "test_env" -x
+
+# Common pytest flags:
+#   -k "pattern"  - Run tests matching pattern
+#   -x            - Stop on first failure
+#   --lf          - Run last failed tests
+#   -m "marker"   - Run tests with marker
+#   --tb=short    - Shorter traceback format
+
+# Other options
+python dev/scripts/cross-platform-test.py --list        # List available platforms
+python dev/scripts/cross-platform-test.py --no-sync     # Skip git sync on remote
+python dev/scripts/cross-platform-test.py --sequential  # Run sequentially (not parallel)
+python dev/scripts/cross-platform-test.py --verbose     # Full output for failures
+```
+
+Configuration: `dev/cross-platform-test.toml` (defaults) and `dev/cross-platform-test.local.toml` (your overrides, gitignored).
 
 ### Version Management Workflow
 1. Make your changes across core and/or CLI

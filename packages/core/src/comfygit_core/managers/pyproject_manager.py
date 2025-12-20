@@ -20,6 +20,7 @@ from ..models.exceptions import CDPyprojectError, CDPyprojectInvalidError, CDPyp
 
 if TYPE_CHECKING:
     from ..models.shared import NodeInfo
+    from .pytorch_backend_manager import PyTorchBackendManager
 
 from ..utils.dependency_parser import parse_dependency_string
 
@@ -185,7 +186,7 @@ class PyprojectManager:
             # Ensure parent directory exists
             self.path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.path, 'w') as f:
+            with open(self.path, 'w', encoding='utf-8') as f:
                 tomlkit.dump(config, f)
         except OSError as e:
             raise CDPyprojectError(f"Failed to write pyproject.toml to {self.path}: {e}")
@@ -284,7 +285,7 @@ class PyprojectManager:
         new_table = tomlkit.table()
 
         # Add metadata fields first
-        for key in ['comfyui_version', 'python_version', 'manifest_state']:
+        for key in ['schema_version', 'comfyui_version', 'python_version', 'manifest_state']:
             if key in comfydock:
                 new_table[key] = comfydock[key]
 
@@ -355,6 +356,260 @@ class PyprojectManager:
         # Reset lazy handlers so they reload from restored state
         self.reset_lazy_handlers()
         logger.debug("Restored pyproject.toml from snapshot")
+
+    def pytorch_injection_context(
+        self,
+        pytorch_manager: PyTorchBackendManager,
+        backend_override: str | None = None,
+    ):
+        """Context manager that temporarily injects PyTorch config during sync.
+
+        This pattern allows syncing with platform-specific PyTorch configuration
+        without persisting it to the tracked pyproject.toml.
+
+        Usage:
+            with pyproject.pytorch_injection_context(pytorch_manager):
+                uv.sync_project()  # Sync happens with PyTorch config injected
+
+        Args:
+            pytorch_manager: PyTorchBackendManager instance for config generation
+            backend_override: Override backend instead of reading from file (e.g., "cu128")
+
+        Yields:
+            None - the context manager just handles inject/restore
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _injection_context():
+            # Capture original content before any modifications
+            original_content = self.path.read_text()
+            effective_backend = backend_override or "unknown"
+
+            try:
+                # Extract python_version from pyproject for probing
+                config = self.load()
+                python_version = config.get("tool", {}).get("comfygit", {}).get("python_version")
+
+                # Get PyTorch config from manager
+                pytorch_config = pytorch_manager.get_pytorch_config(
+                    backend_override=backend_override,
+                    python_version=python_version,
+                )
+
+                # Load current config and inject PyTorch settings
+                config = self.load()
+                self._inject_pytorch_config(config, pytorch_config)
+                self.save(config)
+
+                effective_backend = backend_override or pytorch_manager.get_backend()
+                logger.debug(f"Injected PyTorch config for backend: {effective_backend}")
+
+                yield
+
+            except Exception:
+                # Log full injected config for debugging on failure
+                logger.error("=== PyTorch Sync Failure ===")
+                logger.error(f"Backend: {effective_backend}")
+                try:
+                    logger.error(f"Injected config:\n{self.path.read_text()}")
+                except Exception:
+                    pass
+                raise
+
+            finally:
+                # ALWAYS restore original content
+                self.path.write_text(original_content)
+                # Invalidate cache to ensure fresh reads
+                self._config_cache = None
+                self._cache_mtime = None
+                logger.debug("Restored original pyproject.toml after PyTorch injection")
+
+        return _injection_context()
+
+    def strip_pytorch_config(self) -> None:
+        """Remove PyTorch-specific configuration from pyproject.toml.
+
+        Removes:
+            - PyTorch indexes from tool.uv.index (names containing 'pytorch')
+            - PyTorch sources from tool.uv.sources (torch, torchvision, torchaudio)
+            - PyTorch constraints from tool.uv.constraint-dependencies
+            - torch_backend from tool.comfygit
+
+        This is used during environment creation to ensure PyTorch config is not
+        tracked in git, and during migration from schema v1 to v2.
+        """
+        from ..constants import PYTORCH_CORE_PACKAGES
+
+        config = self.load()
+
+        # Remove torch_backend from tool.comfygit
+        if 'tool' in config and 'comfygit' in config['tool']:
+            config['tool']['comfygit'].pop('torch_backend', None)
+
+        # Remove PyTorch config from tool.uv
+        if 'tool' in config and 'uv' in config['tool']:
+            uv_config = config['tool']['uv']
+
+            # Helper to safely delete keys from tomlkit containers
+            # OutOfOrderTableProxy can raise NonExistentKey even when key appears present
+            def safe_del(container: dict, key: str) -> None:
+                try:
+                    del container[key]
+                except (KeyError, Exception):
+                    # tomlkit.exceptions.NonExistentKey or similar
+                    pass
+
+            # Remove PyTorch indexes
+            if 'index' in uv_config:
+                indexes = uv_config['index']
+                if isinstance(indexes, list):
+                    uv_config['index'] = [
+                        idx for idx in indexes
+                        if 'pytorch' not in idx.get('name', '').lower()
+                    ]
+                    if not uv_config['index']:
+                        safe_del(uv_config, 'index')
+
+            # Remove PyTorch sources
+            if 'sources' in uv_config:
+                for pkg in PYTORCH_CORE_PACKAGES:
+                    uv_config['sources'].pop(pkg, None)
+                if not uv_config['sources']:
+                    safe_del(uv_config, 'sources')
+
+            # Remove PyTorch constraints
+            if 'constraint-dependencies' in uv_config:
+                constraints = uv_config['constraint-dependencies']
+                uv_config['constraint-dependencies'] = [
+                    c for c in constraints
+                    if not any(pkg in c.lower() for pkg in PYTORCH_CORE_PACKAGES)
+                ]
+                if not uv_config['constraint-dependencies']:
+                    safe_del(uv_config, 'constraint-dependencies')
+
+            # Clean up empty uv section
+            if not uv_config:
+                safe_del(config['tool'], 'uv')
+
+        self.save(config)
+        logger.debug("Stripped PyTorch config from pyproject.toml")
+
+    def migrate_pytorch_config(self) -> bool:
+        """Migrate from schema v1 to v2 by stripping embedded PyTorch config.
+
+        Schema v1 had PyTorch config embedded in [tool.uv] section.
+        Schema v2 uses runtime injection from .pytorch-backend file.
+
+        This migration:
+        1. Strips embedded [tool.uv] PyTorch config (indexes, sources, constraints)
+        2. Removes torch_backend field from [tool.comfygit] if present
+        3. Sets schema_version = 2
+
+        Note: This does NOT create .pytorch-backend file. The user should
+        explicitly set their preferred backend with 'cg env-config torch-backend set'.
+        Until then, auto-detection will be used.
+
+        Returns:
+            True if migration was performed, False if already migrated
+        """
+        config = self.load()
+        comfygit_config = config.get('tool', {}).get('comfygit', {})
+
+        # Check if already migrated (schema v2+)
+        schema_version = comfygit_config.get('schema_version', 1)
+        if schema_version >= 2:
+            logger.debug("Already at schema v2+, skipping migration")
+            return False
+
+        logger.info(f"Migrating pyproject from schema v{schema_version} to v2...")
+
+        # Strip PyTorch config from pyproject.toml
+        self.strip_pytorch_config()
+
+        # Bump schema version - reload to get the stripped config
+        config = self.load(force_reload=True)
+        if 'tool' not in config:
+            config['tool'] = tomlkit.table()
+        if 'comfygit' not in config['tool']:
+            config['tool']['comfygit'] = tomlkit.table()
+        config['tool']['comfygit']['schema_version'] = 2
+        self.save(config)
+
+        # Verify the save worked
+        verify_config = self.load(force_reload=True)
+        saved_version = verify_config.get('tool', {}).get('comfygit', {}).get('schema_version')
+        if saved_version != 2:
+            logger.error(f"Migration verification FAILED: schema_version is {saved_version}, expected 2")
+        else:
+            logger.info("Migrated pyproject.toml to schema v2")
+
+        return True
+
+    def _inject_pytorch_config(self, config: dict, pytorch_config: dict) -> None:
+        """Inject PyTorch-specific configuration into pyproject.toml config.
+
+        Args:
+            config: The pyproject.toml config dict to modify
+            pytorch_config: PyTorch config from PyTorchBackendManager.get_pytorch_config()
+        """
+        # Ensure tool.uv section exists
+        if 'tool' not in config:
+            config['tool'] = tomlkit.table()
+        if 'uv' not in config['tool']:
+            config['tool']['uv'] = tomlkit.table()
+
+        uv_config = config['tool']['uv']
+
+        # Inject indexes
+        existing_indexes = uv_config.get('index', [])
+        if not isinstance(existing_indexes, list):
+            existing_indexes = [existing_indexes] if existing_indexes else []
+
+        for new_index in pytorch_config.get('indexes', []):
+            # Check if index already exists by name
+            exists = any(
+                idx.get('name') == new_index['name']
+                for idx in existing_indexes
+            )
+            if not exists:
+                # Create tomlkit table for proper formatting
+                index_table = tomlkit.table()
+                index_table['name'] = new_index['name']
+                index_table['url'] = new_index['url']
+                index_table['explicit'] = new_index.get('explicit', True)
+                existing_indexes.append(index_table)
+
+        # Use array-of-tables format
+        if existing_indexes:
+            aot = tomlkit.aot()
+            for idx in existing_indexes:
+                if hasattr(idx, 'items'):
+                    aot.append(idx)
+                else:
+                    tbl = tomlkit.table()
+                    for k, v in idx.items():
+                        tbl[k] = v
+                    aot.append(tbl)
+            uv_config['index'] = aot
+
+        # Inject sources
+        if 'sources' not in uv_config:
+            uv_config['sources'] = tomlkit.table()
+
+        for package_name, source in pytorch_config.get('sources', {}).items():
+            # Only add if not already present
+            if package_name not in uv_config['sources']:
+                uv_config['sources'][package_name] = source
+
+        # Inject constraints (if any)
+        constraints = pytorch_config.get('constraints', [])
+        if constraints:
+            existing_constraints = uv_config.get('constraint-dependencies', [])
+            for constraint in constraints:
+                if constraint not in existing_constraints:
+                    existing_constraints.append(constraint)
+            uv_config['constraint-dependencies'] = existing_constraints
 
 
 class BaseHandler:

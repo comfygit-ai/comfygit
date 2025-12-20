@@ -88,6 +88,45 @@ class EnvironmentCommands:
             sys.exit(1)
         return active
 
+    def _get_or_probe_backend(
+        self, env: Environment, override: str | None = None
+    ) -> tuple[str, bool]:
+        """Get torch backend from file or probe if missing.
+
+        Args:
+            env: Environment to get backend for
+            override: Optional explicit backend override
+
+        Returns:
+            Tuple of (backend_string, was_probed) where was_probed is True
+            if we had to auto-probe because no backend was configured.
+        """
+        if override:
+            return override, False
+
+        if env.pytorch_manager.has_backend():
+            return env.pytorch_manager.get_backend(), False
+
+        # No backend configured - probe and set it
+        print("⚠️  No PyTorch backend configured. Auto-detecting...")
+        try:
+            # Read Python version from .python-version file
+            python_version_file = env.cec_path / ".python-version"
+            python_version = (
+                python_version_file.read_text(encoding="utf-8").strip()
+                if python_version_file.exists()
+                else "3.12"
+            )
+            backend = env.pytorch_manager.probe_and_set_backend(
+                python_version,
+                backend="auto",
+            )
+            return backend, True
+        except Exception as e:
+            print(f"✗ Error probing PyTorch backend: {e}")
+            print("   Try setting it explicitly: cg env-config torch-backend set <backend>")
+            sys.exit(1)
+
     def _format_size(self, size_bytes: int) -> str:
         """Format bytes as human-readable size."""
         for unit in ("B", "KB", "MB", "GB"):
@@ -270,6 +309,121 @@ class EnvironmentCommands:
 
     # === Commands that operate IN environments ===
 
+    # === Environment Configuration ===
+
+    @with_env_logging("env-config torch-backend show")
+    def env_config_torch_show(self, args: argparse.Namespace, logger=None) -> None:
+        """Show current PyTorch backend setting for this environment."""
+        env = self._get_env(args)
+
+        backend = env.pytorch_manager.get_backend()
+        backend_file = env.pytorch_manager.backend_file
+        versions = env.pytorch_manager.get_versions()
+
+        print(f"PyTorch Backend: {backend}")
+        if versions:
+            for pkg, ver in versions.items():
+                print(f"   {pkg}={ver}")
+
+        if backend_file.exists():
+            print(f"   Source: {backend_file}")
+        else:
+            print("   Source: auto-detected (no .pytorch-backend file)")
+            print()
+            print(f"💡 To save this setting: cg env-config torch-backend set {backend}")
+
+    @with_env_logging("env-config torch-backend set")
+    def env_config_torch_set(self, args: argparse.Namespace, logger=None) -> None:
+        """Set PyTorch backend for this environment.
+
+        Probes for exact versions and stores both backend and version pins.
+        """
+        from comfygit_core.utils.pytorch_prober import PyTorchProbeError
+
+        env = self._get_env(args)
+        backend = args.backend
+
+        # Validate backend format
+        if not env.pytorch_manager.is_valid_backend(backend):
+            print(f"✗ Invalid backend: {backend}")
+            print()
+            print("Valid formats:")
+            print("  • cu118, cu121, cu124, cu126, cu128 (CUDA)")
+            print("  • cpu")
+            print("  • rocm6.2, rocm6.3 (AMD)")
+            print("  • xpu (Intel)")
+            sys.exit(1)
+
+        # Read python version
+        python_version_file = env.cec_path / ".python-version"
+        python_version = (
+            python_version_file.read_text(encoding="utf-8").strip()
+            if python_version_file.exists()
+            else "3.12"
+        )
+
+        # Probe and set backend with versions
+        print(f"🔍 Probing PyTorch versions for {backend} (Python {python_version})...")
+        try:
+            resolved = env.pytorch_manager.probe_and_set_backend(python_version, backend)
+        except PyTorchProbeError as e:
+            print(f"✗ Error probing PyTorch: {e}")
+            sys.exit(1)
+
+        # Show what was stored
+        versions = env.pytorch_manager.get_versions()
+        print(f"✓ PyTorch backend set to: {resolved}")
+        if versions:
+            for pkg, ver in versions.items():
+                print(f"   {pkg}={ver}")
+        print()
+        print("Run 'cg sync' to apply the new backend configuration.")
+
+    @with_env_logging("env-config torch-backend detect")
+    def env_config_torch_detect(self, args: argparse.Namespace, logger=None) -> None:
+        """Auto-detect recommended PyTorch backend using uv probe."""
+        from comfygit_core.utils.pytorch_prober import PyTorchProbeError, probe_pytorch_versions
+
+        env = self._get_env(args)
+        backend_file = env.pytorch_manager.backend_file
+
+        # Read python version from file
+        python_version_file = env.cec_path / ".python-version"
+        python_version = (
+            python_version_file.read_text(encoding="utf-8").strip()
+            if python_version_file.exists()
+            else "3.12"
+        )
+
+        # Probe for recommended backend
+        print(f"🔍 Probing PyTorch compatibility for Python {python_version}...")
+        try:
+            _, detected = probe_pytorch_versions(python_version, "auto")
+        except PyTorchProbeError as e:
+            print(f"✗ Error probing PyTorch: {e}")
+            sys.exit(1)
+
+        # Get current backend (if any)
+        if env.pytorch_manager.has_backend():
+            current = env.pytorch_manager.get_backend()
+        else:
+            current = "(not configured)"
+
+        print(f"Detected backend: {detected}")
+        print(f"Current backend:  {current}")
+
+        if backend_file.exists():
+            print(f"   Source: {backend_file}")
+        else:
+            print("   Source: not configured")
+
+        if current != detected and current != "(not configured)":
+            print()
+            print(f"💡 Consider updating: cg env-config torch-backend set {detected}")
+        elif current == "(not configured)":
+            print()
+            print(f"💡 Set the backend: cg env-config torch-backend set {detected}")
+
     @with_env_logging("run")
     def run(self, args: argparse.Namespace) -> None:
         """Run ComfyUI in the specified environment."""
@@ -278,14 +432,32 @@ class EnvironmentCommands:
         comfyui_args = args.args if hasattr(args, 'args') else []
         no_sync = getattr(args, 'no_sync', False)
 
+        # Handle torch-backend: use override, read from file, or probe if missing
+        torch_backend_override = getattr(args, 'torch_backend', None)
+        torch_backend, was_probed = self._get_or_probe_backend(env, torch_backend_override)
+
+        if torch_backend_override:
+            print(f"🔧 Using PyTorch backend override: {torch_backend}")
+        elif was_probed:
+            print(f"✓ Backend detected and saved: {torch_backend}")
+            print(f"   To change: cg env-config torch-backend set <backend>")
+        else:
+            print(f"🔧 Using PyTorch backend: {torch_backend}")
+
         current_branch = env.get_current_branch()
         branch_display = f" (on {current_branch})" if current_branch else " (detached HEAD)"
 
         while True:
             # Sync before running (unless --no-sync)
+            # Use explicit override if provided, otherwise None (backend is now in file)
             if not no_sync:
                 print(f"🔄 Syncing environment: {env.name}")
-                env.sync(preserve_workflows=True, remove_extra_nodes=False)
+                env.sync(
+                    preserve_workflows=True,
+                    remove_extra_nodes=False,
+                    backend_override=torch_backend_override if torch_backend_override else None,
+                    verbose=True,
+                )
 
             print(f"🎮 Starting ComfyUI in environment: {env.name}{branch_display}")
             if comfyui_args:
@@ -299,6 +471,54 @@ class EnvironmentCommands:
                 continue
 
             sys.exit(result.returncode)
+
+    @with_env_logging("sync")
+    def sync(self, args: argparse.Namespace, logger=None) -> None:
+        """Sync environment packages and dependencies."""
+        env = self._get_env(args)
+
+        # Handle torch-backend: use override, read from file, or probe if missing
+        torch_backend_override = getattr(args, 'torch_backend', None)
+        torch_backend, was_probed = self._get_or_probe_backend(env, torch_backend_override)
+
+        if torch_backend_override:
+            print(f"🔧 Using PyTorch backend override: {torch_backend}")
+        elif was_probed:
+            print(f"✓ Backend detected and saved: {torch_backend}")
+            print(f"   To change: cg env-config torch-backend set <backend>")
+        else:
+            print(f"🔧 Using PyTorch backend: {torch_backend}")
+
+        print(f"\n🔄 Syncing environment: {env.name}")
+
+        verbose = getattr(args, 'verbose', False)
+
+        try:
+            # Use explicit override if provided, otherwise None (backend is now in file)
+            result = env.sync(
+                dry_run=False,
+                model_strategy="skip",  # Sync command focuses on packages
+                remove_extra_nodes=False,  # Don't remove nodes, just sync
+                verbose=verbose,
+                backend_override=torch_backend_override if torch_backend_override else None,
+            )
+
+            if result.success:
+                print("\n✓ Sync complete")
+                if result.packages_synced:
+                    print(f"   Packages synced: {result.packages_synced}")
+                if result.dependency_groups_installed:
+                    print(f"   Dependency groups: {', '.join(result.dependency_groups_installed)}")
+            else:
+                print("\n⚠️  Sync completed with warnings")
+                for error in result.errors:
+                    print(f"   • {error}")
+
+        except Exception as e:
+            if logger:
+                logger.error(f"Sync failed: {e}", exc_info=True)
+            print(f"\n✗ Sync failed: {e}", file=sys.stderr)
+            sys.exit(1)
 
     def manifest(self, args: argparse.Namespace) -> None:
         """Show environment manifest (pyproject.toml configuration)."""
@@ -1997,10 +2217,11 @@ class EnvironmentCommands:
             sys.exit(1)
 
         # Preview mode - read-only, just show what would change
+        branch = getattr(args, 'branch', None)
         if getattr(args, "preview", False):
             try:
                 print(f"Fetching from {args.remote}...")
-                diff = env.preview_pull(remote=args.remote)
+                diff = env.preview_pull(remote=args.remote, branch=branch)
 
                 if not diff.has_changes:
                     if diff.is_already_merged:
@@ -2044,7 +2265,7 @@ class EnvironmentCommands:
             else:
                 # Check for conflicts before pull
                 print(f"Checking for conflicts with {args.remote}...")
-                diff = env.preview_pull(remote=args.remote)
+                diff = env.preview_pull(remote=args.remote, branch=branch)
                 if diff.has_conflicts:
                     # Interactive conflict resolution
                     from .strategies.conflict_resolver import InteractiveConflictResolver
@@ -2072,6 +2293,18 @@ class EnvironmentCommands:
                     # Mixed or empty: no strategy, git decides
 
             print(f"📥 Pulling from {args.remote}...")
+
+            # Handle torch-backend: use override, read from file, or probe if missing
+            torch_backend_override = getattr(args, 'torch_backend', None)
+            torch_backend, was_probed = self._get_or_probe_backend(env, torch_backend_override)
+
+            if torch_backend_override:
+                print(f"🔧 Using PyTorch backend override: {torch_backend}")
+            elif was_probed:
+                print(f"🔧 Auto-detected PyTorch backend: {torch_backend}")
+                print(f"   To save: cg env-config torch-backend set {torch_backend}")
+            else:
+                print(f"🔧 Using PyTorch backend: {torch_backend}")
 
             # Create callbacks for node and model progress (reuse repair command patterns)
             from comfygit_core.models.workflow import BatchDownloadCallbacks, NodeInstallCallbacks
@@ -2113,11 +2346,13 @@ class EnvironmentCommands:
             force = getattr(args, 'force', False)
             result = env.pull_and_repair(
                 remote=args.remote,
+                branch=branch,
                 model_strategy=getattr(args, 'models', 'all'),
                 model_callbacks=model_callbacks,
                 node_callbacks=node_callbacks,
                 strategy_option=strategy_option,
                 force=force,
+                backend_override=torch_backend,
             )
 
             # Extract sync result for summary

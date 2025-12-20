@@ -41,7 +41,7 @@ class TestEnvironmentCreateProgress:
         phase_names = [p[0] for p in tracker.phases]
         assert "clone_comfyui" in phase_names or "restore_comfyui" in phase_names, \
             f"Expected ComfyUI phase, got: {phase_names}"
-        assert "install_pytorch" in phase_names, \
+        assert "probe_pytorch" in phase_names, \
             f"Expected PyTorch phase, got: {phase_names}"
 
         # Verify progress increases monotonically

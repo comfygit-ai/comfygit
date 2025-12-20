@@ -99,6 +99,9 @@ def test_env(test_workspace):
     }
     env.pyproject.save(config)
 
+    # Create .pytorch-backend file for tests that need it
+    (cec_path / ".pytorch-backend").write_text("cu121")
+
     # Initialize git repo
     git_mgr = GitManager(cec_path)
     git_mgr.initialize_environment_repo("Initial test environment")
@@ -394,6 +397,58 @@ def mock_comfyui_clone(monkeypatch):
 
     return fake_clone_comfyui
 
+def _fake_probe_pytorch_versions(python_version, backend):
+    """Fake probe that returns mock versions without network."""
+    # Resolve "auto" to a reasonable default
+    resolved_backend = "cu128" if backend == "auto" else backend
+
+    # Return fake versions with the resolved backend suffix
+    if resolved_backend == "cpu":
+        versions = {
+            "torch": "2.5.1",
+            "torchvision": "0.20.1",
+            "torchaudio": "2.5.1",
+        }
+    else:
+        versions = {
+            "torch": f"2.5.1+{resolved_backend}",
+            "torchvision": f"0.20.1+{resolved_backend}",
+            "torchaudio": f"2.5.1+{resolved_backend}",
+        }
+
+    return versions, resolved_backend
+
+
+@pytest.fixture
+def mock_pytorch_probe(monkeypatch):
+    """Mock PyTorch probing to avoid network calls and actual venv creation.
+
+    This fixture mocks probe_pytorch_versions to return fake versions
+    instead of actually probing with uv dry-run.
+    """
+    monkeypatch.setattr(
+        "comfygit_core.utils.pytorch_prober.probe_pytorch_versions",
+        _fake_probe_pytorch_versions
+    )
+
+    return _fake_probe_pytorch_versions
+
+
+@pytest.fixture(autouse=True)
+def auto_mock_pytorch_probe_for_integration(request, monkeypatch):
+    """Auto-mock PyTorch probing for integration tests.
+
+    This fixture automatically mocks probe_pytorch_versions for any test
+    in the integration/ directory to avoid real UV dry-run probes.
+    """
+    # Only apply to integration tests
+    if "integration" in str(request.fspath):
+        monkeypatch.setattr(
+            "comfygit_core.utils.pytorch_prober.probe_pytorch_versions",
+            _fake_probe_pytorch_versions
+        )
+
+
 @pytest.fixture
 def mock_github_api(monkeypatch):
     """Mock GitHub API calls to avoid network requests."""
@@ -401,7 +456,7 @@ def mock_github_api(monkeypatch):
     class FakeRepositoryInfo:
         def __init__(self):
             self.latest_release = "v0.3.20"
-            self.default_branch = "master"
+            self.default_branch = "main"
 
     class FakeRelease:
         def __init__(self, tag_name: str):

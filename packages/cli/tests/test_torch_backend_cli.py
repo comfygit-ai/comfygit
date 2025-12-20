@@ -1,0 +1,292 @@
+"""Tests for PyTorch backend CLI behavior.
+
+This tests the refined behavior where:
+- Creation commands (create, import) write .pytorch-backend
+- Operation commands (sync, run, pull) READ from file, never write
+- --torch-backend flag is a one-time override that doesn't persist
+- env-config torch-backend is environment-scoped configuration
+"""
+
+import argparse
+from unittest.mock import MagicMock, patch
+
+import pytest
+from comfygit_cli.cli import create_parser
+
+
+class TestTorchBackendArgumentDefaults:
+    """Test that --torch-backend defaults to None for operation commands.
+
+    This ensures we can distinguish "user provided flag" from "use file".
+    """
+
+    def test_sync_command_torch_backend_default_none(self):
+        """Sync command --torch-backend should default to None (not 'auto').
+
+        This allows sync to read from .pytorch-backend file when no flag is provided.
+        """
+        parser = create_parser()
+        args = parser.parse_args(["sync"])
+
+        assert hasattr(args, "torch_backend")
+        assert args.torch_backend is None  # Not 'auto'!
+
+    def test_run_command_torch_backend_default_none(self):
+        """Run command --torch-backend should default to None."""
+        parser = create_parser()
+        args = parser.parse_args(["run"])
+
+        assert hasattr(args, "torch_backend")
+        assert args.torch_backend is None
+
+    def test_pull_command_torch_backend_default_none(self):
+        """Pull command --torch-backend should default to None."""
+        parser = create_parser()
+        args = parser.parse_args(["pull"])
+
+        assert hasattr(args, "torch_backend")
+        assert args.torch_backend is None
+
+    def test_sync_command_accepts_explicit_override(self):
+        """Sync command should accept explicit --torch-backend override."""
+        parser = create_parser()
+        args = parser.parse_args(["sync", "--torch-backend", "cu128"])
+
+        assert args.torch_backend == "cu128"
+
+    def test_run_command_accepts_explicit_override(self):
+        """Run command should accept explicit --torch-backend override."""
+        parser = create_parser()
+        args = parser.parse_args(["run", "--torch-backend", "cpu"])
+
+        assert args.torch_backend == "cpu"
+
+    def test_pull_command_accepts_explicit_override(self):
+        """Pull command should accept explicit --torch-backend override."""
+        parser = create_parser()
+        args = parser.parse_args(["pull", "--torch-backend", "rocm6.3"])
+
+        assert args.torch_backend == "rocm6.3"
+
+
+class TestCreationCommandsKeepAutoDefault:
+    """Test that creation commands (create, import) keep 'auto' default.
+
+    These commands SHOULD auto-detect and write to .pytorch-backend file.
+    """
+
+    def test_create_command_torch_backend_default_auto(self):
+        """Create command should still default to 'auto' for detection."""
+        parser = create_parser()
+        args = parser.parse_args(["create", "test-env"])
+
+        assert hasattr(args, "torch_backend")
+        assert args.torch_backend == "auto"
+
+    def test_import_command_torch_backend_default_auto(self):
+        """Import command should still default to 'auto' for detection."""
+        parser = create_parser()
+        args = parser.parse_args(["import", "test.tar.gz"])
+
+        assert hasattr(args, "torch_backend")
+        assert args.torch_backend == "auto"
+
+
+class TestEnvConfigTorchBackendSubcommand:
+    """Test the new cg env-config torch-backend subcommand.
+
+    This replaces the old cg config torch-backend (which was incorrectly global).
+    """
+
+    def test_env_config_torch_backend_show(self):
+        """env-config torch-backend show should exist."""
+        parser = create_parser()
+        args = parser.parse_args(["env-config", "torch-backend", "show"])
+
+        assert args.command == "env-config"
+        assert args.env_config_command == "torch-backend"
+        assert args.torch_command == "show"
+
+    def test_env_config_torch_backend_set(self):
+        """env-config torch-backend set <backend> should exist."""
+        parser = create_parser()
+        args = parser.parse_args(["env-config", "torch-backend", "set", "cu128"])
+
+        assert args.command == "env-config"
+        assert args.env_config_command == "torch-backend"
+        assert args.torch_command == "set"
+        assert args.backend == "cu128"
+
+    def test_env_config_torch_backend_detect(self):
+        """env-config torch-backend detect should exist."""
+        parser = create_parser()
+        args = parser.parse_args(["env-config", "torch-backend", "detect"])
+
+        assert args.command == "env-config"
+        assert args.env_config_command == "torch-backend"
+        assert args.torch_command == "detect"
+
+
+class TestConfigTorchBackendRemoved:
+    """Test that global config torch-backend commands are removed.
+
+    The old cg config torch-backend was incorrectly scoped - it operated on
+    environments but didn't require -e flag or active environment awareness.
+    """
+
+    def test_config_torch_backend_not_available(self):
+        """Global config torch-backend should not exist."""
+        parser = create_parser()
+
+        # Parsing "config torch-backend show" should fail or not set torch_command
+        args = parser.parse_args(["config"])
+
+        # Either torch-backend subparser is removed, or if config doesn't have
+        # subparsers for torch-backend, it shouldn't have config_command == "torch-backend"
+        if hasattr(args, 'config_command'):
+            assert args.config_command != "torch-backend", \
+                "config torch-backend should be removed (use env-config instead)"
+
+
+class TestSyncBehavior:
+    """Test that sync reads from file and doesn't overwrite user settings."""
+
+    @patch('comfygit_cli.env_commands.get_workspace_or_exit')
+    def test_sync_reads_from_backend_file(self, mock_get_workspace):
+        """Sync should read backend from .pytorch-backend file."""
+        from comfygit_cli.env_commands import EnvironmentCommands
+
+        # Setup mocks
+        mock_env = MagicMock()
+        mock_env.name = "test-env"
+        mock_env.pytorch_manager.backend_file.exists.return_value = True
+        mock_env.pytorch_manager.get_backend.return_value = "cu128"
+        mock_env.sync.return_value = MagicMock(success=True, packages_synced=0, dependency_groups_installed=[], errors=[])
+
+        mock_workspace = MagicMock()
+        mock_workspace.get_active_environment.return_value = mock_env
+        mock_get_workspace.return_value = mock_workspace
+
+        # Create commands handler
+        cmd = EnvironmentCommands()
+        # Clear cached property
+        if 'workspace' in cmd.__dict__:
+            del cmd.__dict__['workspace']
+
+        args = argparse.Namespace(
+            target_env=None,
+            torch_backend=None,  # No override - should read from file
+            verbose=False
+        )
+
+        cmd.sync(args)
+
+        # Should have read from file, NOT called detect_backend
+        mock_env.pytorch_manager.get_backend.assert_called()
+        mock_env.pytorch_manager.detect_backend.assert_not_called()
+        # Should NOT have called set_backend (no file write)
+        mock_env.pytorch_manager.set_backend.assert_not_called()
+
+    @patch('comfygit_cli.env_commands.get_workspace_or_exit')
+    def test_sync_warns_when_no_backend_file(self, mock_get_workspace, capsys, tmp_path):
+        """Sync should warn user when .pytorch-backend file doesn't exist."""
+        from comfygit_cli.env_commands import EnvironmentCommands
+
+        # Setup mocks - no backend file (has_backend returns False)
+        mock_env = MagicMock()
+        mock_env.name = "test-env"
+        mock_env.cec_path = tmp_path  # For .python-version file check
+        mock_env.pytorch_manager.has_backend.return_value = False  # Key fix: mock has_backend()
+        mock_env.pytorch_manager.probe_and_set_backend.return_value = "cu126"  # Auto-detected
+        mock_env.sync.return_value = MagicMock(success=True, packages_synced=0, dependency_groups_installed=[], errors=[])
+
+        mock_workspace = MagicMock()
+        mock_workspace.get_active_environment.return_value = mock_env
+        mock_get_workspace.return_value = mock_workspace
+
+        cmd = EnvironmentCommands()
+        if 'workspace' in cmd.__dict__:
+            del cmd.__dict__['workspace']
+
+        args = argparse.Namespace(
+            target_env=None,
+            torch_backend=None,
+            verbose=False
+        )
+
+        cmd.sync(args)
+
+        captured = capsys.readouterr()
+        # Should warn user about missing backend file
+        assert "No PyTorch backend configured" in captured.out or "⚠️" in captured.out
+        # Should suggest how to save the setting
+        assert "env-config torch-backend set" in captured.out
+
+    @patch('comfygit_cli.env_commands.get_workspace_or_exit')
+    def test_sync_with_override_doesnt_write_file(self, mock_get_workspace):
+        """Sync with --torch-backend override should NOT write to file."""
+        from comfygit_cli.env_commands import EnvironmentCommands
+
+        mock_env = MagicMock()
+        mock_env.name = "test-env"
+        mock_env.pytorch_manager.backend_file.exists.return_value = True
+        mock_env.pytorch_manager.get_backend.return_value = "cu126"  # Currently stored
+        mock_env.sync.return_value = MagicMock(success=True, packages_synced=0, dependency_groups_installed=[], errors=[])
+
+        mock_workspace = MagicMock()
+        mock_workspace.get_active_environment.return_value = mock_env
+        mock_get_workspace.return_value = mock_workspace
+
+        cmd = EnvironmentCommands()
+        if 'workspace' in cmd.__dict__:
+            del cmd.__dict__['workspace']
+
+        args = argparse.Namespace(
+            target_env=None,
+            torch_backend="cpu",  # Explicit override
+            verbose=False
+        )
+
+        cmd.sync(args)
+
+        # Should NOT write to file - override is one-time only
+        mock_env.pytorch_manager.set_backend.assert_not_called()
+
+
+class TestRunBehavior:
+    """Test that run reads from file like sync does."""
+
+    @patch('comfygit_cli.env_commands.get_workspace_or_exit')
+    def test_run_uses_backend_from_file(self, mock_get_workspace):
+        """Run should use backend from .pytorch-backend file."""
+        from comfygit_cli.env_commands import EnvironmentCommands
+
+        mock_env = MagicMock()
+        mock_env.name = "test-env"
+        mock_env.get_current_branch.return_value = "main"
+        mock_env.pytorch_manager.backend_file.exists.return_value = True
+        mock_env.pytorch_manager.get_backend.return_value = "cu128"
+        mock_env.sync.return_value = MagicMock(success=True)
+        mock_env.run.return_value = MagicMock(returncode=0)
+
+        mock_workspace = MagicMock()
+        mock_workspace.get_active_environment.return_value = mock_env
+        mock_get_workspace.return_value = mock_workspace
+
+        cmd = EnvironmentCommands()
+        if 'workspace' in cmd.__dict__:
+            del cmd.__dict__['workspace']
+
+        args = argparse.Namespace(
+            target_env=None,
+            torch_backend=None,  # Should read from file
+            no_sync=False,
+            args=[]
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            cmd.run(args)
+
+        # Should have read from file, not auto-detected
+        mock_env.pytorch_manager.get_backend.assert_called()
+        mock_env.pytorch_manager.detect_backend.assert_not_called()

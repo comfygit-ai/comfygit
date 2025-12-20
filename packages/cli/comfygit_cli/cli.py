@@ -3,13 +3,12 @@
 
 import argparse
 import sys
-from importlib.metadata import version, PackageNotFoundError
+from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Callable
 
 import argcomplete
 
-from .completion_commands import CompletionCommands
 from .completers import (
     branch_completer,
     commit_hash_completer,
@@ -18,6 +17,7 @@ from .completers import (
     ref_completer,
     workflow_completer,
 )
+from .completion_commands import CompletionCommands
 from .env_commands import EnvironmentCommands
 from .global_commands import GlobalCommands
 from .logging.logging_config import setup_logging
@@ -274,8 +274,11 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     registry_update_parser = registry_subparsers.add_parser("update", help="Update registry data from GitHub")
     registry_update_parser.set_defaults(func=global_cmds.registry_update)
 
-    # Config management
+    # Config management - now with subcommands
     config_parser = subparsers.add_parser("config", help="Manage configuration settings")
+    config_subparsers = config_parser.add_subparsers(dest="config_command", help="Configuration commands")
+
+    # Legacy flags - still supported at root level for backward compatibility
     config_parser.add_argument("--civitai-key", type=str, help="Set Civitai API key (use empty string to clear)")
     config_parser.add_argument("--show", action="store_true", help="Show current configuration")
     config_parser.set_defaults(func=global_cmds.config)
@@ -386,9 +389,42 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
 
     # Environment Operation Commands (operate IN environments, require -e or active)
 
+    # env-config - Environment-scoped configuration (requires -e or active env)
+    env_config_parser = subparsers.add_parser("env-config", help="Manage environment-specific configuration")
+    env_config_subparsers = env_config_parser.add_subparsers(dest="env_config_command", help="Environment config commands")
+    env_config_parser.set_defaults(func=_make_help_func(env_config_parser))
+
+    # env-config torch-backend - Manage PyTorch backend for this environment
+    env_config_torch_parser = env_config_subparsers.add_parser("torch-backend", help="Manage PyTorch backend settings")
+    env_config_torch_subparsers = env_config_torch_parser.add_subparsers(dest="torch_command", help="PyTorch backend commands")
+    env_config_torch_parser.set_defaults(func=_make_help_func(env_config_torch_parser))
+
+    # env-config torch-backend show
+    env_config_torch_show_parser = env_config_torch_subparsers.add_parser("show", help="Show current PyTorch backend")
+    env_config_torch_show_parser.set_defaults(func=env_cmds.env_config_torch_show)
+
+    # env-config torch-backend set <backend>
+    env_config_torch_set_parser = env_config_torch_subparsers.add_parser("set", help="Set PyTorch backend")
+    env_config_torch_set_parser.add_argument("backend", help="Backend to set (e.g., cu128, cpu, rocm6.3, xpu)")
+    env_config_torch_set_parser.set_defaults(func=env_cmds.env_config_torch_set)
+
+    # env-config torch-backend detect
+    env_config_torch_detect_parser = env_config_torch_subparsers.add_parser("detect", help="Auto-detect and show recommended backend")
+    env_config_torch_detect_parser.set_defaults(func=env_cmds.env_config_torch_detect)
+
     # run - Run ComfyUI (special handling for ComfyUI args)
     run_parser = subparsers.add_parser("run", help="Run ComfyUI")
     run_parser.add_argument("--no-sync", action="store_true", help="Skip environment sync before running")
+    run_parser.add_argument(
+        "--torch-backend",
+        default=None,
+        metavar="BACKEND",
+        help=(
+            "PyTorch backend override (one-time, not saved). Examples: cpu, "
+            "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
+            "Reads from .pytorch-backend file if not specified."
+        ),
+    )
     run_parser.set_defaults(func=env_cmds.run, args=[])
 
     # status - Show environment status
@@ -413,6 +449,25 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Model download strategy: all (default), required only, or skip"
     )
     repair_parser.set_defaults(func=env_cmds.repair)
+
+    # sync - Sync environment (packages, nodes, models)
+    sync_parser = subparsers.add_parser("sync", help="Sync environment packages and dependencies")
+    sync_parser.add_argument(
+        "--torch-backend",
+        default=None,
+        metavar="BACKEND",
+        help=(
+            "PyTorch backend override (one-time, not saved). Examples: cpu, "
+            "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
+            "Reads from .pytorch-backend file if not specified."
+        ),
+    )
+    sync_parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show full UV output during sync"
+    )
+    sync_parser.set_defaults(func=env_cmds.sync)
 
     # log - Show commit history
     log_parser = subparsers.add_parser("log", help="Show commit history")
@@ -490,6 +545,11 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Git remote name (default: origin)"
     )
     pull_parser.add_argument(
+        "-b", "--branch",
+        default=None,
+        help="Remote branch to pull (default: current local branch). Use when remote has different default branch (e.g., master vs main)"
+    )
+    pull_parser.add_argument(
         "--models",
         choices=["all", "required", "skip"],
         default="all",
@@ -509,6 +569,16 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         "--auto-resolve",
         choices=["mine", "theirs"],
         help="Auto-resolve conflicts: 'mine' keeps local, 'theirs' takes incoming"
+    )
+    pull_parser.add_argument(
+        "--torch-backend",
+        default=None,
+        metavar="BACKEND",
+        help=(
+            "PyTorch backend override (one-time, not saved). Examples: cpu, "
+            "cu128 (CUDA 12.8), cu126, cu124, rocm6.3 (AMD), xpu (Intel). "
+            "Reads from .pytorch-backend file if not specified."
+        ),
     )
     pull_parser.set_defaults(func=env_cmds.pull)
 

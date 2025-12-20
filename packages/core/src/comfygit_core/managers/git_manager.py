@@ -63,6 +63,12 @@ __pycache__/
 
 # Runtime marker (created after successful environment initialization)
 .complete
+
+# PyTorch backend configuration (machine-specific)
+.pytorch-backend
+
+# Lock file (machine-specific due to PyTorch platform variants)
+uv.lock
 """
 
     def ensure_git_identity(self) -> None:
@@ -360,6 +366,44 @@ __pycache__/
         """Create standard .gitignore for environment tracking."""
         gitignore_path = self.repo_path / ".gitignore"
         gitignore_path.write_text(self.gitignore_content)
+
+    def ensure_gitignore_entry(self, entry: str) -> bool:
+        """Ensure a specific entry exists in .gitignore.
+
+        Used during migrations to add new gitignore entries to existing
+        environments.
+
+        Args:
+            entry: The gitignore entry to add (e.g., '.pytorch-backend')
+
+        Returns:
+            True if entry was added, False if already present
+        """
+        gitignore_path = self.repo_path / ".gitignore"
+
+        if not gitignore_path.exists():
+            # Create with just this entry
+            gitignore_path.write_text(f"{entry}\n")
+            logger.debug(f"Created .gitignore with entry: {entry}")
+            return True
+
+        current_content = gitignore_path.read_text()
+        lines = current_content.strip().split('\n') if current_content.strip() else []
+
+        # Check if entry already exists (exact match or with trailing comment)
+        for line in lines:
+            stripped = line.split('#')[0].strip()
+            if stripped == entry:
+                logger.debug(f".gitignore already contains: {entry}")
+                return False
+
+        # Add entry at the end
+        if not current_content.endswith('\n'):
+            current_content += '\n'
+        current_content += f"\n# Added during migration\n{entry}\n"
+        gitignore_path.write_text(current_content)
+        logger.info(f"Added to .gitignore: {entry}")
+        return True
 
 
     def get_status(self, pyproject_manager: PyprojectManager | None = None) -> GitStatus:

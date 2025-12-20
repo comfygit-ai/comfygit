@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .git_manager import GitManager
     from .node_manager import NodeManager
     from .pyproject_manager import PyprojectManager
+    from .pytorch_backend_manager import PyTorchBackendManager
     from .uv_project_manager import UVProjectManager
     from .workflow_manager import WorkflowManager
 
@@ -39,12 +40,14 @@ class EnvironmentGitOrchestrator:
         pyproject_manager: PyprojectManager,
         uv_manager: UVProjectManager,
         workflow_manager: WorkflowManager,
+        pytorch_manager: PyTorchBackendManager | None = None,
     ):
         self.git = git_manager
         self.node_manager = node_manager
         self.pyproject = pyproject_manager
         self.uv = uv_manager
         self.workflow_manager = workflow_manager
+        self.pytorch_manager = pytorch_manager
 
     def checkout(
         self,
@@ -273,10 +276,6 @@ class EnvironmentGitOrchestrator:
             strategy_option: Optional strategy option (e.g., "ours" or "theirs" for -X flag)
         """
         old_nodes = self.pyproject.nodes.get_existing()
-
-        # Remove uv.lock if it's blocking the merge - it gets regenerated after anyway
-        self._cleanup_uvlock_before_git_operation()
-
         self.git.merge_branch(branch, message, strategy_option)
         self._sync_environment_after_git(old_nodes)
         logger.info(f"Merged branch '{branch}'")
@@ -314,8 +313,8 @@ class EnvironmentGitOrchestrator:
         # Reconcile nodes
         self.node_manager.reconcile_nodes_for_rollback(old_nodes, new_nodes)
 
-        # Sync Python environment
-        self.uv.sync_project(all_groups=True)
+        # Sync Python environment with PyTorch injection
+        self.uv.sync_project(all_groups=True, pytorch_manager=self.pytorch_manager)
 
         # Restore workflows
         self.workflow_manager.restore_all_from_cec(preserve_uncommitted=preserve_uncommitted)
@@ -487,31 +486,3 @@ class EnvironmentGitOrchestrator:
             logger.warning(f"Could not check target branch workflows: {e}")
             return True
 
-    def _cleanup_uvlock_before_git_operation(self) -> None:
-        """Remove uv.lock if it would block a git operation.
-
-        After branch switch, uv.sync_project() regenerates uv.lock which can
-        differ from the committed version. This creates phantom "dirty" state
-        that blocks merge/pull operations. Since uv.lock gets regenerated
-        after every git operation anyway (via _sync_environment_after_git),
-        we can safely remove it before merge/pull to prevent blocking.
-        """
-        uvlock_path = self.git.repo_path / "uv.lock"
-        if uvlock_path.exists():
-            # Check if uv.lock is untracked or modified
-            from ..utils.git import get_uncommitted_changes
-            changes = get_uncommitted_changes(self.git.repo_path)
-            if "uv.lock" in changes:
-                logger.debug("Removing regenerated uv.lock before git operation")
-                uvlock_path.unlink()
-            else:
-                # Check for untracked uv.lock
-                from ..utils.git import _git
-                result = _git(
-                    ["ls-files", "--others", "--exclude-standard", "uv.lock"],
-                    self.git.repo_path,
-                    check=False
-                )
-                if result.stdout.strip() == "uv.lock":
-                    logger.debug("Removing untracked uv.lock before git operation")
-                    uvlock_path.unlink()

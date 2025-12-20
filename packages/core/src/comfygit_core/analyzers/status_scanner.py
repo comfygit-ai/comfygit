@@ -19,6 +19,7 @@ from .node_git_analyzer import get_node_git_info
 
 if TYPE_CHECKING:
     from ..managers.pyproject_manager import PyprojectManager
+    from ..managers.pytorch_backend_manager import PyTorchBackendManager
     from ..managers.uv_project_manager import UVProjectManager
 
 logger = get_logger(__name__)
@@ -33,11 +34,13 @@ class StatusScanner:
         pyproject: PyprojectManager,
         venv_path: Path,
         comfyui_path: Path,
+        pytorch_manager: PyTorchBackendManager | None = None,
     ):
         self._uv = uv
         self._pyproject = pyproject
         self._venv_path = venv_path
         self._comfyui_path = comfyui_path
+        self._pytorch_manager = pytorch_manager
 
     def get_full_comparison(self) -> EnvironmentComparison:
         """Get complete environment comparison with all details.
@@ -380,15 +383,17 @@ class StatusScanner:
     def check_packages_sync(self) -> PackageSyncStatus:
         """Check if packages are in sync with pyproject.toml.
 
-        Args:
-            uv: UV interface for package operations
-
         Returns:
             Package sync status
         """
         try:
             # Use UV's dry-run to check if sync would change anything
-            self._uv.sync_project(dry_run=True, all_groups=True)
+            # PyTorch injection ensures the check uses the correct backend
+            self._uv.sync_project(
+                dry_run=True,
+                all_groups=True,
+                pytorch_manager=self._pytorch_manager
+            )
             return PackageSyncStatus(
                 in_sync=True, message="Packages match pyproject.toml"
             )

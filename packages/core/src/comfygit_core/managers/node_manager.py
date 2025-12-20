@@ -23,10 +23,12 @@ from ..services.node_lookup_service import NodeLookupService
 from ..strategies.confirmation import AutoConfirmStrategy, ConfirmationStrategy
 from ..utils.conflict_parser import extract_conflicting_packages
 from ..utils.dependency_parser import parse_dependency_string
+from ..utils.filesystem import rmtree
 from ..utils.git import git_clone, is_github_url, normalize_github_url
 from ..validation.resolution_tester import ResolutionTester
 
 if TYPE_CHECKING:
+    from ..managers.pytorch_backend_manager import PyTorchBackendManager
     from ..repositories.node_mappings_repository import NodeMappingsRepository
 
 logger = get_logger(__name__)
@@ -43,6 +45,7 @@ class NodeManager:
         resolution_tester: ResolutionTester,
         custom_nodes_path: Path,
         node_repository: NodeMappingsRepository,
+        pytorch_manager: PyTorchBackendManager | None = None,
     ):
         self.pyproject = pyproject
         self.uv = uv
@@ -50,6 +53,7 @@ class NodeManager:
         self.resolution_tester = resolution_tester
         self.custom_nodes_path = custom_nodes_path
         self.node_repository = node_repository
+        self.pytorch_manager = pytorch_manager
 
     def _find_node_by_name(self, name: str) -> tuple[str, NodeInfo] | None:
         """Find a node by name across all identifiers (case-insensitive).
@@ -111,7 +115,7 @@ class NodeManager:
             # STEP 1: Filesystem changes
             if disabled_existed:
                 logger.info(f"Removing old disabled version of {node_info.name}")
-                shutil.rmtree(disabled_path)
+                rmtree(disabled_path)
 
             shutil.copytree(cache_path, target_path, dirs_exist_ok=True)
             logger.info(f"Installed node '{node_info.name}' to {target_path}")
@@ -120,7 +124,7 @@ class NodeManager:
             self.add_node_package(node_package)
 
             # STEP 3: Environment sync (quiet - users see our high-level messages)
-            self.uv.sync_project(quiet=True, all_groups=True)
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         except Exception as e:
             # === ROLLBACK ===
@@ -136,7 +140,7 @@ class NodeManager:
             # 2. Clean up filesystem
             if target_path.exists():
                 try:
-                    shutil.rmtree(target_path)
+                    rmtree(target_path)
                     logger.debug(f"Removed {target_path}")
                 except Exception as fs_err:
                     logger.error(f"Failed to clean up {target_path}: {fs_err}")
@@ -393,7 +397,7 @@ class NodeManager:
             # STEP 1: Filesystem changes
             if disabled_existed:
                 logger.info(f"Removing old disabled version of {node_info.name}")
-                shutil.rmtree(disabled_path)
+                rmtree(disabled_path)
 
             shutil.copytree(cache_path, target_path, dirs_exist_ok=True)
             logger.info(f"Installed node '{node_info.name}' to {target_path}")
@@ -402,7 +406,7 @@ class NodeManager:
             self.add_node_package(node_package)
 
             # STEP 3: Environment sync (quiet - users see our high-level messages)
-            self.uv.sync_project(quiet=True, all_groups=True)
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         except Exception as e:
             # === ROLLBACK ===
@@ -418,7 +422,7 @@ class NodeManager:
             # 2. Clean up filesystem
             if target_path.exists():
                 try:
-                    shutil.rmtree(target_path)
+                    rmtree(target_path)
                     logger.debug(f"Removed {target_path}")
                 except Exception as fs_err:
                     logger.warning(f"Could not remove {target_path} during rollback: {fs_err}")
@@ -520,7 +524,7 @@ class NodeManager:
                 logger.info(f"Disabled development node: {removed_node.name}")
             else:
                 # Delete registry/git node (cached globally, can re-download)
-                shutil.rmtree(node_path)
+                rmtree(node_path)
                 filesystem_action = "deleted"
                 logger.info(f"Removed {removed_node.name} (cached, can reinstall)")
 
@@ -538,7 +542,7 @@ class NodeManager:
             self.pyproject.uv_config.cleanup_orphaned_sources(removed_sources)
 
         # Sync Python environment to remove orphaned packages (quiet - users see our high-level messages)
-        self.uv.sync_project(quiet=True, all_groups=True)
+        self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         logger.info(f"Removed node '{actual_identifier}' from tracking")
 
@@ -571,13 +575,13 @@ class NodeManager:
         filesystem_action = "none"
 
         if node_path.exists() and node_path.is_dir():
-            shutil.rmtree(node_path)
+            rmtree(node_path)
             removed = True
             filesystem_action = "deleted"
             logger.info(f"Removed untracked node directory: {node_name}")
 
         if disabled_path.exists() and disabled_path.is_dir():
-            shutil.rmtree(disabled_path)
+            rmtree(disabled_path)
             removed = True
             filesystem_action = "deleted"
             logger.info(f"Removed disabled node directory: {node_name}.disabled")
@@ -642,7 +646,7 @@ class NodeManager:
                     continue
 
                 node_path = self.custom_nodes_path / node_name
-                shutil.rmtree(node_path)
+                rmtree(node_path)
                 logger.info(f"Removed extra node: {node_name}")
         else:
             # Warn about extra nodes (don't auto-delete during manual sync)
@@ -797,7 +801,7 @@ class NodeManager:
                 continue  # Already gone
 
             # Registry/git node - delete it (cached globally, can reinstall)
-            shutil.rmtree(node_path)
+            rmtree(node_path)
             logger.info(f"Removed '{old_node_info.name}' (rollback, cached)")
 
         # Nodes that were added (in new, not in old)
@@ -1180,7 +1184,7 @@ class NodeManager:
         result.message = f"Updated requirements: +{len(added)} -{len(removed)}"
 
         # Sync Python environment to apply requirement changes (quiet - users see our high-level messages)
-        self.uv.sync_project(quiet=True, all_groups=True)
+        self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         logger.info(f"Updated dev node '{node_info.name}': {result.message}")
         return result
@@ -1232,13 +1236,13 @@ class NodeManager:
             if node_path.exists():
                 if disabled_path.exists():
                     # Clean up any existing .disabled from previous failed update
-                    shutil.rmtree(disabled_path)
+                    rmtree(disabled_path)
                 shutil.move(node_path, disabled_path)
                 logger.debug(f"Disabled old version of '{node_info.name}'")
 
             # STEP 2: Remove old node from tracking
             self.pyproject.nodes.remove(identifier)
-            self.uv.sync_project(quiet=True, all_groups=True)
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
             # STEP 3: Get complete version data with downloadUrl from install endpoint
             complete_version = self.node_lookup.registry_client.install_node(
@@ -1258,7 +1262,7 @@ class NodeManager:
 
             # STEP 5: Success - delete old disabled version
             if disabled_path.exists():
-                shutil.rmtree(disabled_path)
+                rmtree(disabled_path)
                 logger.debug(f"Deleted old version of '{node_info.name}'")
 
         except Exception as e:
@@ -1275,7 +1279,7 @@ class NodeManager:
             # 2. Remove failed new installation
             if node_path.exists():
                 try:
-                    shutil.rmtree(node_path)
+                    rmtree(node_path)
                     logger.debug(f"Removed failed installation of '{node_info.name}'")
                 except Exception as cleanup_err:
                     logger.error(f"Failed to clean up new installation: {cleanup_err}")
@@ -1290,7 +1294,7 @@ class NodeManager:
 
             # 4. Sync environment to restore old dependencies
             try:
-                self.uv.sync_project(quiet=True, all_groups=True)
+                self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
             except Exception:
                 pass  # Best effort
 
@@ -1354,13 +1358,13 @@ class NodeManager:
             # STEP 1: Disable old node (rename to .disabled)
             if node_path.exists():
                 if disabled_path.exists():
-                    shutil.rmtree(disabled_path)
+                    rmtree(disabled_path)
                 shutil.move(node_path, disabled_path)
                 logger.debug(f"Disabled old version of '{node_info.name}'")
 
             # STEP 2: Remove old node from tracking
             self.pyproject.nodes.remove(identifier)
-            self.uv.sync_project(quiet=True, all_groups=True)
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
             # STEP 3: Create fresh node info from GitHub API response
             fresh_node_info = NodeInfo(
@@ -1375,7 +1379,7 @@ class NodeManager:
 
             # STEP 5: Success - delete old disabled version
             if disabled_path.exists():
-                shutil.rmtree(disabled_path)
+                rmtree(disabled_path)
                 logger.debug(f"Deleted old version of '{node_info.name}'")
 
         except Exception as e:
@@ -1392,7 +1396,7 @@ class NodeManager:
             # 2. Remove failed new installation
             if node_path.exists():
                 try:
-                    shutil.rmtree(node_path)
+                    rmtree(node_path)
                     logger.debug(f"Removed failed installation of '{node_info.name}'")
                 except Exception as cleanup_err:
                     logger.error(f"Failed to clean up new installation: {cleanup_err}")
@@ -1407,7 +1411,7 @@ class NodeManager:
 
             # 4. Sync environment to restore old dependencies
             try:
-                self.uv.sync_project(quiet=True, all_groups=True)
+                self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
             except Exception:
                 pass  # Best effort
 
