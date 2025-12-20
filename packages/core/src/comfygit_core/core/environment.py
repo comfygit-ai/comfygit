@@ -278,6 +278,10 @@ class Environment:
             # Print so user sees it in CLI output
             import sys
             print("📦 Migrated environment to schema v2 (stripped embedded PyTorch config)", file=sys.stderr)
+
+        # Always ensure .pytorch-backend is in .gitignore (handles pulls from older remotes)
+        self.pytorch_manager._ensure_gitignore_entry()
+
         return migrated
 
     def sync(
@@ -552,6 +556,7 @@ class Environment:
         node_callbacks: NodeInstallCallbacks | None = None,
         strategy_option: str | None = None,
         force: bool = False,
+        backend_override: str | None = None,
     ) -> dict:
         """Pull from remote and auto-repair environment (atomic operation).
 
@@ -566,6 +571,7 @@ class Environment:
             node_callbacks: Optional callbacks for node installation progress
             strategy_option: Optional git merge strategy (e.g., "ours" or "theirs")
             force: If True, discard uncommitted changes and allow unrelated histories
+            backend_override: Override PyTorch backend for sync (e.g., "cu128")
 
         Returns:
             Dict with pull results and sync_result
@@ -632,7 +638,8 @@ class Environment:
             sync_result = self.sync(
                 model_strategy=model_strategy,
                 model_callbacks=model_callbacks,
-                node_callbacks=node_callbacks
+                node_callbacks=node_callbacks,
+                backend_override=backend_override,
             )
 
             # Check for sync failures

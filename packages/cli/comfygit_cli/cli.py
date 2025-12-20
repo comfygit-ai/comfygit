@@ -545,6 +545,11 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         help="Git remote name (default: origin)"
     )
     pull_parser.add_argument(
+        "-b", "--branch",
+        default=None,
+        help="Remote branch to pull (default: current local branch). Use when remote has different default branch (e.g., master vs main)"
+    )
+    pull_parser.add_argument(
         "--models",
         choices=["all", "required", "skip"],
         default="all",
