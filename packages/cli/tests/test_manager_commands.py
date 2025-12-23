@@ -224,6 +224,75 @@ class TestInitNoSystemNodes:
         assert "--bare" not in option_strings
 
 
+class TestStatusLegacyManagerNotice:
+    """Tests that status command shows legacy manager notice."""
+
+    def test_status_shows_legacy_notice_even_when_clean(self, capsys):
+        """status should show legacy manager notice even when environment is clean.
+
+        Bug: Previously the status command returned early for clean environments,
+        skipping the legacy manager notice check.
+        """
+        from comfygit_cli.env_commands import EnvironmentCommands
+        from comfygit_core.models.environment import (
+            EnvironmentComparison,
+            EnvironmentStatus,
+            GitStatus,
+        )
+        from comfygit_core.models.shared import ManagerStatus
+        from comfygit_core.models.workflow import DetailedWorkflowStatus, WorkflowSyncStatus
+
+        env_cmds = EnvironmentCommands()
+
+        # Mock a clean environment with legacy manager
+        mock_env = MagicMock()
+        mock_env.name = "test-env"
+
+        # Create clean status (no workflows, no changes, synced)
+        mock_env.status.return_value = EnvironmentStatus(
+            git=GitStatus(
+                current_branch="main",
+                has_changes=False,
+            ),
+            workflow=DetailedWorkflowStatus(
+                sync_status=WorkflowSyncStatus(
+                    synced=[],
+                    new=[],
+                    modified=[],
+                    deleted=[],
+                ),
+                analyzed_workflows=[],
+            ),
+            comparison=EnvironmentComparison(
+                missing_nodes=[],
+                extra_nodes=[],
+                version_mismatches=[],
+                packages_in_sync=True,
+            ),
+            missing_models=[],
+        )
+
+        # Legacy manager detected
+        mock_env.get_manager_status.return_value = ManagerStatus(
+            current_version="0.2.0",
+            latest_version="0.3.0",
+            update_available=True,
+            is_legacy=True,
+            is_tracked=False,
+        )
+
+        with patch.object(env_cmds, "_get_env", return_value=mock_env):
+            args = argparse.Namespace(target_env="test-env", verbose=False)
+            env_cmds.status(args)
+
+        captured = capsys.readouterr()
+        # Should show clean state
+        assert "No workflows" in captured.out
+        assert "No uncommitted changes" in captured.out
+        # AND also show legacy notice
+        assert "Legacy manager detected" in captured.out
+
+
 class TestLegacyWorkspaceNotice:
     """Tests for legacy notice in get_workspace_or_exit.
 

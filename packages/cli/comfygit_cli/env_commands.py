@@ -623,6 +623,9 @@ class EnvironmentCommands:
 
             print("\n✓ No workflows")
             print("✓ No uncommitted changes")
+
+            # Show legacy manager notice even in clean state
+            self._show_legacy_manager_notice(env)
             return
 
         # Show environment name with branch
