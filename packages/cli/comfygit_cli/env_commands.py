@@ -88,6 +88,13 @@ class EnvironmentCommands:
             sys.exit(1)
         return active
 
+    def _get_python_version(self, env: Environment) -> str:
+        """Get Python version from environment."""
+        python_version_file = env.cec_path / ".python-version"
+        if python_version_file.exists():
+            return python_version_file.read_text(encoding="utf-8").strip()
+        return "3.12"
+
     def _get_or_probe_backend(
         self, env: Environment, override: str | None = None
     ) -> tuple[str, bool]:
@@ -104,28 +111,33 @@ class EnvironmentCommands:
         if override:
             return override, False
 
-        if env.pytorch_manager.has_backend():
-            return env.pytorch_manager.get_backend(), False
+        had_backend = env.pytorch_manager.has_backend()
 
-        # No backend configured - probe and set it
-        print("⚠️  No PyTorch backend configured. Auto-detecting...")
         try:
-            # Read Python version from .python-version file
-            python_version_file = env.cec_path / ".python-version"
-            python_version = (
-                python_version_file.read_text(encoding="utf-8").strip()
-                if python_version_file.exists()
-                else "3.12"
-            )
-            backend = env.pytorch_manager.probe_and_set_backend(
-                python_version,
-                backend="auto",
-            )
-            return backend, True
+            python_version = self._get_python_version(env)
+            backend = env.pytorch_manager.ensure_backend(python_version)
+
+            was_probed = not had_backend
+            if was_probed:
+                print("⚠️  No PyTorch backend configured. Auto-detecting...")
+                print(f"✓ Backend detected and saved: {backend}")
+                print("   To change: cg env-config torch-backend set <backend>")
+
+            return backend, was_probed
         except Exception as e:
             print(f"✗ Error probing PyTorch backend: {e}")
             print("   Try setting it explicitly: cg env-config torch-backend set <backend>")
             sys.exit(1)
+
+    def _show_legacy_manager_notice(self, env: Environment) -> None:
+        """Show legacy manager notice if environment uses symlinked manager."""
+        try:
+            status = env.get_manager_status()
+            if status.is_legacy:
+                print("")
+                print("Legacy manager detected. Run 'cg manager update' to migrate.")
+        except Exception:
+            pass  # Silently fail - notice is informational only
 
     def _format_size(self, size_bytes: int) -> str:
         """Format bytes as human-readable size."""
@@ -611,6 +623,9 @@ class EnvironmentCommands:
 
             print("\n✓ No workflows")
             print("✓ No uncommitted changes")
+
+            # Show legacy manager notice even in clean state
+            self._show_legacy_manager_notice(env)
             return
 
         # Show environment name with branch
@@ -760,6 +775,9 @@ class EnvironmentCommands:
 
         # Suggested actions - smart and contextual
         self._show_smart_suggestions(status)
+
+        # Show legacy manager notice if applicable
+        self._show_legacy_manager_notice(env)
 
     # Removed: _has_uninstalled_packages - this logic is now in core's WorkflowAnalysisStatus
 
@@ -2950,3 +2968,73 @@ class EnvironmentCommands:
                     print(f"    {m.actual_category}/{m.name} → {expected}/")
             else:
                 print("✓ No changes needed - all dependencies already resolved")
+
+    # ================================================================================
+    # Manager Commands - Per-environment comfygit-manager management
+    # ================================================================================
+
+    @with_env_logging("manager status")
+    def manager_status(self, args: argparse.Namespace, logger: Any = None) -> None:
+        """Show manager version and update availability."""
+        env = self._get_env(args)
+
+        status = env.get_manager_status()
+
+        print("comfygit-manager")
+        print(f"   Current: {status.current_version or 'not installed'}")
+        print(f"   Latest:  {status.latest_version or 'unknown'}")
+
+        if status.is_legacy:
+            print("   Legacy installation (symlinked)")
+            print(f"   Run 'cg -e {env.name} manager update' to migrate")
+        elif not status.is_tracked:
+            print("   Not installed")
+            print(f"   Run 'cg -e {env.name} manager update' to install")
+        elif status.update_available:
+            print("   Update available!")
+        else:
+            print("   Up to date")
+
+    @with_env_logging("manager update")
+    def manager_update(self, args: argparse.Namespace, logger: Any = None) -> None:
+        """Update or migrate comfygit-manager."""
+        from comfygit_core.strategies.confirmation import AutoConfirmStrategy, InteractiveConfirmStrategy
+
+        env = self._get_env(args)
+        version = getattr(args, 'version', None) or "latest"
+        use_yes = getattr(args, 'yes', False)
+
+        # Ensure backend is configured (same as sync/run commands)
+        had_backend = env.pytorch_manager.has_backend()
+        if not had_backend:
+            print("⚠️  No PyTorch backend configured. Auto-detecting...")
+            python_version = self._get_python_version(env)
+            backend = env.pytorch_manager.ensure_backend(python_version)
+            print(f"✓ Backend detected and saved: {backend}")
+            print("   To change: cg env-config torch-backend set <backend>\n")
+
+        status = env.get_manager_status()
+
+        if status.is_legacy:
+            print("Migrating comfygit-manager to per-environment installation...")
+        elif not status.is_tracked:
+            print("Installing comfygit-manager...")
+        else:
+            print("Updating comfygit-manager...")
+
+        strategy = AutoConfirmStrategy() if use_yes else InteractiveConfirmStrategy()
+
+        try:
+            result = env.update_manager(version=version, confirmation_strategy=strategy)
+
+            if result.changed:
+                print(f"   {result.message}")
+                print("\n   Restart this environment to use the new version")
+            else:
+                print(f"   {result.message}")
+
+        except Exception as e:
+            print(f"   Failed to update manager: {e}", file=sys.stderr)
+            if logger:
+                logger.error(f"Manager update failed: {e}", exc_info=True)
+            sys.exit(1)

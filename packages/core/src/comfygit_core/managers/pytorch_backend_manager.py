@@ -115,6 +115,22 @@ class PyTorchBackendManager:
             return False
         return bool(self.backend_file.read_text().strip())
 
+    def ensure_backend(self, python_version: str = "3.12") -> str:
+        """Ensure backend is configured, auto-probing if necessary.
+
+        If .pytorch-backend file exists and is valid, returns its contents.
+        Otherwise, probes the system for available backends and saves the result.
+
+        Args:
+            python_version: Python version for probing (e.g., "3.12")
+
+        Returns:
+            Backend string (e.g., 'cu128', 'cpu')
+        """
+        if self.has_backend():
+            return self.get_backend()
+        return self.probe_and_set_backend(python_version, "auto")
+
     def get_versions(self) -> dict[str, str]:
         """Read PyTorch versions from .pytorch-backend file.
 

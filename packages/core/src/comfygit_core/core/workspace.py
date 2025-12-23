@@ -31,6 +31,7 @@ from .environment import Environment
 
 if TYPE_CHECKING:
     from ..models.protocols import EnvironmentCreateProgress, ImportCallbacks
+    from ..models.shared import LegacyCleanupResult
 
 logger = get_logger(__name__)
 
@@ -114,8 +115,18 @@ class WorkspacePaths:
 
     @property
     def system_nodes(self) -> Path:
-        """Directory for workspace-level system nodes (infrastructure custom nodes)."""
+        """Legacy directory for workspace-level system nodes.
+
+        In schema v1, comfygit-manager was symlinked from this directory.
+        In schema v2, manager is tracked per-environment in pyproject.toml.
+        This property is kept for legacy migration detection only.
+        """
         return self.metadata / "system_nodes"
+
+    @property
+    def schema_version_file(self) -> Path:
+        """Path to workspace schema version file."""
+        return self.metadata / "version"
 
     def exists(self) -> bool:
         return self.root.exists() and self.metadata.exists()
@@ -128,13 +139,16 @@ class WorkspacePaths:
         self.models.mkdir(parents=True, exist_ok=True)
         self.input.mkdir(parents=True, exist_ok=True)
         self.output.mkdir(parents=True, exist_ok=True)
-        self.system_nodes.mkdir(parents=True, exist_ok=True)
+        # Note: system_nodes is NOT created anymore (legacy, schema v1 only)
 
 class Workspace:
     """Manages ComfyDock workspace and all environments within it.
 
     Represents an existing, validated workspace - no nullable state.
     """
+
+    # Current workspace schema version (v2 = per-environment manager)
+    CURRENT_SCHEMA_VERSION = 2
 
     def __init__(self, paths: WorkspacePaths):
         """Initialize workspace with validated paths.
@@ -144,6 +158,118 @@ class Workspace:
         """
         self.paths = paths
 
+    def get_schema_version(self) -> int:
+        """Get workspace schema version.
+
+        Returns:
+            1 if legacy (no version file), else the version from file.
+        """
+        version_file = self.paths.schema_version_file
+        if not version_file.exists():
+            return 1  # Legacy workspace
+        try:
+            return int(version_file.read_text().strip())
+        except (ValueError, OSError):
+            return 1  # Treat as legacy if file is corrupted
+
+    def is_legacy_schema(self) -> bool:
+        """Check if this is a legacy workspace (schema v1).
+
+        Legacy workspaces use symlinked system nodes from .metadata/system_nodes/.
+        Modern workspaces (v2+) track manager per-environment in pyproject.toml.
+        """
+        return self.get_schema_version() < self.CURRENT_SCHEMA_VERSION
+
+    def has_legacy_system_nodes(self) -> bool:
+        """Check if workspace has legacy system_nodes directory with content.
+
+        This is a more specific check than is_legacy_schema() - it only returns
+        True if there's actually a system_nodes directory with nodes in it.
+        Used to determine if migration notice should be shown.
+        """
+        system_nodes_dir = self.paths.system_nodes
+        if not system_nodes_dir.exists():
+            return False
+        # Check if there's at least one subdirectory (an actual node)
+        return any(p.is_dir() for p in system_nodes_dir.iterdir())
+
+    def _write_schema_version(self) -> None:
+        """Write current schema version to workspace.
+
+        Called during workspace creation to mark as modern schema.
+        """
+        self.paths.schema_version_file.write_text(str(self.CURRENT_SCHEMA_VERSION))
+
+    def upgrade_schema_if_needed(self) -> bool:
+        """Upgrade workspace schema to current version if no version file exists.
+
+        This is called when creating new environments with per-env manager.
+        Only writes the version file if it doesn't exist (preserves existing).
+
+        Returns:
+            True if upgraded, False if already has version file.
+        """
+        if self.paths.schema_version_file.exists():
+            return False
+        self._write_schema_version()
+        return True
+
+    def cleanup_legacy_system_nodes(self, force: bool = False) -> "LegacyCleanupResult":
+        """Remove legacy .metadata/system_nodes/ directory.
+
+        Scans all environments to verify none use legacy symlinks before removing.
+
+        Args:
+            force: Skip environment verification check
+
+        Returns:
+            LegacyCleanupResult with status and any environments still using legacy
+        """
+        import shutil
+
+        from ..models.shared import LegacyCleanupResult
+
+        system_nodes_dir = self.paths.system_nodes
+
+        # Check if directory exists
+        if not system_nodes_dir.exists():
+            return LegacyCleanupResult(
+                success=False,
+                message="No legacy system_nodes directory found"
+            )
+
+        # If not forcing, check all environments for legacy symlinks
+        if not force:
+            legacy_envs = []
+            for env in self.list_environments():
+                try:
+                    status = env.get_manager_status()
+                    if status.is_legacy:
+                        legacy_envs.append(env.name)
+                except Exception:
+                    pass  # Skip environments that can't be checked
+
+            if legacy_envs:
+                return LegacyCleanupResult(
+                    success=False,
+                    legacy_environments=legacy_envs,
+                    message="Some environments still use legacy manager"
+                )
+
+        # Remove the directory
+        try:
+            shutil.rmtree(system_nodes_dir)
+            self._write_schema_version()  # Ensure v2 after cleanup
+            return LegacyCleanupResult(
+                success=True,
+                removed_path=str(system_nodes_dir),
+                message=f"Removed {system_nodes_dir}"
+            )
+        except Exception as e:
+            return LegacyCleanupResult(
+                success=False,
+                message=f"Failed to remove: {e}"
+            )
 
     @property
     def path(self) -> Path:

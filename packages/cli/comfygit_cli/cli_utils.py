@@ -10,6 +10,7 @@ from .logging.environment_logger import WorkspaceLogger
 if TYPE_CHECKING:
     from comfygit_core.core.workspace import Workspace
 
+
 def get_workspace_or_exit() -> "Workspace":
     """Get workspace or exit with error message."""
     try:
