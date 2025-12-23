@@ -114,8 +114,18 @@ class WorkspacePaths:
 
     @property
     def system_nodes(self) -> Path:
-        """Directory for workspace-level system nodes (infrastructure custom nodes)."""
+        """Legacy directory for workspace-level system nodes.
+
+        In schema v1, comfygit-manager was symlinked from this directory.
+        In schema v2, manager is tracked per-environment in pyproject.toml.
+        This property is kept for legacy migration detection only.
+        """
         return self.metadata / "system_nodes"
+
+    @property
+    def schema_version_file(self) -> Path:
+        """Path to workspace schema version file."""
+        return self.metadata / "version"
 
     def exists(self) -> bool:
         return self.root.exists() and self.metadata.exists()
@@ -128,13 +138,16 @@ class WorkspacePaths:
         self.models.mkdir(parents=True, exist_ok=True)
         self.input.mkdir(parents=True, exist_ok=True)
         self.output.mkdir(parents=True, exist_ok=True)
-        self.system_nodes.mkdir(parents=True, exist_ok=True)
+        # Note: system_nodes is NOT created anymore (legacy, schema v1 only)
 
 class Workspace:
     """Manages ComfyDock workspace and all environments within it.
 
     Represents an existing, validated workspace - no nullable state.
     """
+
+    # Current workspace schema version (v2 = per-environment manager)
+    CURRENT_SCHEMA_VERSION = 2
 
     def __init__(self, paths: WorkspacePaths):
         """Initialize workspace with validated paths.
@@ -144,6 +157,34 @@ class Workspace:
         """
         self.paths = paths
 
+    def get_schema_version(self) -> int:
+        """Get workspace schema version.
+
+        Returns:
+            1 if legacy (no version file), else the version from file.
+        """
+        version_file = self.paths.schema_version_file
+        if not version_file.exists():
+            return 1  # Legacy workspace
+        try:
+            return int(version_file.read_text().strip())
+        except (ValueError, OSError):
+            return 1  # Treat as legacy if file is corrupted
+
+    def is_legacy_schema(self) -> bool:
+        """Check if this is a legacy workspace (schema v1).
+
+        Legacy workspaces use symlinked system nodes from .metadata/system_nodes/.
+        Modern workspaces (v2+) track manager per-environment in pyproject.toml.
+        """
+        return self.get_schema_version() < self.CURRENT_SCHEMA_VERSION
+
+    def _write_schema_version(self) -> None:
+        """Write current schema version to workspace.
+
+        Called during workspace creation to mark as modern schema.
+        """
+        self.paths.schema_version_file.write_text(str(self.CURRENT_SCHEMA_VERSION))
 
     @property
     def path(self) -> Path:

@@ -95,10 +95,15 @@ class WorkspaceFactory:
             with open(workspace_paths.workspace_file, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, indent=2)
 
+            workspace = Workspace(workspace_paths)
+
+            # Write schema version to mark as modern workspace
+            workspace._write_schema_version()
+
             logger.info(f"Created workspace at {workspace_paths.root}")
             logger.info(f"Default models directory: {workspace_paths.models}")
 
-            return Workspace(workspace_paths)
+            return workspace
 
         except PermissionError as e:
             raise PermissionError(f"Cannot create workspace at {workspace_paths.root}: insufficient permissions") from e

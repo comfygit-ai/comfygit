@@ -1,7 +1,6 @@
 """Simplified Environment - owns everything about a single ComfyUI environment."""
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 from functools import cached_property
@@ -26,6 +25,8 @@ from ..managers.workflow_manager import WorkflowManager
 from ..models.environment import EnvironmentStatus
 from ..models.ref_diff import RefDiff
 from ..models.shared import (
+    ManagerStatus,
+    ManagerUpdateResult,
     ModelSourceResult,
     ModelSourceStatus,
     NodeInfo,
@@ -255,6 +256,217 @@ class Environment:
             workflow_status=workflow_status,
             missing_models=missing_models
         )
+
+    def get_manager_status(self) -> ManagerStatus:
+        """Check current comfygit-manager installation status.
+
+        Returns ManagerStatus with:
+        - current_version: Version from pyproject.toml or detected from filesystem
+        - latest_version: Latest version from ComfyUI Registry
+        - update_available: Whether latest > current
+        - is_legacy: True if manager is symlinked (legacy workspace)
+        - is_tracked: True if manager is tracked in pyproject.toml
+        """
+        from packaging.version import InvalidVersion, Version
+
+        from ..constants import MANAGER_NODE_ID
+        from ..utils.symlink_utils import is_link
+
+        manager_path = self.custom_nodes_path / MANAGER_NODE_ID
+        current_version: str | None = None
+        is_legacy = False
+        is_tracked = False
+
+        # Check if it's a symlink (legacy)
+        if manager_path.exists() or is_link(manager_path):
+            if is_link(manager_path):
+                is_legacy = True
+                # Try to read version from symlink target
+                try:
+                    import tomllib
+                    target_pyproject = manager_path / "pyproject.toml"
+                    if target_pyproject.exists():
+                        with open(target_pyproject, "rb") as f:
+                            data = tomllib.load(f)
+                            current_version = data.get("project", {}).get("version")
+                except Exception:
+                    pass
+            else:
+                # It's a real directory - check if tracked in pyproject
+                nodes = self.pyproject.nodes.get_existing()
+                if MANAGER_NODE_ID in nodes:
+                    is_tracked = True
+                    current_version = nodes[MANAGER_NODE_ID].version
+
+        # Get latest version from registry
+        latest_version: str | None = None
+        try:
+            node_info = self.node_lookup.get_node(MANAGER_NODE_ID)
+            if node_info:
+                latest_version = node_info.version
+        except Exception:
+            # Registry lookup failed - continue without latest
+            pass
+
+        # Determine if update is available
+        update_available = False
+        if current_version and latest_version:
+            try:
+                update_available = Version(latest_version) > Version(current_version)
+            except InvalidVersion:
+                # Version comparison failed - assume update available if versions differ
+                update_available = latest_version != current_version
+
+        return ManagerStatus(
+            current_version=current_version,
+            latest_version=latest_version,
+            update_available=update_available,
+            is_legacy=is_legacy,
+            is_tracked=is_tracked,
+        )
+
+    def update_manager(
+        self,
+        version: str = "latest",
+        confirmation_strategy: ConfirmationStrategy | None = None,
+    ) -> ManagerUpdateResult:
+        """Update comfygit-manager with migration support.
+
+        Handles:
+        1. Legacy symlink → tracked node migration
+        2. Cleanup of dependency-groups.system-nodes
+        3. Standard registry node update flow
+        4. Schema version bump on first migration
+
+        Args:
+            version: Target version ("latest" or specific version)
+            confirmation_strategy: Strategy for confirming changes
+
+        Returns:
+            ManagerUpdateResult with details of what changed
+        """
+        from ..constants import MANAGER_NODE_ID
+        from ..utils.symlink_utils import is_link
+
+        manager_path = self.custom_nodes_path / MANAGER_NODE_ID
+        status = self.get_manager_status()
+
+        old_version = status.current_version
+        was_migration = False
+
+        # Handle legacy symlink migration
+        if status.is_legacy:
+            # Remove symlink - we'll install fresh
+            if is_link(manager_path):
+                manager_path.unlink()
+            was_migration = True
+
+        # Check if already tracked
+        nodes = self.pyproject.nodes.get_existing()
+        if MANAGER_NODE_ID in nodes and not was_migration:
+            # Standard update flow - update_node always updates to latest
+            result = self.node_manager.update_node(
+                MANAGER_NODE_ID,
+                confirmation_strategy=confirmation_strategy,
+            )
+
+            # Cleanup legacy dependency group if present
+            self._cleanup_system_nodes_dependency_group()
+
+            return ManagerUpdateResult(
+                changed=result.changed,
+                was_migration=False,
+                old_version=result.old_version,
+                new_version=result.new_version,
+                message=result.message,
+            )
+
+        # Not tracked or migrating - add as new node
+        node_info = self.node_manager.add_node(
+            identifier=MANAGER_NODE_ID if version == "latest" else f"{MANAGER_NODE_ID}@{version}",
+        )
+
+        # Cleanup legacy dependency group
+        self._cleanup_system_nodes_dependency_group()
+
+        # Bump workspace schema if this was a migration
+        if was_migration and self.workspace.is_legacy_schema():
+            self.workspace._write_schema_version()
+
+        return ManagerUpdateResult(
+            changed=True,
+            was_migration=was_migration,
+            old_version=old_version,
+            new_version=node_info.version,
+            message="Migrated to per-environment manager" if was_migration else f"Installed {MANAGER_NODE_ID}",
+        )
+
+    def _cleanup_system_nodes_dependency_group(self) -> None:
+        """Remove legacy dependency-groups.system-nodes from pyproject.toml."""
+        config = self.pyproject.load()
+        dep_groups = config.get("dependency-groups", {})
+        if "system-nodes" in dep_groups:
+            del dep_groups["system-nodes"]
+            if not dep_groups:
+                del config["dependency-groups"]
+            self.pyproject.save(config)
+            logger.info("Removed legacy dependency-groups.system-nodes")
+
+    def _register_imported_manager(self) -> None:
+        """Auto-register comfygit-manager from imported environment.
+
+        If the imported environment contains a comfygit-manager directory in custom_nodes,
+        detect its version and register it as a tracked node in pyproject.toml.
+
+        This replaces the legacy symlink system where manager was symlinked from
+        workspace-level .metadata/system_nodes/.
+        """
+        import tomllib
+
+        from ..constants import MANAGER_NODE_ID
+
+        manager_path = self.custom_nodes_path / MANAGER_NODE_ID
+        if not manager_path.exists() or not manager_path.is_dir():
+            logger.debug("No comfygit-manager found in imported environment")
+            return
+
+        # Check if already tracked
+        nodes = self.pyproject.nodes.get_existing()
+        if MANAGER_NODE_ID in nodes:
+            logger.debug("comfygit-manager already tracked in pyproject.toml")
+            return
+
+        # Detect version from manager's pyproject.toml
+        version = None
+        manager_pyproject = manager_path / "pyproject.toml"
+        if manager_pyproject.exists():
+            try:
+                with open(manager_pyproject, "rb") as f:
+                    data = tomllib.load(f)
+                    version = data.get("project", {}).get("version")
+            except Exception as e:
+                logger.warning(f"Could not read manager version: {e}")
+
+        # Register as tracked node
+        config = self.pyproject.load()
+        if "tool" not in config:
+            config["tool"] = {}
+        if "comfygit" not in config["tool"]:
+            config["tool"]["comfygit"] = {}
+        if "nodes" not in config["tool"]["comfygit"]:
+            config["tool"]["comfygit"]["nodes"] = {}
+
+        config["tool"]["comfygit"]["nodes"][MANAGER_NODE_ID] = {
+            "name": MANAGER_NODE_ID,
+            "version": version or "unknown",
+            "source": "registry",
+            "registry_id": MANAGER_NODE_ID,
+        }
+        self.pyproject.save(config)
+        logger.info(f"Registered imported comfygit-manager (v{version or 'unknown'})")
+
+        # Clean up legacy dependency group if present
+        self._cleanup_system_nodes_dependency_group()
 
     def _ensure_schema_migrated(self) -> bool:
         """Migrate pyproject schema v1 → v2 if needed.
@@ -612,7 +824,7 @@ class Environment:
 
         try:
             # Determine branch
-            from ..utils.git import git_get_current_branch, git_fetch
+            from ..utils.git import git_fetch, git_get_current_branch
             current_branch = branch or git_get_current_branch(self.cec_path)
             target_ref = f"{remote}/{current_branch}"
 
@@ -1652,11 +1864,8 @@ class Environment:
 
         Dev nodes without git remotes will trigger a callback notification but
         will still be exported (they just can't be shared).
-
-        System nodes (like comfygit-manager) are skipped - they should not be exported.
         """
         from ..analyzers.node_git_analyzer import get_node_git_info
-        from ..constants import SYSTEM_CUSTOM_NODES
 
         nodes = self.pyproject.nodes.get_existing()
         config = self.pyproject.load()
@@ -1664,11 +1873,6 @@ class Environment:
 
         for identifier, node_info in nodes.items():
             if node_info.source != 'development':
-                continue
-
-            # Skip system nodes - they should not be exported
-            if node_info.name in SYSTEM_CUSTOM_NODES:
-                logger.debug(f"Skipping system node '{node_info.name}' in export git capture")
                 continue
 
             node_path = self.custom_nodes_path / node_info.name
@@ -1857,31 +2061,9 @@ class Environment:
             settings_file.write_text('{"Comfy.TutorialCompleted": true}')
             logger.debug("Created default user settings (skip templates panel)")
 
-        linked_nodes = self.system_node_manager.create_symlinks()
-        if linked_nodes:
-            logger.info(f"Linked system nodes: {', '.join(linked_nodes)}")
-
-        # Update system-nodes dependency group from LOCAL workspace's system nodes
-        # (replaces any imported deps with local versions)
-        local_requirements = self.system_node_manager.get_all_requirements()
-        if local_requirements:
-            config = self.pyproject.load()
-            if "dependency-groups" not in config:
-                config["dependency-groups"] = {}
-            config["dependency-groups"]["system-nodes"] = list(local_requirements)
-
-            # Dev mode: redirect comfygit-core to local editable path
-            dev_core_path = os.environ.get("COMFYGIT_DEV_CORE_PATH")
-            if dev_core_path and any("comfygit-core" in req for req in local_requirements):
-                config.setdefault("tool", {}).setdefault("uv", {}).setdefault("sources", {})
-                config["tool"]["uv"]["sources"]["comfygit-core"] = {
-                    "path": dev_core_path,
-                    "editable": True
-                }
-                logger.info(f"Dev mode: comfygit-core → {dev_core_path}")
-
-            self.pyproject.save(config)
-            logger.info(f"Updated system-nodes deps: {', '.join(local_requirements)}")
+        # Auto-register comfygit-manager if present in imported environment
+        # (replaces legacy symlink system - manager is now per-environment)
+        self._register_imported_manager()
 
         # Phase 1.5: Probe PyTorch and configure backend
         # Read Python version from .python-version file

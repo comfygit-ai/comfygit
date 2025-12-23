@@ -207,16 +207,6 @@ class EnvironmentFactory:
         settings_file.write_text('{"Comfy.TutorialCompleted": true}')
         logger.debug("Created default user settings (skip templates panel)")
 
-        # Create system node symlinks (comfygit-manager, etc.)
-        linked_nodes = env.system_node_manager.create_symlinks()
-        if linked_nodes:
-            logger.info(f"Linked system nodes: {', '.join(linked_nodes)}")
-
-        # Collect system node requirements
-        system_node_requirements = env.system_node_manager.get_all_requirements()
-        if system_node_requirements:
-            logger.info(f"System node requirements: {', '.join(system_node_requirements)}")
-
         _complete("configure_environment")
 
         # Create initial pyproject.toml (torch_backend stored in .pytorch-backend file, not here)
@@ -226,7 +216,6 @@ class EnvironmentFactory:
             version_to_clone,
             version_type,
             commit_sha,
-            system_node_requirements=system_node_requirements,
         )
         env.pyproject.save(config)
 
@@ -248,6 +237,19 @@ class EnvironmentFactory:
         )
 
         _complete("install_dependencies")
+
+        # Phase: Install comfygit-manager as tracked node (85%)
+        _progress("install_manager", "Installing comfygit-manager", 85)
+        try:
+            from ..constants import MANAGER_NODE_ID
+            logger.info(f"Installing {MANAGER_NODE_ID} as tracked node...")
+            env.node_manager.add_node(MANAGER_NODE_ID)
+            logger.info(f"{MANAGER_NODE_ID} installed successfully")
+        except Exception as e:
+            # Manager installation failure is non-fatal - environment still works
+            logger.warning(f"Could not install {MANAGER_NODE_ID}: {e}")
+            logger.warning("Environment will work but manager panel will be unavailable")
+        _complete("install_manager")
 
         # Phase: Finalize environment (90-100%)
         _progress("finalize", "Finalizing environment", 90)
@@ -440,15 +442,14 @@ class EnvironmentFactory:
         comfyui_version: str,
         comfyui_version_type: str = "branch",
         comfyui_commit_sha: str | None = None,
-        system_node_requirements: list[str] | None = None,
     ) -> dict:
         """Create the initial pyproject.toml.
 
         Note: torch_backend is NOT stored in pyproject.toml (schema v2+).
         It's stored in .pytorch-backend file which is gitignored.
+        Note: comfygit-manager is installed as a tracked node separately,
+        not through dependency-groups.system-nodes (that was legacy schema).
         """
-        import os
-
         from ..constants import PYPROJECT_SCHEMA_VERSION
 
         config = {
@@ -469,22 +470,5 @@ class EnvironmentFactory:
                 }
             }
         }
-
-        # Add system-nodes dependency group if requirements exist
-        if system_node_requirements:
-            config["dependency-groups"] = {
-                "system-nodes": list(system_node_requirements)
-            }
-
-        # Dev mode: redirect comfygit-core to local editable path
-        dev_core_path = os.environ.get("COMFYGIT_DEV_CORE_PATH")
-        if dev_core_path and system_node_requirements:
-            if any("comfygit-core" in req for req in system_node_requirements):
-                config.setdefault("tool", {}).setdefault("uv", {}).setdefault("sources", {})
-                config["tool"]["uv"]["sources"]["comfygit-core"] = {
-                    "path": dev_core_path,
-                    "editable": True
-                }
-                logger.info(f"Dev mode: comfygit-core → {dev_core_path}")
 
         return config

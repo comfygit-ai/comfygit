@@ -63,14 +63,16 @@ CUSTOM_NODES_BLACKLIST = {
     '.temp'
 }
 
-# System custom nodes managed outside of pyproject.toml.
-# These are infrastructure/tooling nodes that exist in all environments
-# but are not tracked, exported, or synced through the normal node system.
-# They live at workspace level (.metadata/system_nodes/) and are symlinked
-# into each environment's custom_nodes/ directory.
-SYSTEM_CUSTOM_NODES = {
+# Legacy system custom nodes - used only for migration detection.
+# In v1 schema, these nodes were symlinked from workspace-level .metadata/system_nodes/.
+# In v2 schema, comfygit-manager is tracked per-environment in pyproject.toml.
+# This set is kept only for detecting legacy workspaces that need migration.
+LEGACY_SYSTEM_NODES = {
     'comfygit-manager',
 }
+
+# The manager node ID - used for environment creation and migration logic.
+MANAGER_NODE_ID = 'comfygit-manager'
 
 # Schema version for environment pyproject.toml format.
 # Increment when making breaking changes to the pyproject.toml structure.
@@ -88,7 +90,7 @@ GITHUB_NODE_MAPPINGS_URL = "https://raw.githubusercontent.com/ComfyDock/ComfyDoc
 MAX_REGISTRY_DATA_AGE_HOURS = 24
 
 # Prevent infinite loops for optional group removal
-MAX_OPT_GROUP_RETRIES = 10  
+MAX_OPT_GROUP_RETRIES = 10
 
 # PyTorch core packages
 PYTORCH_CORE_PACKAGES = ["torch", "torchvision", "torchaudio"]

@@ -360,3 +360,29 @@ class ModelWithoutSourceInfo:
     workflows: list[str] = field(default_factory=list)
 
 
+# Manager Status Models
+
+
+@dataclass
+class ManagerStatus:
+    """Status of comfygit-manager installation in an environment.
+
+    Used to check current installation state and determine if migration/update is needed.
+    """
+    current_version: str | None  # Version from pyproject.toml or detected from filesystem
+    latest_version: str | None   # Latest version from ComfyUI Registry
+    update_available: bool       # True if latest > current
+    is_legacy: bool              # True if symlinked to workspace system_nodes
+    is_tracked: bool             # True if tracked in pyproject.toml
+
+
+@dataclass
+class ManagerUpdateResult:
+    """Result from updating comfygit-manager."""
+    changed: bool                # Whether any change was made
+    was_migration: bool = False  # True if migrated from legacy symlink
+    old_version: str | None = None
+    new_version: str | None = None
+    message: str = ""
+
+
