@@ -165,7 +165,6 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     init_parser.add_argument("path", type=Path, nargs="?", help="Workspace directory (default: ~/comfygit)")
     init_parser.add_argument("--models-dir", type=Path, help="Path to existing models directory to index")
     init_parser.add_argument("--yes", "-y", action="store_true", help="Use all defaults, no interactive prompts")
-    init_parser.add_argument("--bare", action="store_true", help="Create workspace without system nodes (comfygit-manager)")
     init_parser.set_defaults(func=global_cmds.init)
 
     # list - List all environments
@@ -795,6 +794,22 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
         help="UV command and arguments (e.g., 'add --group optional-cuda sageattention')"
     )
     py_uv_parser.set_defaults(func=env_cmds.py_uv)
+
+    # Manager subcommands (per-environment comfygit-manager)
+    manager_parser = subparsers.add_parser("manager", help="Manage comfygit-manager installation")
+    manager_subparsers = manager_parser.add_subparsers(dest="manager_command", help="Manager commands")
+    manager_parser.set_defaults(func=_make_help_func(manager_parser))
+
+    # manager status
+    manager_status_parser = manager_subparsers.add_parser("status", help="Show manager version and update availability")
+    manager_status_parser.set_defaults(func=env_cmds.manager_status)
+
+    # manager update
+    manager_update_parser = manager_subparsers.add_parser("update", help="Update or migrate comfygit-manager")
+    manager_update_parser.add_argument("--version", help="Target version (default: latest)")
+    manager_update_parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
+    manager_update_parser.set_defaults(func=env_cmds.manager_update)
+
 
 if __name__ == "__main__":
     main()

@@ -16,15 +16,6 @@ from .utils import create_progress_callback, paginate, show_civitai_auth_help, s
 
 logger = get_logger(__name__)
 
-# Default system nodes to install with new workspaces.
-# These are infrastructure custom nodes that provide management capabilities.
-# Use `cg init --bare` to skip installation.
-DEFAULT_SYSTEM_NODES = {
-    "comfygit-manager": {
-        "url": "https://github.com/comfyhub-org/comfygit-manager.git",
-        "description": "ComfyGit management panel for ComfyUI",
-    },
-}
 
 
 class GlobalCommands:
@@ -141,12 +132,6 @@ class GlobalCommands:
 
             print(f"✓ Workspace initialized at {workspace.path}")
 
-            # Install default system nodes (unless --bare)
-            if not getattr(args, 'bare', False):
-                self._install_system_nodes(workspace)
-            else:
-                print("📦 Skipping system node installation (--bare flag)")
-
             # Handle models directory setup
             self._setup_models_directory(workspace, args)
 
@@ -161,39 +146,6 @@ class GlobalCommands:
         except Exception as e:
             print(f"✗ Failed to initialize workspace: {e}", file=sys.stderr)
             sys.exit(1)
-
-    def _install_system_nodes(self, workspace: Workspace) -> None:
-        """Install default system nodes (comfygit-manager) into workspace.
-
-        System nodes are infrastructure custom nodes that:
-        - Live at workspace level (.metadata/system_nodes/)
-        - Are symlinked into every environment
-        - Are never tracked in pyproject.toml
-        """
-        from comfygit_core.utils.git import git_clone
-
-        system_nodes_path = workspace.paths.system_nodes
-
-        for node_name, node_config in DEFAULT_SYSTEM_NODES.items():
-            target_path = system_nodes_path / node_name
-
-            if target_path.exists():
-                logger.debug(f"System node '{node_name}' already exists, skipping")
-                continue
-
-            print(f"📦 Installing system node: {node_name}")
-            try:
-                git_clone(
-                    url=node_config["url"],
-                    target_path=target_path,
-                    depth=1  # Shallow clone for speed
-                )
-                print(f"   ✓ Installed {node_name}")
-                logger.info(f"Installed system node: {node_name}")
-            except Exception as e:
-                print(f"   ⚠️  Failed to install {node_name}: {e}")
-                print("   You can install it manually later")
-                logger.warning(f"Failed to install system node {node_name}: {e}")
 
     def _show_workspace_env_setup(self, workspace_path: Path) -> None:
         """Show instructions for setting COMFYGIT_HOME for custom workspace location."""

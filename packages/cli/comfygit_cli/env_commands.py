@@ -2950,3 +2950,64 @@ class EnvironmentCommands:
                     print(f"    {m.actual_category}/{m.name} → {expected}/")
             else:
                 print("✓ No changes needed - all dependencies already resolved")
+
+    # ================================================================================
+    # Manager Commands - Per-environment comfygit-manager management
+    # ================================================================================
+
+    @with_env_logging("manager status")
+    def manager_status(self, args: argparse.Namespace, logger: Any = None) -> None:
+        """Show manager version and update availability."""
+        env = self._get_env(args)
+
+        status = env.get_manager_status()
+
+        print("comfygit-manager")
+        print(f"   Current: {status.current_version or 'not installed'}")
+        print(f"   Latest:  {status.latest_version or 'unknown'}")
+
+        if status.is_legacy:
+            print("   Legacy installation (symlinked)")
+            print(f"   Run 'cg -e {env.name} manager update' to migrate")
+        elif not status.is_tracked:
+            print("   Not installed")
+            print(f"   Run 'cg -e {env.name} manager update' to install")
+        elif status.update_available:
+            print("   Update available!")
+        else:
+            print("   Up to date")
+
+    @with_env_logging("manager update")
+    def manager_update(self, args: argparse.Namespace, logger: Any = None) -> None:
+        """Update or migrate comfygit-manager."""
+        from comfygit_core.strategies.confirmation import AutoConfirmStrategy, InteractiveConfirmStrategy
+
+        env = self._get_env(args)
+        version = getattr(args, 'version', None) or "latest"
+        use_yes = getattr(args, 'yes', False)
+
+        status = env.get_manager_status()
+
+        if status.is_legacy:
+            print("Migrating comfygit-manager to per-environment installation...")
+        elif not status.is_tracked:
+            print("Installing comfygit-manager...")
+        else:
+            print("Updating comfygit-manager...")
+
+        strategy = AutoConfirmStrategy() if use_yes else InteractiveConfirmStrategy()
+
+        try:
+            result = env.update_manager(version=version, confirmation_strategy=strategy)
+
+            if result.changed:
+                print(f"   {result.message}")
+                print("\n   Restart this environment to use the new version")
+            else:
+                print(f"   {result.message}")
+
+        except Exception as e:
+            print(f"   Failed to update manager: {e}", file=sys.stderr)
+            if logger:
+                logger.error(f"Manager update failed: {e}", exc_info=True)
+            sys.exit(1)
