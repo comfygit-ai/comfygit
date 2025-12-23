@@ -351,6 +351,15 @@ class Environment:
         manager_path = self.custom_nodes_path / MANAGER_NODE_ID
         status = self.get_manager_status()
 
+        # Ensure PyTorch backend is configured (auto-probe if missing)
+        python_version_file = self.cec_path / ".python-version"
+        python_version = (
+            python_version_file.read_text(encoding="utf-8").strip()
+            if python_version_file.exists()
+            else "3.12"
+        )
+        self.pytorch_manager.ensure_backend(python_version)
+
         old_version = status.current_version
         was_migration = False
 

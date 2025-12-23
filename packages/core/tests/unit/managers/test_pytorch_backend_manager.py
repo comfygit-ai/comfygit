@@ -326,3 +326,43 @@ class TestGitignoreUpdate:
         # Should not have added duplicate
         content = gitignore.read_text()
         assert content.count(".pytorch-backend") == 1
+
+
+class TestEnsureBackend:
+    """Tests for ensure_backend() method."""
+
+    @pytest.fixture
+    def temp_cec(self):
+        """Create a temporary .cec directory for testing."""
+        with TemporaryDirectory() as tmpdir:
+            cec_path = Path(tmpdir) / ".cec"
+            cec_path.mkdir()
+            yield cec_path
+
+    def test_ensure_backend_returns_existing(self, temp_cec):
+        """ensure_backend should return existing backend without probing."""
+        backend_file = temp_cec / ".pytorch-backend"
+        backend_file.write_text("cu128")
+
+        manager = PyTorchBackendManager(temp_cec)
+        result = manager.ensure_backend(python_version="3.12")
+
+        assert result == "cu128"
+
+    def test_ensure_backend_probes_when_missing(self, temp_cec, monkeypatch):
+        """ensure_backend should probe and save when file missing."""
+        manager = PyTorchBackendManager(temp_cec)
+
+        # Track whether probe_and_set_backend was called
+        probe_called = []
+
+        def mock_probe(python_version, backend):
+            probe_called.append((python_version, backend))
+            return "cu128"
+
+        monkeypatch.setattr(manager, 'probe_and_set_backend', mock_probe)
+
+        result = manager.ensure_backend(python_version="3.12")
+
+        assert result == "cu128"
+        assert probe_called == [("3.12", "auto")]
