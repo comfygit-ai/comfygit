@@ -6,7 +6,6 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from comfygit_core.caching.api_cache import APICacheManager
 from comfygit_core.constants import DEFAULT_GITHUB_URL
 from comfygit_core.logging.logging_config import get_logger
 from comfygit_core.utils.git import parse_github_url
@@ -40,18 +39,13 @@ class GitHubRelease:
 
 class GitHubClient:
     """Client for interacting with GitHub repositories.
-    
+
     Provides repository cloning, metadata retrieval, and release management.
-    Designed for custom nodes hosted on GitHub.
+    Always fetches fresh data from API (no caching) to ensure latest versions.
     """
 
-    def __init__(
-        self,
-        cache_manager: APICacheManager,
-        base_url: str = DEFAULT_GITHUB_URL,
-    ):
+    def __init__(self, base_url: str = DEFAULT_GITHUB_URL):
         self.base_url = base_url
-        self.cache_manager = cache_manager
         self.rate_limiter = RateLimitManager(min_interval=0.05)
         self.retry_config = RetryConfig(
             max_retries=3,
@@ -117,12 +111,6 @@ class GitHubClient:
 
         # ref parameter takes precedence over URL-embedded commit
         target_ref = ref or url_commit
-        cache_key = f"{owner}/{name}" + (f"@{target_ref}" if target_ref else "")
-
-        # Try cache first
-        cached = self.cache_manager.get("github", cache_key)
-        if cached:
-            return GitHubRepoInfo(**cached)
 
         try:
             # Rate limit API calls
@@ -168,7 +156,7 @@ class GitHubClient:
                 # No releases found, that's okay
                 pass
 
-            repo_info = GitHubRepoInfo(
+            return GitHubRepoInfo(
                 owner=owner,
                 name=name,
                 default_branch=default_branch,
@@ -177,11 +165,6 @@ class GitHubClient:
                 clone_url=repo_data.get("clone_url"),
                 latest_commit=latest_commit
             )
-
-            # Cache the result
-            self.cache_manager.set("github", cache_key, repo_info.__dict__)
-
-            return repo_info
 
         except (urllib.error.URLError, json.JSONDecodeError) as e:
             logger.warning(f"Failed to get repository info for {repo_url}: {e}")
@@ -204,16 +187,6 @@ class GitHubClient:
             return []
 
         owner, name, _ = parsed
-        cache_key = f"{owner}/{name}/releases"
-
-        # Try cache first
-        cached = self.cache_manager.get("github", cache_key)
-        if cached:
-            releases = [GitHubRelease(**r) for r in cached]
-            # Filter and limit
-            if not include_prerelease:
-                releases = [r for r in releases if not r.prerelease]
-            return releases[:limit]
 
         try:
             # Rate limit API calls
@@ -244,9 +217,6 @@ class GitHubClient:
             # Sort by published date (newest first)
             releases.sort(key=lambda r: r.published_at, reverse=True)
 
-            # Cache all releases
-            self.cache_manager.set("github", cache_key, [r.__dict__ for r in releases])
-
             # Filter and limit
             if not include_prerelease:
                 releases = [r for r in releases if not r.prerelease]
@@ -271,12 +241,6 @@ class GitHubClient:
             return None
 
         owner, name, _ = parsed
-        cache_key = f"{owner}/{name}/release/{tag}"
-
-        # Try cache first
-        cached = self.cache_manager.get("github", cache_key)
-        if cached:
-            return GitHubRelease(**cached)
 
         try:
             # Rate limit API calls
@@ -287,7 +251,7 @@ class GitHubClient:
             with urllib.request.urlopen(api_url) as response:
                 release_data = json.loads(response.read())
 
-            release = GitHubRelease(
+            return GitHubRelease(
                 tag_name=release_data["tag_name"],
                 name=release_data.get("name", release_data["tag_name"]),
                 published_at=release_data["published_at"],
@@ -296,14 +260,8 @@ class GitHubClient:
                 html_url=release_data["html_url"]
             )
 
-            # Cache the result
-            self.cache_manager.set("github", cache_key, release.__dict__)
-
-            return release
-
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                # Note negative result (don't cache to avoid stale data)
                 return None
             logger.warning(f"Failed to get release {tag} for {repo_url}: {e}")
             return None

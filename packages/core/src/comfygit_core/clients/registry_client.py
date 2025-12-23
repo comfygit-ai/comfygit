@@ -5,7 +5,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from comfygit_core.caching.api_cache import APICacheManager
 from comfygit_core.constants import DEFAULT_REGISTRY_URL
 from comfygit_core.logging.logging_config import get_logger
 from comfygit_core.models.exceptions import (
@@ -29,16 +28,11 @@ class ComfyRegistryClient:
     """Client for interacting with the Comfy Registry API.
 
     Provides node discovery, validation, version management, and download URLs.
-    Includes intelligent fuzzy matching and caching for optimal performance.
+    Always fetches fresh data from API (no caching) to ensure latest versions.
     """
 
-    def __init__(
-        self,
-        cache_manager: APICacheManager,
-        base_url: str = DEFAULT_REGISTRY_URL,
-    ):
+    def __init__(self, base_url: str = DEFAULT_REGISTRY_URL):
         self.base_url = base_url
-        self.cache_manager = cache_manager
         self.rate_limiter = RateLimitManager(min_interval=0.05)
         self.retry_config = RetryConfig(
             max_retries=3,
@@ -158,14 +152,6 @@ class ComfyRegistryClient:
             CDRegistryServerError: For 5xx server errors
             CDRegistryConnectionError: For network issues
         """
-
-        # Check cache first
-        logger.debug(f"Registry client: Checking cache for '{url}'")
-        cached_data = self.cache_manager.get("registry", url)
-        if cached_data is not None:
-            logger.debug(f"Registry client: Using cached data for '{url}'")
-            return cached_data
-
         # Rate limit ourselves
         self.rate_limiter.wait_if_needed("registry_api")
 
@@ -176,8 +162,7 @@ class ComfyRegistryClient:
             with urllib.request.urlopen(req, timeout=30) as response:
                 if response.status == 200:
                     json_data = json.loads(response.read().decode("utf-8"))
-                    logger.debug(f"Registry client: Got data for '{url}'")
-                    self.cache_manager.set("registry", url, json_data)
+                    logger.debug(f"Registry: Got data for '{url}'")
                     return json_data
 
         except urllib.error.HTTPError as e:

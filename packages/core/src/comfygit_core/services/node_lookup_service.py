@@ -9,7 +9,7 @@ from comfygit_core.models.exceptions import CDNodeNotFoundError, CDRegistryError
 from comfygit_core.models.shared import NodeInfo
 
 from ..analyzers.custom_node_scanner import CustomNodeScanner
-from ..caching import APICacheManager, CustomNodeCacheManager
+from ..caching import CustomNodeCacheManager
 from ..clients import ComfyRegistryClient, GitHubClient
 from ..logging.logging_config import get_logger
 from ..utils.git import is_git_url
@@ -81,10 +81,9 @@ class NodeLookupService:
             workspace_config_repository: Repository for workspace config (cache preference)
         """
         self.scanner = CustomNodeScanner()
-        self.api_cache = APICacheManager(cache_base_path=cache_path)
         self.custom_node_cache = CustomNodeCacheManager(cache_base_path=cache_path)
-        self.registry_client = ComfyRegistryClient(cache_manager=self.api_cache)
-        self.github_client = GitHubClient(cache_manager=self.api_cache)
+        self.registry_client = ComfyRegistryClient()
+        self.github_client = GitHubClient()
         self.node_mappings_repository = node_mappings_repository
         self.workspace_config_repository = workspace_config_repository
 

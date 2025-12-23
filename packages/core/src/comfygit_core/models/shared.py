@@ -107,12 +107,17 @@ class NodeInfo:
         Returns:
             NodeInfo instance
         """
+        from packaging.version import Version, InvalidVersion
 
         # Determine version to use
         if version is None:
-            # Get latest version (highest version number or first in dict)
+            # Get latest version using semantic version comparison
             if package.versions:
-                version = max(package.versions.keys())
+                try:
+                    version = max(package.versions.keys(), key=Version)
+                except InvalidVersion:
+                    # Fall back to string comparison if versions aren't valid semver
+                    version = max(package.versions.keys())
             else:
                 version = None
 
