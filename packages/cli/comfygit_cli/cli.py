@@ -348,6 +348,26 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     orch_logs_parser.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to show (default: 50)")
     orch_logs_parser.set_defaults(func=global_cmds.orch_logs)
 
+    # Workspace management subcommands
+    workspace_parser = subparsers.add_parser("workspace", help="Workspace operations")
+    workspace_subparsers = workspace_parser.add_subparsers(
+        dest="workspace_command",
+        help="Workspace commands"
+    )
+    workspace_parser.set_defaults(func=_make_help_func(workspace_parser))
+
+    # workspace cleanup
+    workspace_cleanup_parser = workspace_subparsers.add_parser(
+        "cleanup",
+        help="Remove legacy workspace artifacts"
+    )
+    workspace_cleanup_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip verification and force cleanup"
+    )
+    workspace_cleanup_parser.set_defaults(func=global_cmds.workspace_cleanup)
+
 
 def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     """Add environment-specific commands."""

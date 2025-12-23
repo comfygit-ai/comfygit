@@ -386,3 +386,12 @@ class ManagerUpdateResult:
     message: str = ""
 
 
+@dataclass
+class LegacyCleanupResult:
+    """Result from cleaning up legacy workspace artifacts."""
+    success: bool                     # Whether cleanup was performed
+    removed_path: str | None = None   # Path that was removed (as string)
+    legacy_environments: list[str] = field(default_factory=list)  # Envs still using legacy
+    message: str = ""
+
+

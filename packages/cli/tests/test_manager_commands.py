@@ -225,17 +225,19 @@ class TestInitNoSystemNodes:
 
 
 class TestLegacyWorkspaceNotice:
-    """Tests for legacy workspace detection notice."""
+    """Tests for legacy notice in get_workspace_or_exit.
 
-    def test_legacy_notice_shown_for_legacy_workspace(self, capsys):
-        """Legacy notice should be shown for v1 schema workspaces."""
+    Note: Legacy notices have been moved to per-environment level.
+    The workspace-level notice has been removed. These tests verify
+    that get_workspace_or_exit() does NOT show legacy notices.
+    """
+
+    def test_no_legacy_notice_at_workspace_level(self, capsys):
+        """Workspace-level legacy notice has been removed."""
         from comfygit_cli import cli_utils
 
-        # Reset the notice flag
-        cli_utils._legacy_notice_shown = False
-
         mock_workspace = MagicMock()
-        mock_workspace.is_legacy_schema.return_value = True
+        mock_workspace.has_legacy_system_nodes.return_value = True
 
         with patch.object(cli_utils.WorkspaceFactory, "find", return_value=mock_workspace):
             with patch.object(cli_utils.WorkspaceLogger, "set_workspace_path"):
@@ -243,44 +245,6 @@ class TestLegacyWorkspaceNotice:
 
         assert result == mock_workspace
         captured = capsys.readouterr()
-        assert "Legacy workspace" in captured.out
-        assert "manager update" in captured.out
-
-    def test_legacy_notice_not_shown_for_modern_workspace(self, capsys):
-        """Legacy notice should NOT be shown for v2 schema workspaces."""
-        from comfygit_cli import cli_utils
-
-        # Reset the notice flag
-        cli_utils._legacy_notice_shown = False
-
-        mock_workspace = MagicMock()
-        mock_workspace.is_legacy_schema.return_value = False
-
-        with patch.object(cli_utils.WorkspaceFactory, "find", return_value=mock_workspace):
-            with patch.object(cli_utils.WorkspaceLogger, "set_workspace_path"):
-                result = cli_utils.get_workspace_or_exit()
-
-        assert result == mock_workspace
-        captured = capsys.readouterr()
+        # Legacy notices are now per-environment, not workspace-level
         assert "Legacy workspace" not in captured.out
-
-    def test_legacy_notice_shown_once_per_session(self, capsys):
-        """Legacy notice should only be shown once per CLI session."""
-        from comfygit_cli import cli_utils
-
-        # Reset the notice flag
-        cli_utils._legacy_notice_shown = False
-
-        mock_workspace = MagicMock()
-        mock_workspace.is_legacy_schema.return_value = True
-
-        with patch.object(cli_utils.WorkspaceFactory, "find", return_value=mock_workspace):
-            with patch.object(cli_utils.WorkspaceLogger, "set_workspace_path"):
-                # First call
-                cli_utils.get_workspace_or_exit()
-                # Second call
-                cli_utils.get_workspace_or_exit()
-
-        captured = capsys.readouterr()
-        # Should only appear once
-        assert captured.out.count("Legacy workspace") == 1
+        assert "Legacy" not in captured.out

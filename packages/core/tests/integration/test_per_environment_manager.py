@@ -408,3 +408,63 @@ class TestWorkspaceSchemaVersion:
 
         # ASSERT
         assert workspace.is_legacy_schema() is True
+
+    def test_has_legacy_system_nodes(self, tmp_path):
+        """has_legacy_system_nodes returns True only if system_nodes directory has content."""
+        from comfygit_core.core.workspace import WorkspacePaths, Workspace
+
+        # ARRANGE - Create workspace structure
+        workspace_path = tmp_path / "test_workspace"
+        workspace_path.mkdir()
+        metadata = workspace_path / ".metadata"
+        metadata.mkdir()
+        (metadata / "workspace.json").write_text("{}")
+        paths = WorkspacePaths(workspace_path)
+        workspace = Workspace(paths)
+
+        # ASSERT - No system_nodes directory
+        assert workspace.has_legacy_system_nodes() is False
+
+        # ARRANGE - Create empty system_nodes directory
+        system_nodes = metadata / "system_nodes"
+        system_nodes.mkdir()
+
+        # ASSERT - Empty system_nodes directory
+        assert workspace.has_legacy_system_nodes() is False
+
+        # ARRANGE - Add a node subdirectory
+        (system_nodes / "comfygit-manager").mkdir()
+
+        # ASSERT - system_nodes with content
+        assert workspace.has_legacy_system_nodes() is True
+
+    def test_upgrade_schema_if_needed(self, tmp_path):
+        """upgrade_schema_if_needed only writes version file if it doesn't exist."""
+        from comfygit_core.core.workspace import WorkspacePaths, Workspace
+
+        # ARRANGE - Create legacy workspace
+        workspace_path = tmp_path / "test_workspace"
+        workspace_path.mkdir()
+        metadata = workspace_path / ".metadata"
+        metadata.mkdir()
+        (metadata / "workspace.json").write_text("{}")
+        paths = WorkspacePaths(workspace_path)
+        workspace = Workspace(paths)
+
+        # ASSERT - No version file initially
+        assert not paths.schema_version_file.exists()
+        assert workspace.is_legacy_schema() is True
+
+        # ACT - First upgrade
+        result1 = workspace.upgrade_schema_if_needed()
+
+        # ASSERT - Version file created
+        assert result1 is True
+        assert paths.schema_version_file.exists()
+        assert workspace.is_legacy_schema() is False
+
+        # ACT - Second upgrade (should be no-op)
+        result2 = workspace.upgrade_schema_if_needed()
+
+        # ASSERT - No change
+        assert result2 is False

@@ -152,15 +152,17 @@ class TestSyncBehavior:
     """Test that sync reads from file and doesn't overwrite user settings."""
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
-    def test_sync_reads_from_backend_file(self, mock_get_workspace):
-        """Sync should read backend from .pytorch-backend file."""
+    def test_sync_uses_ensure_backend(self, mock_get_workspace):
+        """Sync should use ensure_backend() which handles both existing and missing backends."""
         from comfygit_cli.env_commands import EnvironmentCommands
 
         # Setup mocks
         mock_env = MagicMock()
         mock_env.name = "test-env"
-        mock_env.pytorch_manager.backend_file.exists.return_value = True
-        mock_env.pytorch_manager.get_backend.return_value = "cu128"
+        mock_env.cec_path = MagicMock()
+        mock_env.cec_path.__truediv__ = MagicMock(return_value=MagicMock(exists=MagicMock(return_value=True)))
+        mock_env.pytorch_manager.has_backend.return_value = True
+        mock_env.pytorch_manager.ensure_backend.return_value = "cu128"
         mock_env.sync.return_value = MagicMock(success=True, packages_synced=0, dependency_groups_installed=[], errors=[])
 
         mock_workspace = MagicMock()
@@ -175,17 +177,14 @@ class TestSyncBehavior:
 
         args = argparse.Namespace(
             target_env=None,
-            torch_backend=None,  # No override - should read from file
+            torch_backend=None,  # No override - should use ensure_backend
             verbose=False
         )
 
         cmd.sync(args)
 
-        # Should have read from file, NOT called detect_backend
-        mock_env.pytorch_manager.get_backend.assert_called()
-        mock_env.pytorch_manager.detect_backend.assert_not_called()
-        # Should NOT have called set_backend (no file write)
-        mock_env.pytorch_manager.set_backend.assert_not_called()
+        # Should have called ensure_backend which reads from file or probes
+        mock_env.pytorch_manager.ensure_backend.assert_called()
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_sync_warns_when_no_backend_file(self, mock_get_workspace, capsys, tmp_path):
@@ -257,15 +256,17 @@ class TestRunBehavior:
     """Test that run reads from file like sync does."""
 
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
-    def test_run_uses_backend_from_file(self, mock_get_workspace):
-        """Run should use backend from .pytorch-backend file."""
+    def test_run_uses_ensure_backend(self, mock_get_workspace):
+        """Run should use ensure_backend() which handles both existing and missing backends."""
         from comfygit_cli.env_commands import EnvironmentCommands
 
         mock_env = MagicMock()
         mock_env.name = "test-env"
         mock_env.get_current_branch.return_value = "main"
-        mock_env.pytorch_manager.backend_file.exists.return_value = True
-        mock_env.pytorch_manager.get_backend.return_value = "cu128"
+        mock_env.cec_path = MagicMock()
+        mock_env.cec_path.__truediv__ = MagicMock(return_value=MagicMock(exists=MagicMock(return_value=True)))
+        mock_env.pytorch_manager.has_backend.return_value = True
+        mock_env.pytorch_manager.ensure_backend.return_value = "cu128"
         mock_env.sync.return_value = MagicMock(success=True)
         mock_env.run.return_value = MagicMock(returncode=0)
 
@@ -279,7 +280,7 @@ class TestRunBehavior:
 
         args = argparse.Namespace(
             target_env=None,
-            torch_backend=None,  # Should read from file
+            torch_backend=None,  # Should use ensure_backend
             no_sync=False,
             args=[]
         )
@@ -287,6 +288,5 @@ class TestRunBehavior:
         with pytest.raises(SystemExit) as exc_info:
             cmd.run(args)
 
-        # Should have read from file, not auto-detected
-        mock_env.pytorch_manager.get_backend.assert_called()
-        mock_env.pytorch_manager.detect_backend.assert_not_called()
+        # Should have called ensure_backend which reads from file or probes
+        mock_env.pytorch_manager.ensure_backend.assert_called()

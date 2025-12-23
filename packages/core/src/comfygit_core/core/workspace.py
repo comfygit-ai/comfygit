@@ -31,6 +31,7 @@ from .environment import Environment
 
 if TYPE_CHECKING:
     from ..models.protocols import EnvironmentCreateProgress, ImportCallbacks
+    from ..models.shared import LegacyCleanupResult
 
 logger = get_logger(__name__)
 
@@ -179,12 +180,96 @@ class Workspace:
         """
         return self.get_schema_version() < self.CURRENT_SCHEMA_VERSION
 
+    def has_legacy_system_nodes(self) -> bool:
+        """Check if workspace has legacy system_nodes directory with content.
+
+        This is a more specific check than is_legacy_schema() - it only returns
+        True if there's actually a system_nodes directory with nodes in it.
+        Used to determine if migration notice should be shown.
+        """
+        system_nodes_dir = self.paths.system_nodes
+        if not system_nodes_dir.exists():
+            return False
+        # Check if there's at least one subdirectory (an actual node)
+        return any(p.is_dir() for p in system_nodes_dir.iterdir())
+
     def _write_schema_version(self) -> None:
         """Write current schema version to workspace.
 
         Called during workspace creation to mark as modern schema.
         """
         self.paths.schema_version_file.write_text(str(self.CURRENT_SCHEMA_VERSION))
+
+    def upgrade_schema_if_needed(self) -> bool:
+        """Upgrade workspace schema to current version if no version file exists.
+
+        This is called when creating new environments with per-env manager.
+        Only writes the version file if it doesn't exist (preserves existing).
+
+        Returns:
+            True if upgraded, False if already has version file.
+        """
+        if self.paths.schema_version_file.exists():
+            return False
+        self._write_schema_version()
+        return True
+
+    def cleanup_legacy_system_nodes(self, force: bool = False) -> "LegacyCleanupResult":
+        """Remove legacy .metadata/system_nodes/ directory.
+
+        Scans all environments to verify none use legacy symlinks before removing.
+
+        Args:
+            force: Skip environment verification check
+
+        Returns:
+            LegacyCleanupResult with status and any environments still using legacy
+        """
+        import shutil
+
+        from ..models.shared import LegacyCleanupResult
+
+        system_nodes_dir = self.paths.system_nodes
+
+        # Check if directory exists
+        if not system_nodes_dir.exists():
+            return LegacyCleanupResult(
+                success=False,
+                message="No legacy system_nodes directory found"
+            )
+
+        # If not forcing, check all environments for legacy symlinks
+        if not force:
+            legacy_envs = []
+            for env in self.list_environments():
+                try:
+                    status = env.get_manager_status()
+                    if status.is_legacy:
+                        legacy_envs.append(env.name)
+                except Exception:
+                    pass  # Skip environments that can't be checked
+
+            if legacy_envs:
+                return LegacyCleanupResult(
+                    success=False,
+                    legacy_environments=legacy_envs,
+                    message="Some environments still use legacy manager"
+                )
+
+        # Remove the directory
+        try:
+            shutil.rmtree(system_nodes_dir)
+            self._write_schema_version()  # Ensure v2 after cleanup
+            return LegacyCleanupResult(
+                success=True,
+                removed_path=str(system_nodes_dir),
+                message=f"Removed {system_nodes_dir}"
+            )
+        except Exception as e:
+            return LegacyCleanupResult(
+                success=False,
+                message=f"Failed to remove: {e}"
+            )
 
     @property
     def path(self) -> Path:

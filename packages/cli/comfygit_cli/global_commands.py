@@ -1763,3 +1763,26 @@ class GlobalCommands:
             else:
                 print("(empty log file)")
 
+    # === Workspace Management ===
+
+    @with_workspace_logging("workspace cleanup")
+    def workspace_cleanup(self, args: argparse.Namespace) -> None:
+        """Clean up legacy workspace artifacts.
+
+        Removes .metadata/system_nodes/ directory if no environments
+        still use legacy symlinked manager.
+        """
+        force = getattr(args, 'force', False)
+
+        result = self.workspace.cleanup_legacy_system_nodes(force=force)
+
+        if result.success:
+            print(f"Removed {result.removed_path}")
+        else:
+            if result.legacy_environments:
+                print("Cannot cleanup: Some environments still use legacy manager")
+                for env in result.legacy_environments:
+                    print(f"  {env}")
+                print("\nRun 'cg -e <ENV> manager update' to migrate, then retry.")
+            else:
+                print(f"{result.message}")

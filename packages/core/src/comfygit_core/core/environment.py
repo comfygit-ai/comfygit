@@ -272,31 +272,30 @@ class Environment:
         from ..constants import MANAGER_NODE_ID
         from ..utils.symlink_utils import is_link
 
-        manager_path = self.custom_nodes_path / MANAGER_NODE_ID
         current_version: str | None = None
         is_legacy = False
         is_tracked = False
 
-        # Check if it's a symlink (legacy)
-        if manager_path.exists() or is_link(manager_path):
-            if is_link(manager_path):
+        # First check if tracked in pyproject (modern per-env manager)
+        nodes = self.pyproject.nodes.get_existing()
+        if MANAGER_NODE_ID in nodes:
+            is_tracked = True
+            current_version = nodes[MANAGER_NODE_ID].version
+        else:
+            # Not tracked - check for legacy symlink at registry ID path
+            legacy_path = self.custom_nodes_path / MANAGER_NODE_ID
+            if is_link(legacy_path):
                 is_legacy = True
                 # Try to read version from symlink target
                 try:
                     import tomllib
-                    target_pyproject = manager_path / "pyproject.toml"
+                    target_pyproject = legacy_path / "pyproject.toml"
                     if target_pyproject.exists():
                         with open(target_pyproject, "rb") as f:
                             data = tomllib.load(f)
                             current_version = data.get("project", {}).get("version")
                 except Exception:
                     pass
-            else:
-                # It's a real directory - check if tracked in pyproject
-                nodes = self.pyproject.nodes.get_existing()
-                if MANAGER_NODE_ID in nodes:
-                    is_tracked = True
-                    current_version = nodes[MANAGER_NODE_ID].version
 
         # Get latest version from registry
         latest_version: str | None = None
@@ -422,28 +421,41 @@ class Environment:
             logger.info("Removed legacy dependency-groups.system-nodes")
 
     def _register_imported_manager(self) -> None:
-        """Auto-register comfygit-manager from imported environment.
+        """Auto-register or install comfygit-manager for imported environment.
 
-        If the imported environment contains a comfygit-manager directory in custom_nodes,
-        detect its version and register it as a tracked node in pyproject.toml.
+        Order of operations:
+        1. If tracked in pyproject.toml → already good, skip
+        2. If directory exists (from export) → register with detected version
+        3. If missing entirely → install fresh from registry
 
         This replaces the legacy symlink system where manager was symlinked from
         workspace-level .metadata/system_nodes/.
         """
-        import tomllib
-
         from ..constants import MANAGER_NODE_ID
-
-        manager_path = self.custom_nodes_path / MANAGER_NODE_ID
-        if not manager_path.exists() or not manager_path.is_dir():
-            logger.debug("No comfygit-manager found in imported environment")
-            return
 
         # Check if already tracked
         nodes = self.pyproject.nodes.get_existing()
         if MANAGER_NODE_ID in nodes:
             logger.debug("comfygit-manager already tracked in pyproject.toml")
             return
+
+        manager_path = self.custom_nodes_path / MANAGER_NODE_ID
+
+        if manager_path.exists() and manager_path.is_dir():
+            # Directory exists - register from filesystem
+            self._register_existing_manager(manager_path)
+        else:
+            # Not present - install fresh from registry
+            self._install_manager_from_registry()
+
+        # Always cleanup legacy dependency group
+        self._cleanup_system_nodes_dependency_group()
+
+    def _register_existing_manager(self, manager_path: Path) -> None:
+        """Register existing manager directory in pyproject.toml."""
+        import tomllib
+
+        from ..constants import MANAGER_NODE_ID
 
         # Detect version from manager's pyproject.toml
         version = None
@@ -472,10 +484,24 @@ class Environment:
             "registry_id": MANAGER_NODE_ID,
         }
         self.pyproject.save(config)
-        logger.info(f"Registered imported comfygit-manager (v{version or 'unknown'})")
+        logger.info(f"Registered existing comfygit-manager (v{version or 'unknown'})")
 
-        # Clean up legacy dependency group if present
-        self._cleanup_system_nodes_dependency_group()
+    def _install_manager_from_registry(self) -> None:
+        """Install comfygit-manager from registry during import."""
+        from ..constants import MANAGER_NODE_ID
+
+        logger.info("Installing comfygit-manager from registry...")
+        try:
+            self.node_manager.add_node(MANAGER_NODE_ID)
+            logger.info("comfygit-manager installed successfully")
+
+            # Upgrade workspace schema if this is a legacy workspace
+            if self.workspace.upgrade_schema_if_needed():
+                logger.info("Upgraded workspace to schema v2")
+        except Exception as e:
+            # Manager installation failure is non-fatal
+            logger.warning(f"Could not install comfygit-manager: {e}")
+            logger.warning("Environment will work but manager panel will be unavailable")
 
     def _ensure_schema_migrated(self) -> bool:
         """Migrate pyproject schema v1 → v2 if needed.

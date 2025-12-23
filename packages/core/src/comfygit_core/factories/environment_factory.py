@@ -245,6 +245,11 @@ class EnvironmentFactory:
             logger.info(f"Installing {MANAGER_NODE_ID} as tracked node...")
             env.node_manager.add_node(MANAGER_NODE_ID)
             logger.info(f"{MANAGER_NODE_ID} installed successfully")
+
+            # Upgrade workspace schema if this is a legacy workspace
+            # (new envs with per-env manager = modern workspace)
+            if workspace.upgrade_schema_if_needed():
+                logger.info("Upgraded workspace to schema v2 (per-environment manager)")
         except Exception as e:
             # Manager installation failure is non-fatal - environment still works
             logger.warning(f"Could not install {MANAGER_NODE_ID}: {e}")

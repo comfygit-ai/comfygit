@@ -129,6 +129,16 @@ class EnvironmentCommands:
             print("   Try setting it explicitly: cg env-config torch-backend set <backend>")
             sys.exit(1)
 
+    def _show_legacy_manager_notice(self, env: Environment) -> None:
+        """Show legacy manager notice if environment uses symlinked manager."""
+        try:
+            status = env.get_manager_status()
+            if status.is_legacy:
+                print("")
+                print("Legacy manager detected. Run 'cg manager update' to migrate.")
+        except Exception:
+            pass  # Silently fail - notice is informational only
+
     def _format_size(self, size_bytes: int) -> str:
         """Format bytes as human-readable size."""
         for unit in ("B", "KB", "MB", "GB"):
@@ -762,6 +772,9 @@ class EnvironmentCommands:
 
         # Suggested actions - smart and contextual
         self._show_smart_suggestions(status)
+
+        # Show legacy manager notice if applicable
+        self._show_legacy_manager_notice(env)
 
     # Removed: _has_uninstalled_packages - this logic is now in core's WorkflowAnalysisStatus
 
