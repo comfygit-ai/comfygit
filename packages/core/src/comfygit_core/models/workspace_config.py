@@ -58,6 +58,7 @@ class WorkspaceConfig:
     global_model_directory: ModelDirectory | None
     api_credentials: APICredentials | None = None
     prefer_registry_cache: bool = True  # Use local node mappings cache instead of API
+    external_uv_cache: str | None = None  # Optional external UV cache path for dev/testing
 
     @classmethod
     def from_dict(cls, data):
@@ -68,6 +69,7 @@ class WorkspaceConfig:
             global_model_directory=ModelDirectory.from_dict(data["global_model_directory"]) if data.get("global_model_directory") else None,
             api_credentials=APICredentials.from_dict(data.get("api_credentials")) if data.get("api_credentials") else None,
             prefer_registry_cache=data.get("prefer_registry_cache", True),
+            external_uv_cache=data.get("external_uv_cache"),
         )
 
     @classmethod
@@ -79,5 +81,6 @@ class WorkspaceConfig:
             "global_model_directory": ModelDirectory.to_dict(instance.global_model_directory) if instance.global_model_directory else None,
             "api_credentials": instance.api_credentials.to_dict() if instance.api_credentials else None,
             "prefer_registry_cache": instance.prefer_registry_cache,
+            "external_uv_cache": instance.external_uv_cache,
         }
         return result

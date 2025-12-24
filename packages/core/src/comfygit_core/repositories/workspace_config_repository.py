@@ -172,3 +172,21 @@ class WorkspaceConfigRepository:
             return data.api_credentials.runpod_api_key
 
         return None
+
+    def get_external_uv_cache(self) -> Path | None:
+        """Get external UV cache path if configured."""
+        data = self.config_file
+        if data.external_uv_cache:
+            return Path(data.external_uv_cache)
+        return None
+
+    def set_external_uv_cache(self, path: Path | None):
+        """Set or clear external UV cache path."""
+        data = self.config_file
+        if path:
+            data.external_uv_cache = str(path.resolve())
+            logger.info(f"External UV cache set to: {path}")
+        else:
+            data.external_uv_cache = None
+            logger.info("External UV cache cleared")
+        self.save(data)

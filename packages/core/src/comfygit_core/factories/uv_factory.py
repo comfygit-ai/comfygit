@@ -12,6 +12,7 @@ def create_uv_for_environment(
     cec_path: Path | None = None,
     venv_path: Path | None = None,
     torch_backend: str | None = None,
+    external_uv_cache: Path | None = None,
 ) -> UVProjectManager:
     """Create a UV project manager configured for a specific environment.
 
@@ -22,12 +23,13 @@ def create_uv_for_environment(
         cec_path: Path to the .cec directory (where pyproject.toml lives)
         venv_path: Path to the virtual environment
         torch_backend: PyTorch backend to use (auto, cpu, cu118, cu121, etc.)
+        external_uv_cache: Optional external cache path (overrides workspace-local)
 
     Returns:
         Configured UVProjectManager instance
     """
     # Workspace-level cache directories
-    uv_cache_path, uv_python_path = get_uv_cache_paths(workspace_path)
+    uv_cache_path, uv_python_path = get_uv_cache_paths(workspace_path, external_uv_cache)
 
     # Create UV command interface
     uv_command = UVCommand(
@@ -47,15 +49,23 @@ def create_uv_for_environment(
     return UVProjectManager(uv_command, pyproject_manager)
 
 
-def get_uv_cache_paths(workspace_path: Path) -> tuple[Path, Path]:
+def get_uv_cache_paths(
+    workspace_path: Path,
+    external_uv_cache: Path | None = None,
+) -> tuple[Path, Path]:
     """Get the standard UV cache paths for a workspace.
 
     Args:
         workspace_path: Path to the workspace root
+        external_uv_cache: Optional external cache path (overrides workspace-local)
 
     Returns:
         Tuple of (uv_cache_dir, uv_python_install_dir)
     """
-    uv_cache_path = workspace_path / "uv_cache"
+    if external_uv_cache:
+        uv_cache_path = external_uv_cache
+    else:
+        uv_cache_path = workspace_path / "uv_cache"
+    # Python installs always stay workspace-local for isolation
     uv_python_path = workspace_path / "uv" / "python"
     return uv_cache_path, uv_python_path

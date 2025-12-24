@@ -1355,6 +1355,10 @@ class GlobalCommands:
             self._set_civitai_key(args.civitai_key)
             return
 
+        if hasattr(args, 'uv_cache') and args.uv_cache is not None:
+            self._set_uv_cache(args.uv_cache)
+            return
+
         if hasattr(args, 'show') and args.show:
             self._show_config()
             return
@@ -1370,6 +1374,24 @@ class GlobalCommands:
         else:
             self.workspace.workspace_config_manager.set_civitai_token(key)
             print("✓ Civitai API key saved")
+
+    def _set_uv_cache(self, path_str: str):
+        """Set external UV cache path."""
+        from pathlib import Path
+
+        if path_str == "":
+            self.workspace.workspace_config_manager.set_external_uv_cache(None)
+            print("✓ External UV cache cleared (using workspace-local cache)")
+        else:
+            path = Path(path_str).expanduser().resolve()
+            if not path.exists():
+                print(f"Error: Path does not exist: {path}")
+                return
+            if not path.is_dir():
+                print(f"Error: Path is not a directory: {path}")
+                return
+            self.workspace.workspace_config_manager.set_external_uv_cache(path)
+            print(f"✓ External UV cache set to: {path}")
 
     def _show_config(self):
         """Display current configuration."""
@@ -1390,6 +1412,13 @@ class GlobalCommands:
         # Registry cache preference
         prefer_cache = self.workspace.workspace_config_manager.get_prefer_registry_cache()
         print(f"  Registry Cache:  {'Enabled' if prefer_cache else 'Disabled'}")
+
+        # External UV cache
+        uv_cache = self.workspace.workspace_config_manager.get_external_uv_cache()
+        if uv_cache:
+            print(f"  UV Cache:        {uv_cache}")
+        else:
+            print("  UV Cache:        Workspace-local (default)")
 
     def _interactive_config(self):
         """Interactive configuration menu."""
