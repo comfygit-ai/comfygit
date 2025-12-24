@@ -101,14 +101,12 @@ class EnvironmentFactory:
         # Phase: Resolve ComfyUI version (10-15%)
         _progress("resolve_version", "Resolving ComfyUI version", 10)
 
-        from ..caching.api_cache import APICacheManager
         from ..caching.comfyui_cache import ComfyUICacheManager, ComfyUISpec
         from ..clients.github_client import GitHubClient
         from ..utils.comfyui_ops import resolve_comfyui_version
         from ..utils.git import git_rev_parse
 
-        api_cache = APICacheManager(cache_base_path=workspace.paths.cache)
-        github_client = GitHubClient(cache_manager=api_cache)
+        github_client = GitHubClient()
 
         version_to_clone, version_type, _ = resolve_comfyui_version(
             comfyui_version,

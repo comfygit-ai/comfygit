@@ -5,22 +5,13 @@ that enable fetching and validating ComfyUI release tags from GitHub API.
 """
 
 import pytest
-from pathlib import Path
 from comfygit_core.clients.github_client import GitHubClient, GitHubRepoInfo
-from comfygit_core.caching.api_cache import APICacheManager
 
 
 @pytest.fixture
-def temp_cache(tmp_path):
-    """Temporary cache for testing."""
-    return tmp_path / "test_cache"
-
-
-@pytest.fixture
-def github_client(temp_cache):
-    """GitHub client with temporary cache."""
-    cache_manager = APICacheManager(cache_base_path=temp_cache)
-    return GitHubClient(cache_manager=cache_manager)
+def github_client():
+    """GitHub client for testing."""
+    return GitHubClient()
 
 
 @pytest.fixture
@@ -160,14 +151,3 @@ def test_validate_version_exists_returns_false_for_invalid(github_client, comfyu
     assert is_valid is False, "Should return False for non-existent version"
 
 
-def test_list_releases_uses_cache(github_client, comfyui_repo_url):
-    """SHOULD cache release lists for faster subsequent calls."""
-    # First call - hits API
-    releases1 = github_client.list_releases(comfyui_repo_url, limit=3)
-
-    # Second call - should use cache
-    releases2 = github_client.list_releases(comfyui_repo_url, limit=3)
-
-    assert len(releases1) == len(releases2), "Cached results should match fresh results"
-    if len(releases1) > 0:
-        assert releases1[0].tag_name == releases2[0].tag_name, "Cached data should be identical"
