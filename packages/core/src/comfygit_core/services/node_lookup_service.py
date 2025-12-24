@@ -16,7 +16,6 @@ from ..utils.git import is_git_url
 
 if TYPE_CHECKING:
     from comfygit_core.repositories.node_mappings_repository import NodeMappingsRepository
-    from comfygit_core.repositories.workspace_config_repository import WorkspaceConfigRepository
 
 logger = get_logger(__name__)
 
@@ -61,7 +60,7 @@ class NodeLookupService:
     """Pure stateless service for finding nodes and analyzing their requirements.
 
     Responsibilities:
-    - Registry lookup (cache-first, then API)
+    - Registry lookup (API-first, cache fallback)
     - GitHub API calls (validating repos, getting commit info)
     - Requirement scanning (analyzing node directories)
     - Cache management (API responses, downloaded node archives)
@@ -71,28 +70,26 @@ class NodeLookupService:
         self,
         cache_path: Path,
         node_mappings_repository: NodeMappingsRepository | None = None,
-        workspace_config_repository: WorkspaceConfigRepository | None = None,
     ):
         """Initialize the node lookup service.
 
         Args:
             cache_path: Required path to workspace cache directory
-            node_mappings_repository: Repository for cached node mappings
-            workspace_config_repository: Repository for workspace config (cache preference)
+            node_mappings_repository: Repository for cached node mappings (fallback when API fails)
         """
         self.scanner = CustomNodeScanner()
         self.custom_node_cache = CustomNodeCacheManager(cache_base_path=cache_path)
         self.registry_client = ComfyRegistryClient()
         self.github_client = GitHubClient()
         self.node_mappings_repository = node_mappings_repository
-        self.workspace_config_repository = workspace_config_repository
 
     def find_node(self, identifier: str) -> NodeInfo | None:
-        """Find node info from cache, registry, or git URL.
+        """Find node info from registry API, git URL, or local cache.
 
-        Cache-first strategy:
-        1. If prefer_registry_cache=True and package in local cache → return from cache
-        2. Otherwise → query live API
+        API-first strategy:
+        1. Git URLs → query GitHub API directly
+        2. Registry IDs → query live registry API first
+        3. If API fails → fall back to local node mappings cache
 
         Args:
             identifier: Registry ID, git URL, or name. Supports @version/@ref syntax:
@@ -113,7 +110,7 @@ class NodeLookupService:
             base_identifier = parts[0]
             requested_version = parts[1]
 
-        # Check if it's a git URL - these bypass cache
+        # Check if it's a git URL - these go directly to GitHub API
         if is_git_url(base_identifier):
             try:
                 if repo_info := self.github_client.get_repository_info(base_identifier, ref=requested_version):
@@ -127,29 +124,7 @@ class NodeLookupService:
                 logger.warning(f"Invalid git URL: {e}")
                 return None
 
-        # Check if we should prefer cached mappings
-        prefer_cache = True
-        if self.workspace_config_repository:
-            prefer_cache = self.workspace_config_repository.get_prefer_registry_cache()
-
-        # Strategy: Cache first, then API
-        if prefer_cache and self.node_mappings_repository:
-            package = self.node_mappings_repository.get_package(base_identifier)
-            if package:
-                logger.debug(f"Found '{base_identifier}' in local cache")
-                node_info = NodeInfo.from_global_package(package, version=requested_version)
-                # Check if we got a valid download_url for the requested version
-                # If not (version not in cache or missing download_url), fall back to API
-                if node_info.download_url:
-                    return node_info
-                logger.debug(
-                    f"Cache has '{base_identifier}' but missing download_url for version "
-                    f"'{requested_version}', falling back to API..."
-                )
-            else:
-                logger.debug(f"'{base_identifier}' not in local cache, trying API...")
-
-        # Fallback to registry API
+        # Strategy: API first, cache fallback
         try:
             registry_node = self.registry_client.get_node(base_identifier)
             if registry_node:
@@ -164,6 +139,19 @@ class NodeLookupService:
                 return NodeInfo.from_registry_node(registry_node)
         except CDRegistryError as e:
             logger.warning(f"Cannot reach registry: {e}")
+            # Fall back to local cache
+            if self.node_mappings_repository:
+                logger.debug(f"Trying local cache for '{base_identifier}'...")
+                package = self.node_mappings_repository.get_package(base_identifier)
+                if package:
+                    logger.debug(f"Found '{base_identifier}' in local cache")
+                    node_info = NodeInfo.from_global_package(package, version=requested_version)
+                    if node_info.download_url:
+                        return node_info
+                    logger.debug(
+                        f"Cache has '{base_identifier}' but missing download_url for version "
+                        f"'{requested_version}'"
+                    )
 
         logger.debug(f"Node '{base_identifier}' not found")
         return None
@@ -186,13 +174,7 @@ class NodeLookupService:
             if is_git_url(identifier):
                 msg = f"Node '{identifier}' not found. GitHub repository is invalid or inaccessible."
             else:
-                # Registry lookup was attempted
-                prefer_cache = True
-                if self.workspace_config_repository:
-                    prefer_cache = self.workspace_config_repository.get_prefer_registry_cache()
-
-                sources_tried = ["local cache", "registry API"] if prefer_cache else ["registry API"]
-                msg = f"Node '{identifier}' not found in {' or '.join(sources_tried)}"
+                msg = f"Node '{identifier}' not found in registry API or local cache"
 
             raise CDNodeNotFoundError(msg)
         return node

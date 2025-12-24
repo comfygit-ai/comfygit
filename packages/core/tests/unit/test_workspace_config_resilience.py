@@ -58,8 +58,7 @@ class TestWorkspaceConfigLoadBehavior:
             "active_environment": "",
             "created_at": "2025-01-01T00:00:00",
             "global_model_directory": None,
-            "api_credentials": None,
-            "prefer_registry_cache": True
+            "api_credentials": None
         }
         config_file.write_text(json.dumps(valid_config))
 

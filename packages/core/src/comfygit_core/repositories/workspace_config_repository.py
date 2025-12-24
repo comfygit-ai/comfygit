@@ -131,18 +131,6 @@ class WorkspaceConfigRepository:
 
         return None
 
-    def get_prefer_registry_cache(self) -> bool:
-        """Get prefer_registry_cache setting (defaults to True)."""
-        data = self.config_file
-        return data.prefer_registry_cache
-
-    def set_prefer_registry_cache(self, enabled: bool):
-        """Set prefer_registry_cache setting."""
-        data = self.config_file
-        data.prefer_registry_cache = enabled
-        self.save(data)
-        logger.info(f"Registry cache preference set to: {enabled}")
-
     def set_runpod_token(self, token: str | None):
         """Set or clear RunPod API key."""
         data = self.config_file
