@@ -145,6 +145,6 @@ See `DOCUMENTATION_STATUS.md` for what needs writing.
 
 ## Questions?
 
-- GitHub Issues: https://github.com/comfyhub-org/comfygit/issues
-- GitHub Discussions: https://github.com/comfyhub-org/comfygit/discussions
+- GitHub Issues: https://github.com/comfygit-ai/comfygit/issues
+- GitHub Discussions: https://github.com/comfygit-ai/comfygit/discussions
 

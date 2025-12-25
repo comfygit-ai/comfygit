@@ -98,7 +98,6 @@ $ cg export my-workflow.tar.gz
 Exporting environment 'my-project'...
 Bundling node metadata...
 Bundling model sources...
-Bundling Python lockfile...
 Created my-workflow.tar.gz (2.3 MB)
 
 $ cg import my-workflow.tar.gz --name imported-env
@@ -181,5 +180,5 @@ See the [model management guide](./user-guide/models/model-index.md) to learn mo
 ## Community & Support
 
 - **Discord**: [Join our community](https://discord.gg/2h5rSTeh6Y)
-- **Issues**: [GitHub Issues](https://github.com/comfyhub-org/comfygit/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/comfyhub-org/comfygit/discussions)
+- **Issues**: [GitHub Issues](https://github.com/comfygit-ai/comfygit/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/comfygit-ai/comfygit/discussions)

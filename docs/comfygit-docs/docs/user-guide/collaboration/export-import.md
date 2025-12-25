@@ -1,6 +1,6 @@
 # Export and Import
 
-Share complete ComfyUI environments as portable tarballs that include configuration, workflows, and development nodes.
+Share complete ComfyUI environments as portable tarballs that include configuration and workflows.
 
 ## Overview
 
@@ -17,7 +17,7 @@ Unlike git remotes (which require continuous sync), export creates a self-contai
 
 ## Exporting an Environment
 
-Export packages your environment configuration, workflows, and development nodes into a tarball.
+Export packages your environment configuration and workflows into a tarball.
 
 ### Basic Export
 
@@ -68,13 +68,10 @@ environment_export.tar.gz
 │                           # - Custom nodes list
 │                           # - Model metadata
 │                           # - Workflow dependencies
-├── uv.lock                 # Locked Python dependencies
 ├── .python-version         # Python version constraint
-├── workflows/              # All committed workflows
-│   ├── workflow1.json
-│   └── workflow2.json
-└── dev_nodes/              # Development node source code
-    └── my-custom-node/     # (Only nodes with source="development")
+└── workflows/              # All committed workflows
+    ├── workflow1.json
+    └── workflow2.json
 ```
 
 !!! note "Only Committed Content"
@@ -505,40 +502,6 @@ The environment remains usable with reduced functionality when optional groups f
 
 ---
 
-## Development Nodes
-
-Export includes source code for development nodes (nodes with `source = "development"`).
-
-### What Gets Included
-
-Development node source code is bundled in the tarball:
-
-```
-dev_nodes/
-└── my-custom-node/
-    ├── __init__.py
-    ├── nodes.py
-    └── requirements.txt
-```
-
-**Filtering:**
-
-- Excludes `__pycache__/` directories
-- Excludes `.pyc` files
-- Includes all other source files
-
-### Import Behavior
-
-During import, development nodes are:
-
-1. Extracted to `.cec/dev_nodes/`
-2. Symlinked to `ComfyUI/custom_nodes/`
-3. Dependencies installed from `requirements.txt`
-
-This allows sharing custom nodes under development without publishing to a registry.
-
----
-
 ## Advanced Import Behaviors
 
 ComfyGit performs several automatic operations during import to ensure environment consistency and cross-platform compatibility.
@@ -630,17 +593,6 @@ sources = [
     { type = "civitai", url = "https://civitai.com/..." }
 ]
 ```
-
-### Development Node Extraction
-
-Development nodes (nodes with `source = "development"`) are:
-
-1. **Extracted** to `.cec/dev_nodes/<node-name>/`
-2. **Symlinked** to `ComfyUI/custom_nodes/<node-name>`
-3. **Dependencies installed** from their `requirements.txt` if present
-4. **Treated as local code** (not managed via git/registry)
-
-This allows distributing custom nodes under active development without publishing them to the ComfyUI registry.
 
 ---
 
@@ -819,7 +771,7 @@ Export/import enables offline environment sharing with intelligent automation:
 
 - **Validation** ensures recipients can recreate environments (uncommitted changes, model sources)
 - **Progressive disclosure** for models without sources - view first 3, expand to see all
-- **Tarball packaging** includes pyproject.toml, workflows, development nodes, and dependency locks
+- **Tarball packaging** includes pyproject.toml and workflows
 - **Committed content only** - ensures consistency and reproducibility
 
 **Import Features:**
@@ -828,7 +780,6 @@ Export/import enables offline environment sharing with intelligent automation:
 - **ComfyUI caching** speeds up subsequent imports (30-60s → 2-5s for same version)
 - **Model strategies** control download behavior (all/required/skip)
 - **PyTorch backend management** strips imported config and installs correct backend for target platform
-- **Development nodes** extracted and symlinked automatically
 - **Download intent preservation** tracks models that couldn't be downloaded for later resolution
 
 **Automatic Behaviors:**
