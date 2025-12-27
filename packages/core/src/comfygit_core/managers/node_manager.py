@@ -1158,13 +1158,11 @@ class NodeManager:
         stored_groups = self.pyproject.dependencies.get_groups()
         stored_reqs = stored_groups.get(group_name, [])
 
-        # Normalize for comparison (compare package names only)
-        current_names = {parse_dependency_string(r)[0] for r in current_reqs}
-        stored_names = {parse_dependency_string(r)[0] for r in stored_reqs}
-
-        added = current_names - stored_names
-        removed = stored_names - current_names
-        reqs_changed = bool(added or removed)
+        # Compare full requirement strings (including version constraints)
+        # Normalize by sorting for consistent comparison
+        current_set = set(current_reqs)
+        stored_set = set(stored_reqs)
+        reqs_changed = current_set != stored_set
 
         if reqs_changed:
             changes.append("requirements")
