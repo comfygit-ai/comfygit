@@ -1159,10 +1159,11 @@ class NodeManager:
         stored_reqs = stored_groups.get(group_name, [])
 
         # Compare full requirement strings (including version constraints)
-        # Normalize by sorting for consistent comparison
         current_set = set(current_reqs)
         stored_set = set(stored_reqs)
-        reqs_changed = current_set != stored_set
+        added = current_set - stored_set
+        removed = stored_set - current_set
+        reqs_changed = bool(added or removed)
 
         if reqs_changed:
             changes.append("requirements")
