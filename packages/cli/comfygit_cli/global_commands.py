@@ -1409,10 +1409,6 @@ class GlobalCommands:
         else:
             print("  Civitai API Key: Not set")
 
-        # Registry cache preference
-        prefer_cache = self.workspace.workspace_config_manager.get_prefer_registry_cache()
-        print(f"  Registry Cache:  {'Enabled' if prefer_cache else 'Disabled'}")
-
         # External UV cache
         uv_cache = self.workspace.workspace_config_manager.get_external_uv_cache()
         if uv_cache:
@@ -1425,7 +1421,6 @@ class GlobalCommands:
         while True:
             # Get current config
             civitai_token = self.workspace.workspace_config_manager.get_civitai_token()
-            prefer_cache = self.workspace.workspace_config_manager.get_prefer_registry_cache()
 
             # Display menu
             print("\nComfyGit Configuration\n")
@@ -1437,20 +1432,14 @@ class GlobalCommands:
             else:
                 print("  1. Civitai API Key: Not set")
 
-            # Registry cache
-            cache_status = "Enabled" if prefer_cache else "Disabled"
-            print(f"  2. Registry Cache:  {cache_status}")
-
             # Options
-            print("\n  [1-2] Change setting  [c] Clear a setting  [q] Quit")
+            print("\n  [1] Change setting  [c] Clear a setting  [q] Quit")
             choice = input("Choice: ").strip().lower()
 
             if choice == 'q':
                 break
             elif choice == '1':
                 self._interactive_set_civitai_key()
-            elif choice == '2':
-                self._interactive_toggle_registry_cache()
             elif choice == 'c':
                 self._interactive_clear_setting()
             else:
@@ -1468,15 +1457,6 @@ class GlobalCommands:
 
         self.workspace.workspace_config_manager.set_civitai_token(key)
         print("✓ API key saved")
-
-    def _interactive_toggle_registry_cache(self):
-        """Toggle registry cache preference."""
-        current = self.workspace.workspace_config_manager.get_prefer_registry_cache()
-        new_value = not current
-
-        self.workspace.workspace_config_manager.set_prefer_registry_cache(new_value)
-        status = "enabled" if new_value else "disabled"
-        print(f"✓ Registry cache {status}")
 
     def _interactive_clear_setting(self):
         """Clear a configuration setting."""
