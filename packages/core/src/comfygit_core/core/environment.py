@@ -573,14 +573,6 @@ class Environment:
 
         logger.info("Syncing environment...")
 
-        # Refresh dev node requirements before UV sync (picks up any changes)
-        try:
-            updated_dev_nodes = self.node_manager.refresh_all_dev_node_requirements()
-            if updated_dev_nodes:
-                logger.info(f"Updated requirements for dev nodes: {', '.join(updated_dev_nodes)}")
-        except Exception as e:
-            logger.warning(f"Could not refresh dev node requirements: {e}")
-
         # Sync packages with UV - progressive installation with PyTorch injection
         try:
             sync_result = self.uv_manager.sync_dependencies_progressive(

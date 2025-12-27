@@ -1117,24 +1117,40 @@ class NodeManager:
         self,
         identifier: str,
         node_info: NodeInfo,
-        no_test: bool,
-        skip_sync: bool = False
+        no_test: bool
     ) -> UpdateResult:
-        """Update dev node by re-scanning requirements.
+        """Update dev node by re-scanning requirements and git info.
+
+        This snapshots the current state of the dev node (requirements + git info)
+        so it can be committed and shared with collaborators.
 
         Args:
             identifier: Node identifier in pyproject
             node_info: Node info object
             no_test: Skip dependency resolution testing
-            skip_sync: Skip UV sync after update (for batch operations)
         """
         result = UpdateResult(node_name=node_info.name, source='development')
 
-        # Scan current requirements
         node_path = self.custom_nodes_path / node_info.name
         if not node_path.exists():
             raise CDNodeNotFoundError(f"Dev node directory not found: {node_path}")
 
+        changes = []
+
+        # Update git info (repo, branch, commit)
+        git_info = get_node_git_info(node_path)
+        if git_info and git_info.remote_url:
+            if node_info.repository != git_info.remote_url:
+                node_info.repository = git_info.remote_url
+                changes.append("repository")
+            if git_info.branch and node_info.branch != git_info.branch:
+                node_info.branch = git_info.branch
+                changes.append("branch")
+            if git_info.commit and node_info.pinned_commit != git_info.commit:
+                node_info.pinned_commit = git_info.commit
+                changes.append("commit")
+
+        # Scan current requirements
         current_reqs = self.node_lookup.scan_requirements(node_path)
 
         # Get stored requirements from dependency group
@@ -1148,32 +1164,37 @@ class NodeManager:
 
         added = current_names - stored_names
         removed = stored_names - current_names
+        reqs_changed = bool(added or removed)
 
-        if not added and not removed:
-            result.message = "No requirement changes detected"
+        if reqs_changed:
+            changes.append("requirements")
+            # Update requirements - remove old group first to replace (not append)
+            try:
+                self.pyproject.dependencies.remove_group(group_name)
+            except ValueError:
+                pass  # Group didn't exist
+
+            existing_sources = self.pyproject.uv_config.get_source_names()
+
+            if current_reqs:
+                self.uv.add_requirements_with_sources(
+                    current_reqs, group=group_name, no_sync=True
+                )
+
+            # Detect new sources
+            new_sources = self.pyproject.uv_config.get_source_names() - existing_sources
+            if new_sources:
+                node_info.dependency_sources = sorted(new_sources)
+
+        if not changes:
+            result.message = "No changes detected"
             return result
 
-        # Update requirements - remove old group first to replace (not append)
-        try:
-            self.pyproject.dependencies.remove_group(group_name)
-        except ValueError:
-            pass  # Group didn't exist
-
-        existing_sources = self.pyproject.uv_config.get_source_names()
-
-        if current_reqs:
-            self.uv.add_requirements_with_sources(
-                current_reqs, group=group_name, no_sync=True
-            )
-
-        # Detect new sources
-        new_sources = self.pyproject.uv_config.get_source_names() - existing_sources
-        if new_sources:
-            node_info.dependency_sources = sorted(new_sources)
-            self.pyproject.nodes.add(node_info, identifier)
+        # Save updated node info to pyproject
+        self.pyproject.nodes.add(node_info, identifier)
 
         # Test resolution if requested
-        if not no_test:
+        if not no_test and reqs_changed:
             resolution_result = self.resolution_tester.test_resolution(self.pyproject.path)
             if not resolution_result.success:
                 self._raise_dependency_conflict(node_info.name, resolution_result)
@@ -1181,43 +1202,14 @@ class NodeManager:
         result.requirements_added = list(added)
         result.requirements_removed = list(removed)
         result.changed = True
-        result.message = f"Updated requirements: +{len(added)} -{len(removed)}"
+        result.message = f"Updated: {', '.join(changes)}"
 
-        # Sync Python environment to apply requirement changes (unless batching)
-        if not skip_sync:
+        # Sync Python environment to apply requirement changes
+        if reqs_changed:
             self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         logger.info(f"Updated dev node '{node_info.name}': {result.message}")
         return result
-
-    def refresh_all_dev_node_requirements(self) -> list[str]:
-        """Re-scan ALL dev nodes and update dependency groups if changed.
-
-        Called during sync() to pick up any requirement changes in dev nodes.
-        Skips missing nodes silently (reported separately by status).
-
-        Returns:
-            List of dev node names that were updated
-        """
-        updated = []
-        for identifier, node_info in self.pyproject.nodes.get_existing().items():
-            if node_info.source != 'development':
-                continue
-
-            node_path = self.custom_nodes_path / node_info.name
-            if not node_path.exists():
-                continue  # Missing dev node - reported separately by status
-
-            try:
-                result = self._update_development_node(
-                    identifier, node_info, no_test=True, skip_sync=True
-                )
-                if result.changed:
-                    updated.append(node_info.name)
-            except Exception as e:
-                logger.warning(f"Could not refresh dev node '{node_info.name}': {e}")
-
-        return updated
 
     def _update_registry_node(
         self,
