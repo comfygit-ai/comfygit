@@ -29,6 +29,67 @@ class CompletionCommands:
             "fi",
         ]
 
+    @classmethod
+    def _get_manual_install_snippet(cls, shell: str) -> str:
+        """Generate copy-paste ready completion snippet for manual installation."""
+        lines = [cls.COMPLETION_COMMENT]
+
+        if shell == 'zsh':
+            lines.extend(cls._zsh_compinit_block())
+            lines.append('')
+
+        lines.extend(cls._completion_lines())
+        return '\n'.join(lines)
+
+    @staticmethod
+    def _is_config_writable(config_file: Path) -> tuple[bool, str | None]:
+        """Check if config file is writable, returning (writable, reason_if_not)."""
+        # Check if it's a symlink to a read-only location
+        if config_file.is_symlink():
+            resolved = config_file.resolve()
+            if not os.access(resolved, os.W_OK):
+                return False, f"symlink to read-only location:\n  {config_file} -> {resolved}"
+
+        # Check general write permission (handles non-symlink cases)
+        if config_file.exists() and not os.access(config_file, os.W_OK):
+            return False, "file is not writable (check permissions)"
+
+        # Check parent dir writability for new files
+        if not config_file.exists():
+            parent = config_file.parent
+            if not os.access(parent, os.W_OK):
+                return False, f"parent directory is not writable: {parent}"
+
+        return True, None
+
+    @classmethod
+    def _print_manual_install_instructions(cls, shell: str, config_file: Path, reason: str):
+        """Print helpful instructions when config file cannot be modified."""
+        print(f"✗ Cannot modify {config_file}")
+        print(f"\nReason: {reason}")
+        print("\nThis is common with Home Manager, dotfile managers, and similar tools.")
+        print("\nTo enable completions, add this to your shell configuration:")
+        print()
+        print("─" * 50)
+        print(cls._get_manual_install_snippet(shell))
+        print("─" * 50)
+
+        # Shell-specific Home Manager hints
+        if shell == 'bash':
+            print("\nFor Home Manager users, add to your home.nix:")
+            print()
+            print("  programs.bash.initExtra = ''")
+            for line in cls._get_manual_install_snippet(shell).split('\n'):
+                print(f"    {line}")
+            print("  '';")
+        elif shell == 'zsh':
+            print("\nFor Home Manager users, add to your home.nix:")
+            print()
+            print("  programs.zsh.initExtra = ''")
+            for line in cls._get_manual_install_snippet(shell).split('\n'):
+                print(f"    {line}")
+            print("  '';")
+
     @staticmethod
     def _detect_shell():
         """Detect the user's shell and return shell name and config file path."""
@@ -164,9 +225,15 @@ class CompletionCommands:
             print(f"  source {config_file}")
             return
 
+        # Check if config file is writable before proceeding
+        writable, reason = self._is_config_writable(config_file)
+        if not writable:
+            self._print_manual_install_instructions(shell, config_file, reason)
+            sys.exit(1)
+
         # Check if argcomplete is available
         if not self._check_argcomplete_available():
-            print("⚠️  argcomplete not found in PATH")
+            print("argcomplete not found in PATH")
             print("   Installing argcomplete as a uv tool...")
             if not self._install_argcomplete():
                 print("\n✗ Could not install argcomplete automatically")

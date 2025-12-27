@@ -1,8 +1,8 @@
 site_name: ComfyGit Documentation
 site_description: Version control for ComfyUI environments
 site_url: https://docs.comfyhub.org/comfygit/
-repo_url: https://github.com/comfyhub-org/comfygit
-repo_name: comfyhub-org/comfygit
+repo_url: https://github.com/comfygit-ai/comfygit
+repo_name: comfygit-ai/comfygit
 edit_uri: edit/main/docs/comfygit-docs/docs/
 
 nav:
@@ -49,20 +49,6 @@ nav:
     - Missing Models: troubleshooting/missing-models.md
     - UV Errors: troubleshooting/uv-errors.md
     - Environment Corruption: troubleshooting/environment-corruption.md
-  - Legacy Docs (v0.x):
-    - Overview: legacy/index.md
-    - Installation: legacy/installation.md
-    - Usage: legacy/usage.md
-    - Environments: legacy/environments.md
-    - Best Practices: legacy/best_practices.md
-    - Troubleshooting:
-      - Permission Handling: legacy/troubleshooting/permission_handling.md
-      - Slow Model Loading: legacy/troubleshooting/slow_model_loading.md
-      - Edit Files in Container: legacy/troubleshooting/edit_files_in_container.md
-      - WSL RAM: legacy/troubleshooting/add_more_ram_to_wsl.md
-      - Filepath Issues: legacy/troubleshooting/filepath_permissions.md
-      - Installing Nodes Manually: legacy/troubleshooting/installing_custom_nodes_manually.md
-      - Other Issues: legacy/troubleshooting/other.md
 
 theme:
   name: material
@@ -164,7 +150,7 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/comfyhub-org/comfygit
+      link: https://github.com/comfygit-ai/comfygit
     - icon: fontawesome/brands/discord
       link: https://discord.gg/comfyhub
   version:

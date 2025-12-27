@@ -1,6 +1,6 @@
 # Global Commands
 
-> Workspace-level commands that operate on the entire ComfyDock workspace.
+> Workspace-level commands that operate on the entire ComfyGit workspace.
 
 
 ## `init`

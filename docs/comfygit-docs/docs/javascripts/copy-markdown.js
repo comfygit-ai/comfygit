@@ -2,7 +2,7 @@
 (function() {
   'use strict';
 
-  const REPO_BASE = 'https://raw.githubusercontent.com/ComfyDock/comfydock/main/docs/comfydock-docs/docs/';
+  const REPO_BASE = 'https://raw.githubusercontent.com/comfygit-ai/comfygit/main/docs/comfygit-docs/docs/';
   const CACHE_KEY_PREFIX = 'md_cache_';
 
   function getCurrentPagePath() {
