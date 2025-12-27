@@ -235,3 +235,69 @@ class TestCompletionCommands:
             assert second_content.count('eval "$(register-python-argcomplete comfygit)"') == 2
         finally:
             config_file.unlink()
+
+
+class TestManualInstallSnippet:
+    """Test manual install snippet generation."""
+
+    def test_bash_snippet_no_compinit(self):
+        """Bash snippet should not include zsh compinit block."""
+        snippet = CompletionCommands._get_manual_install_snippet('bash')
+        assert CompletionCommands.COMPLETION_COMMENT in snippet
+        assert 'register-python-argcomplete comfygit' in snippet
+        assert 'register-python-argcomplete cg' in snippet
+        assert 'compinit' not in snippet
+        assert 'compdef' not in snippet
+
+    def test_zsh_snippet_includes_compinit(self):
+        """Zsh snippet should include compinit initialization."""
+        snippet = CompletionCommands._get_manual_install_snippet('zsh')
+        assert CompletionCommands.COMPLETION_COMMENT in snippet
+        assert 'register-python-argcomplete comfygit' in snippet
+        assert 'compinit' in snippet
+        assert 'autoload -Uz compinit' in snippet
+
+
+class TestConfigWritability:
+    """Test config file writability detection."""
+
+    def test_writable_regular_file(self):
+        """Regular writable file should be detected as writable."""
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            config_file = Path(f.name)
+
+        try:
+            writable, reason = CompletionCommands._is_config_writable(config_file)
+            assert writable is True
+            assert reason is None
+        finally:
+            config_file.unlink()
+
+    def test_nonexistent_file_in_writable_dir(self):
+        """Non-existent file in writable directory should be writable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = Path(tmpdir) / 'new_bashrc'
+            writable, reason = CompletionCommands._is_config_writable(config_file)
+            assert writable is True
+            assert reason is None
+
+    def test_symlink_to_readonly_detected(self):
+        """Symlink to read-only location should be detected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a read-only target
+            target = Path(tmpdir) / 'readonly_target'
+            target.write_text('content')
+            target.chmod(0o444)
+
+            # Create symlink to it
+            symlink = Path(tmpdir) / 'symlink'
+            symlink.symlink_to(target)
+
+            try:
+                writable, reason = CompletionCommands._is_config_writable(symlink)
+                assert writable is False
+                assert 'symlink to read-only location' in reason
+                assert str(target) in reason
+            finally:
+                # Restore permissions for cleanup
+                target.chmod(0o644)
