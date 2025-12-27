@@ -22,6 +22,7 @@ from ..services.node_lookup_service import NodeLookupService
 from ..strategies.confirmation import AutoConfirmStrategy, ConfirmationStrategy
 from ..utils.conflict_parser import extract_conflicting_packages
 from ..utils.dependency_parser import parse_dependency_string
+from ..analyzers.node_git_analyzer import get_node_git_info
 from ..utils.filesystem import rmtree
 from ..utils.git import git_clone, is_github_url, normalize_github_url
 from ..validation.resolution_tester import ResolutionTester
@@ -500,19 +501,9 @@ class NodeManager:
         filesystem_action = "none"
         if not untrack_only and node_path.exists():
             if is_development:
-                # Preserve development node with .disabled suffix
-                disabled_path = self.custom_nodes_path / f"{removed_node.name}.disabled"
-
-                # Handle existing .disabled directory (backup with timestamp BEFORE .disabled)
-                if disabled_path.exists():
-                    import time
-                    backup_path = self.custom_nodes_path / f"{removed_node.name}.{int(time.time())}.disabled"
-                    shutil.move(disabled_path, backup_path)
-                    logger.info(f"Backed up old .disabled to {backup_path.name}")
-
-                shutil.move(node_path, disabled_path)
-                filesystem_action = "disabled"
-                logger.info(f"Disabled development node: {removed_node.name}")
+                # Developer manages their own code - just untrack, don't touch filesystem
+                filesystem_action = "none"
+                logger.info(f"Untracked development node: {removed_node.name} (filesystem unchanged)")
             else:
                 # Delete registry/git node (cached globally, can re-download)
                 rmtree(node_path)
@@ -1051,6 +1042,17 @@ class NodeManager:
 
         # Create as development node
         node_info = NodeInfo(name=node_name, version='dev', source='development')
+
+        # Capture git info if available
+        git_info = get_node_git_info(node_path)
+        if git_info and git_info.remote_url:
+            node_info.repository = git_info.remote_url
+            if git_info.branch:
+                node_info.branch = git_info.branch
+            if git_info.commit:
+                node_info.pinned_commit = git_info.commit
+            logger.info(f"Captured git info for dev node: {git_info.remote_url}")
+
         node_package = NodePackage(node_info=node_info, requirements=requirements)
 
         # Add to pyproject
