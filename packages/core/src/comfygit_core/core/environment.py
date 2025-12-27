@@ -533,53 +533,6 @@ class Environment:
 
         return migrated
 
-    def _refresh_dev_node_requirements(self) -> list[str]:
-        """Re-scan dev nodes and update dependency groups if changed.
-
-        Returns:
-            List of dev node names that were updated
-        """
-        from ..utils.dependency_parser import parse_dependency_string
-
-        updated = []
-        nodes = self.pyproject.nodes.get_existing()
-
-        for identifier, node_info in nodes.items():
-            if node_info.source != 'development':
-                continue
-
-            node_path = self.custom_nodes_path / node_info.name
-            if not node_path.exists():
-                continue  # Missing dev node - reported separately
-
-            # Scan current requirements
-            current_reqs = self.node_lookup.scan_requirements(node_path)
-
-            # Get stored requirements
-            group_name = self.pyproject.nodes.generate_group_name(node_info, identifier)
-            stored_reqs = self.pyproject.dependencies.get_groups().get(group_name, [])
-
-            # Compare package names only (ignore version constraints)
-            current_names = {parse_dependency_string(r)[0] for r in current_reqs}
-            stored_names = {parse_dependency_string(r)[0] for r in stored_reqs}
-
-            if current_names != stored_names:
-                logger.info(f"Dev node '{node_info.name}' requirements changed, updating...")
-                # First remove the old group to replace it (not append)
-                try:
-                    self.pyproject.dependencies.remove_group(group_name)
-                except ValueError:
-                    pass  # Group didn't exist
-
-                # Then add the new requirements
-                if current_reqs:
-                    self.uv_manager.add_requirements_with_sources(
-                        current_reqs, group=group_name, no_sync=True
-                    )
-                updated.append(node_info.name)
-
-        return updated
-
     def sync(
         self,
         dry_run: bool = False,
@@ -622,7 +575,7 @@ class Environment:
 
         # Refresh dev node requirements before UV sync (picks up any changes)
         try:
-            updated_dev_nodes = self._refresh_dev_node_requirements()
+            updated_dev_nodes = self.node_manager.refresh_all_dev_node_requirements()
             if updated_dev_nodes:
                 logger.info(f"Updated requirements for dev nodes: {', '.join(updated_dev_nodes)}")
         except Exception as e:

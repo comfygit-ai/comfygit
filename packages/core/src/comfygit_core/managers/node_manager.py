@@ -1113,8 +1113,21 @@ class NodeManager:
         else:
             raise CDEnvironmentError(f"Unknown node source: {node_info.source}")
 
-    def _update_development_node(self, identifier: str, node_info: NodeInfo, no_test: bool) -> UpdateResult:
-        """Update dev node by re-scanning requirements."""
+    def _update_development_node(
+        self,
+        identifier: str,
+        node_info: NodeInfo,
+        no_test: bool,
+        skip_sync: bool = False
+    ) -> UpdateResult:
+        """Update dev node by re-scanning requirements.
+
+        Args:
+            identifier: Node identifier in pyproject
+            node_info: Node info object
+            no_test: Skip dependency resolution testing
+            skip_sync: Skip UV sync after update (for batch operations)
+        """
         result = UpdateResult(node_name=node_info.name, source='development')
 
         # Scan current requirements
@@ -1140,16 +1153,18 @@ class NodeManager:
             result.message = "No requirement changes detected"
             return result
 
-        # Update requirements
+        # Update requirements - remove old group first to replace (not append)
+        try:
+            self.pyproject.dependencies.remove_group(group_name)
+        except ValueError:
+            pass  # Group didn't exist
+
         existing_sources = self.pyproject.uv_config.get_source_names()
 
         if current_reqs:
             self.uv.add_requirements_with_sources(
-                current_reqs, group=group_name, no_sync=True, raw=True
+                current_reqs, group=group_name, no_sync=True
             )
-        else:
-            # No requirements - remove group
-            self.pyproject.dependencies.remove_group(group_name)
 
         # Detect new sources
         new_sources = self.pyproject.uv_config.get_source_names() - existing_sources
@@ -1168,11 +1183,41 @@ class NodeManager:
         result.changed = True
         result.message = f"Updated requirements: +{len(added)} -{len(removed)}"
 
-        # Sync Python environment to apply requirement changes (quiet - users see our high-level messages)
-        self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
+        # Sync Python environment to apply requirement changes (unless batching)
+        if not skip_sync:
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         logger.info(f"Updated dev node '{node_info.name}': {result.message}")
         return result
+
+    def refresh_all_dev_node_requirements(self) -> list[str]:
+        """Re-scan ALL dev nodes and update dependency groups if changed.
+
+        Called during sync() to pick up any requirement changes in dev nodes.
+        Skips missing nodes silently (reported separately by status).
+
+        Returns:
+            List of dev node names that were updated
+        """
+        updated = []
+        for identifier, node_info in self.pyproject.nodes.get_existing().items():
+            if node_info.source != 'development':
+                continue
+
+            node_path = self.custom_nodes_path / node_info.name
+            if not node_path.exists():
+                continue  # Missing dev node - reported separately by status
+
+            try:
+                result = self._update_development_node(
+                    identifier, node_info, no_test=True, skip_sync=True
+                )
+                if result.changed:
+                    updated.append(node_info.name)
+            except Exception as e:
+                logger.warning(f"Could not refresh dev node '{node_info.name}': {e}")
+
+        return updated
 
     def _update_registry_node(
         self,
