@@ -127,7 +127,7 @@ For development or testing:
 
 ```bash
 # Clone the repository
-git clone https://github.com/comfyhub-org/comfygit.git
+git clone https://github.com/comfygit-ai/comfygit.git
 cd comfygit
 
 # Install in development mode
@@ -298,5 +298,5 @@ Now that ComfyGit is installed:
 If you encounter issues during installation:
 
 * Check the [troubleshooting guide](../troubleshooting/common-issues.md)
-* Search [GitHub Issues](https://github.com/comfyhub-org/comfygit/issues)
-* Ask on [GitHub Discussions](https://github.com/comfyhub-org/comfygit/discussions)
+* Search [GitHub Issues](https://github.com/comfygit-ai/comfygit/issues)
+* Ask on [GitHub Discussions](https://github.com/comfygit-ai/comfygit/discussions)

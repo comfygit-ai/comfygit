@@ -112,6 +112,7 @@ class Environment:
             cec_path=self.cec_path,
             venv_path=self.venv_path,
             torch_backend=self.torch_backend,
+            external_uv_cache=self.workspace_config_manager.get_external_uv_cache(),
         )
 
     @cached_property
@@ -128,7 +129,6 @@ class Environment:
         return NodeLookupService(
             cache_path=self.workspace_paths.cache,
             node_mappings_repository=self.node_mapping_repository,
-            workspace_config_repository=self.workspace_config_manager,
         )
 
     @cached_property

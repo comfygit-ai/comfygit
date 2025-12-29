@@ -131,18 +131,6 @@ class WorkspaceConfigRepository:
 
         return None
 
-    def get_prefer_registry_cache(self) -> bool:
-        """Get prefer_registry_cache setting (defaults to True)."""
-        data = self.config_file
-        return data.prefer_registry_cache
-
-    def set_prefer_registry_cache(self, enabled: bool):
-        """Set prefer_registry_cache setting."""
-        data = self.config_file
-        data.prefer_registry_cache = enabled
-        self.save(data)
-        logger.info(f"Registry cache preference set to: {enabled}")
-
     def set_runpod_token(self, token: str | None):
         """Set or clear RunPod API key."""
         data = self.config_file
@@ -172,3 +160,21 @@ class WorkspaceConfigRepository:
             return data.api_credentials.runpod_api_key
 
         return None
+
+    def get_external_uv_cache(self) -> Path | None:
+        """Get external UV cache path if configured."""
+        data = self.config_file
+        if data.external_uv_cache:
+            return Path(data.external_uv_cache)
+        return None
+
+    def set_external_uv_cache(self, path: Path | None):
+        """Set or clear external UV cache path."""
+        data = self.config_file
+        if path:
+            data.external_uv_cache = str(path.resolve())
+            logger.info(f"External UV cache set to: {path}")
+        else:
+            data.external_uv_cache = None
+            logger.info("External UV cache cleared")
+        self.save(data)

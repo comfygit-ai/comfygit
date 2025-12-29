@@ -1355,6 +1355,10 @@ class GlobalCommands:
             self._set_civitai_key(args.civitai_key)
             return
 
+        if hasattr(args, 'uv_cache') and args.uv_cache is not None:
+            self._set_uv_cache(args.uv_cache)
+            return
+
         if hasattr(args, 'show') and args.show:
             self._show_config()
             return
@@ -1370,6 +1374,24 @@ class GlobalCommands:
         else:
             self.workspace.workspace_config_manager.set_civitai_token(key)
             print("✓ Civitai API key saved")
+
+    def _set_uv_cache(self, path_str: str):
+        """Set external UV cache path."""
+        from pathlib import Path
+
+        if path_str == "":
+            self.workspace.workspace_config_manager.set_external_uv_cache(None)
+            print("✓ External UV cache cleared (using workspace-local cache)")
+        else:
+            path = Path(path_str).expanduser().resolve()
+            if not path.exists():
+                print(f"Error: Path does not exist: {path}")
+                return
+            if not path.is_dir():
+                print(f"Error: Path is not a directory: {path}")
+                return
+            self.workspace.workspace_config_manager.set_external_uv_cache(path)
+            print(f"✓ External UV cache set to: {path}")
 
     def _show_config(self):
         """Display current configuration."""
@@ -1387,16 +1409,18 @@ class GlobalCommands:
         else:
             print("  Civitai API Key: Not set")
 
-        # Registry cache preference
-        prefer_cache = self.workspace.workspace_config_manager.get_prefer_registry_cache()
-        print(f"  Registry Cache:  {'Enabled' if prefer_cache else 'Disabled'}")
+        # External UV cache
+        uv_cache = self.workspace.workspace_config_manager.get_external_uv_cache()
+        if uv_cache:
+            print(f"  UV Cache:        {uv_cache}")
+        else:
+            print("  UV Cache:        Workspace-local (default)")
 
     def _interactive_config(self):
         """Interactive configuration menu."""
         while True:
             # Get current config
             civitai_token = self.workspace.workspace_config_manager.get_civitai_token()
-            prefer_cache = self.workspace.workspace_config_manager.get_prefer_registry_cache()
 
             # Display menu
             print("\nComfyGit Configuration\n")
@@ -1408,20 +1432,14 @@ class GlobalCommands:
             else:
                 print("  1. Civitai API Key: Not set")
 
-            # Registry cache
-            cache_status = "Enabled" if prefer_cache else "Disabled"
-            print(f"  2. Registry Cache:  {cache_status}")
-
             # Options
-            print("\n  [1-2] Change setting  [c] Clear a setting  [q] Quit")
+            print("\n  [1] Change setting  [c] Clear a setting  [q] Quit")
             choice = input("Choice: ").strip().lower()
 
             if choice == 'q':
                 break
             elif choice == '1':
                 self._interactive_set_civitai_key()
-            elif choice == '2':
-                self._interactive_toggle_registry_cache()
             elif choice == 'c':
                 self._interactive_clear_setting()
             else:
@@ -1439,15 +1457,6 @@ class GlobalCommands:
 
         self.workspace.workspace_config_manager.set_civitai_token(key)
         print("✓ API key saved")
-
-    def _interactive_toggle_registry_cache(self):
-        """Toggle registry cache preference."""
-        current = self.workspace.workspace_config_manager.get_prefer_registry_cache()
-        new_value = not current
-
-        self.workspace.workspace_config_manager.set_prefer_registry_cache(new_value)
-        status = "enabled" if new_value else "disabled"
-        print(f"✓ Registry cache {status}")
 
     def _interactive_clear_setting(self):
         """Clear a configuration setting."""

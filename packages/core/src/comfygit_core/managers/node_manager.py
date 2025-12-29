@@ -22,6 +22,7 @@ from ..services.node_lookup_service import NodeLookupService
 from ..strategies.confirmation import AutoConfirmStrategy, ConfirmationStrategy
 from ..utils.conflict_parser import extract_conflicting_packages
 from ..utils.dependency_parser import parse_dependency_string
+from ..analyzers.node_git_analyzer import get_node_git_info
 from ..utils.filesystem import rmtree
 from ..utils.git import git_clone, is_github_url, normalize_github_url
 from ..validation.resolution_tester import ResolutionTester
@@ -500,19 +501,9 @@ class NodeManager:
         filesystem_action = "none"
         if not untrack_only and node_path.exists():
             if is_development:
-                # Preserve development node with .disabled suffix
-                disabled_path = self.custom_nodes_path / f"{removed_node.name}.disabled"
-
-                # Handle existing .disabled directory (backup with timestamp BEFORE .disabled)
-                if disabled_path.exists():
-                    import time
-                    backup_path = self.custom_nodes_path / f"{removed_node.name}.{int(time.time())}.disabled"
-                    shutil.move(disabled_path, backup_path)
-                    logger.info(f"Backed up old .disabled to {backup_path.name}")
-
-                shutil.move(node_path, disabled_path)
-                filesystem_action = "disabled"
-                logger.info(f"Disabled development node: {removed_node.name}")
+                # Developer manages their own code - just untrack, don't touch filesystem
+                filesystem_action = "none"
+                logger.info(f"Untracked development node: {removed_node.name} (filesystem unchanged)")
             else:
                 # Delete registry/git node (cached globally, can re-download)
                 rmtree(node_path)
@@ -1051,6 +1042,17 @@ class NodeManager:
 
         # Create as development node
         node_info = NodeInfo(name=node_name, version='dev', source='development')
+
+        # Capture git info if available
+        git_info = get_node_git_info(node_path)
+        if git_info and git_info.remote_url:
+            node_info.repository = git_info.remote_url
+            if git_info.branch:
+                node_info.branch = git_info.branch
+            if git_info.commit:
+                node_info.pinned_commit = git_info.commit
+            logger.info(f"Captured git info for dev node: {git_info.remote_url}")
+
         node_package = NodePackage(node_info=node_info, requirements=requirements)
 
         # Add to pyproject
@@ -1111,15 +1113,44 @@ class NodeManager:
         else:
             raise CDEnvironmentError(f"Unknown node source: {node_info.source}")
 
-    def _update_development_node(self, identifier: str, node_info: NodeInfo, no_test: bool) -> UpdateResult:
-        """Update dev node by re-scanning requirements."""
+    def _update_development_node(
+        self,
+        identifier: str,
+        node_info: NodeInfo,
+        no_test: bool
+    ) -> UpdateResult:
+        """Update dev node by re-scanning requirements and git info.
+
+        This snapshots the current state of the dev node (requirements + git info)
+        so it can be committed and shared with collaborators.
+
+        Args:
+            identifier: Node identifier in pyproject
+            node_info: Node info object
+            no_test: Skip dependency resolution testing
+        """
         result = UpdateResult(node_name=node_info.name, source='development')
 
-        # Scan current requirements
         node_path = self.custom_nodes_path / node_info.name
         if not node_path.exists():
             raise CDNodeNotFoundError(f"Dev node directory not found: {node_path}")
 
+        changes = []
+
+        # Update git info (repo, branch, commit)
+        git_info = get_node_git_info(node_path)
+        if git_info and git_info.remote_url:
+            if node_info.repository != git_info.remote_url:
+                node_info.repository = git_info.remote_url
+                changes.append("repository")
+            if git_info.branch and node_info.branch != git_info.branch:
+                node_info.branch = git_info.branch
+                changes.append("branch")
+            if git_info.commit and node_info.pinned_commit != git_info.commit:
+                node_info.pinned_commit = git_info.commit
+                changes.append("commit")
+
+        # Scan current requirements
         current_reqs = self.node_lookup.scan_requirements(node_path)
 
         # Get stored requirements from dependency group
@@ -1127,36 +1158,42 @@ class NodeManager:
         stored_groups = self.pyproject.dependencies.get_groups()
         stored_reqs = stored_groups.get(group_name, [])
 
-        # Normalize for comparison (compare package names only)
-        current_names = {parse_dependency_string(r)[0] for r in current_reqs}
-        stored_names = {parse_dependency_string(r)[0] for r in stored_reqs}
+        # Compare full requirement strings (including version constraints)
+        current_set = set(current_reqs)
+        stored_set = set(stored_reqs)
+        added = current_set - stored_set
+        removed = stored_set - current_set
+        reqs_changed = bool(added or removed)
 
-        added = current_names - stored_names
-        removed = stored_names - current_names
+        if reqs_changed:
+            changes.append("requirements")
+            # Update requirements - remove old group first to replace (not append)
+            try:
+                self.pyproject.dependencies.remove_group(group_name)
+            except ValueError:
+                pass  # Group didn't exist
 
-        if not added and not removed:
-            result.message = "No requirement changes detected"
+            existing_sources = self.pyproject.uv_config.get_source_names()
+
+            if current_reqs:
+                self.uv.add_requirements_with_sources(
+                    current_reqs, group=group_name, no_sync=True
+                )
+
+            # Detect new sources
+            new_sources = self.pyproject.uv_config.get_source_names() - existing_sources
+            if new_sources:
+                node_info.dependency_sources = sorted(new_sources)
+
+        if not changes:
+            result.message = "No changes detected"
             return result
 
-        # Update requirements
-        existing_sources = self.pyproject.uv_config.get_source_names()
-
-        if current_reqs:
-            self.uv.add_requirements_with_sources(
-                current_reqs, group=group_name, no_sync=True, raw=True
-            )
-        else:
-            # No requirements - remove group
-            self.pyproject.dependencies.remove_group(group_name)
-
-        # Detect new sources
-        new_sources = self.pyproject.uv_config.get_source_names() - existing_sources
-        if new_sources:
-            node_info.dependency_sources = sorted(new_sources)
-            self.pyproject.nodes.add(node_info, identifier)
+        # Save updated node info to pyproject
+        self.pyproject.nodes.add(node_info, identifier)
 
         # Test resolution if requested
-        if not no_test:
+        if not no_test and reqs_changed:
             resolution_result = self.resolution_tester.test_resolution(self.pyproject.path)
             if not resolution_result.success:
                 self._raise_dependency_conflict(node_info.name, resolution_result)
@@ -1164,10 +1201,11 @@ class NodeManager:
         result.requirements_added = list(added)
         result.requirements_removed = list(removed)
         result.changed = True
-        result.message = f"Updated requirements: +{len(added)} -{len(removed)}"
+        result.message = f"Updated: {', '.join(changes)}"
 
-        # Sync Python environment to apply requirement changes (quiet - users see our high-level messages)
-        self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
+        # Sync Python environment to apply requirement changes
+        if reqs_changed:
+            self.uv.sync_project(quiet=True, all_groups=True, pytorch_manager=self.pytorch_manager)
 
         logger.info(f"Updated dev node '{node_info.name}': {result.message}")
         return result
