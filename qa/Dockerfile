@@ -29,6 +29,9 @@ COPY agent_instructions/ /qa/agent_instructions/
 COPY scenarios/ /qa/scenarios/
 COPY scripts/ /qa/scripts/
 
+# Install Python dependencies for QA runner
+RUN uv pip install --system pydantic pyyaml
+
 # Install comfygit from PyPI (or local for dev)
 ARG COMFYGIT_VERSION=latest
 ARG INSTALL_LOCAL=false

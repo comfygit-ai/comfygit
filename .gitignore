@@ -86,3 +86,6 @@ docs/contexts
 # Any test environment exports
 *.tar.gz
 .claude/context
+
+# bv (beads viewer) local config and caches
+.bv/
