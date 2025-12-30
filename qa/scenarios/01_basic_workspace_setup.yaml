@@ -1,0 +1,125 @@
+# Basic Workspace Setup and Node Installation
+# Tests the fundamental happy path for ComfyGit usage
+
+name: Basic Workspace Setup
+description: |
+  Tests creating a workspace, adding an environment, installing nodes,
+  and verifying the setup is correct. This is the foundational scenario
+  that must work for anything else to work.
+category: workspace
+priority: critical
+
+# Environment requirements
+requirements:
+  comfygit: ">=0.3.0"
+  disk_space: "500MB"
+
+setup:
+  - command: rm -rf /workspace/* /workspace/.*
+    description: Clean workspace directory
+    ignore_errors: true
+
+steps:
+  # Step 1: Initialize workspace
+  - action: Initialize a new ComfyGit workspace
+    command: cg init --name test-workspace
+    expect: |
+      Should see confirmation that workspace was created.
+      .comfygit directory should exist.
+    verify:
+      - "ls -la /workspace/.comfygit/"
+      - "cat /workspace/.comfygit/config.json"
+
+  # Step 2: Check status on empty workspace
+  - action: Check status of empty workspace
+    command: cg status
+    expect: |
+      Should show workspace info.
+      Should indicate no environments exist yet.
+
+  # Step 3: Create a production environment
+  - action: Create a production environment
+    command: cg env create production
+    expect: |
+      Environment should be created.
+      Should see progress for ComfyUI clone/setup.
+    on_failure: investigate
+    timeout: 300  # May take time to clone ComfyUI
+    verify:
+      - "ls -la /workspace/.comfygit/environments/"
+      - "cg env list"
+
+  # Step 4: Check environment status
+  - action: Check production environment status
+    command: cg -e production status
+    expect: |
+      Should show environment details.
+      Should show ComfyUI version.
+      Should show no custom nodes installed.
+
+  # Step 5: Install a popular custom node
+  - action: Install ComfyUI-Manager node
+    command: cg -e production node add comfyui-manager
+    expect: |
+      Should download and install the node.
+      Should update pyproject.toml.
+    on_failure: investigate
+    timeout: 120
+    verify:
+      - "cg -e production status"
+      - "ls /workspace/.comfygit/environments/production/ComfyUI/custom_nodes/"
+
+  # Step 6: Verify node installation in pyproject
+  - action: Verify pyproject.toml updated correctly
+    command: cat /workspace/.comfygit/environments/production/pyproject.toml
+    expect: |
+      Should contain comfyui-manager in dependencies.
+      Should have proper formatting.
+
+  # Step 7: Install another node to test multiple nodes
+  - action: Install another custom node
+    command: cg -e production node add was-node-suite-comfyui
+    expect: |
+      Should install second node.
+      Both nodes should coexist.
+    timeout: 120
+    verify:
+      - "cg -e production node list"
+
+  # Step 8: Check overall status
+  - action: Final status check
+    command: cg -e production status
+    expect: |
+      Should show both nodes installed.
+      No errors or warnings.
+
+  # Step 9: Try listing nodes
+  - action: List installed nodes
+    command: cg -e production node list
+    expect: |
+      Should show comfyui-manager.
+      Should show was-node-suite-comfyui.
+      Should show versions/sources.
+
+  # Step 10: Exploration - look for edge cases
+  - action: Explore edge cases
+    explore: |
+      Try some edge cases:
+      1. What happens if you try to add an already-installed node?
+      2. What happens with a non-existent node name?
+      3. What does `cg node search` show?
+      4. Are there any confusing error messages?
+
+      Document anything unexpected or confusing.
+
+cleanup:
+  - command: rm -rf /workspace/*
+    description: Clean up test workspace
+    ignore_errors: true
+
+success_criteria: |
+  - Workspace initializes without errors
+  - Environment creates successfully
+  - Nodes install and appear in status
+  - No crashes or unexpected errors
+  - Error messages (if any) are clear and actionable

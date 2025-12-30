@@ -1,0 +1,11 @@
+# Reports are generated, not committed
+reports/*
+!reports/.gitkeep
+
+# Temp files
+*.tmp
+*.log
+
+# Python cache
+__pycache__/
+*.pyc

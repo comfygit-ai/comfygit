@@ -1,0 +1,148 @@
+# Workflow Sync Testing
+# Tests importing and syncing workflows with their dependencies
+
+name: Workflow Sync
+description: |
+  Tests the workflow sync functionality - adding a workflow file and
+  having ComfyGit resolve and install required custom nodes.
+  This is a core user journey.
+category: workflow
+priority: high
+
+requirements:
+  comfygit: ">=0.3.0"
+  disk_space: "1GB"
+  network: true  # Needs to resolve nodes from registry
+
+setup:
+  - command: rm -rf /workspace/* /workspace/.*
+    description: Clean workspace
+    ignore_errors: true
+
+  - command: cg init --name workflow-test
+    description: Initialize workspace
+
+  - command: cg env create production
+    description: Create environment
+    timeout: 300
+
+steps:
+  # Step 1: Create a minimal workflow file
+  - action: Create a test workflow with dependencies
+    command: |
+      cat > /workspace/test_workflow.json << 'EOF'
+      {
+        "last_node_id": 4,
+        "last_link_id": 3,
+        "nodes": [
+          {
+            "id": 1,
+            "type": "KSampler",
+            "pos": [480, 200],
+            "size": {"0": 300, "1": 200}
+          },
+          {
+            "id": 2,
+            "type": "EmptyLatentImage",
+            "pos": [100, 200]
+          },
+          {
+            "id": 3,
+            "type": "CLIPTextEncode",
+            "pos": [100, 400]
+          },
+          {
+            "id": 4,
+            "type": "ImpactWildcardProcessor",
+            "pos": [100, 600]
+          }
+        ],
+        "links": [],
+        "groups": [],
+        "config": {},
+        "extra": {}
+      }
+      EOF
+    expect: Workflow file created
+
+  # Step 2: Add workflow to environment
+  - action: Add workflow to environment
+    command: cg -e production workflow add /workspace/test_workflow.json
+    expect: |
+      Should detect that the workflow uses nodes not in base ComfyUI.
+      Should identify ImpactWildcardProcessor as requiring a custom node.
+    on_failure: investigate
+    verify:
+      - "cg -e production workflow list"
+
+  # Step 3: Check workflow status
+  - action: Check workflow status after adding
+    command: cg -e production workflow status test_workflow
+    expect: |
+      Should show workflow details.
+      Should indicate missing nodes.
+
+  # Step 4: Resolve workflow dependencies
+  - action: Resolve and install workflow dependencies
+    command: cg -e production workflow sync test_workflow
+    expect: |
+      Should identify required nodes (impact-pack for ImpactWildcardProcessor).
+      Should prompt for confirmation or auto-install.
+      Should install the required node(s).
+    timeout: 180
+    on_failure: investigate
+    verify:
+      - "cg -e production node list"
+      - "cg -e production workflow status test_workflow"
+
+  # Step 5: Verify workflow is now ready
+  - action: Verify workflow is ready to run
+    command: cg -e production workflow status test_workflow
+    expect: |
+      Should show workflow as ready/complete.
+      All required nodes should be installed.
+
+  # Step 6: Explore workflow edge cases
+  - action: Explore workflow handling edge cases
+    explore: |
+      Test some edge cases:
+      1. What happens if you add the same workflow twice?
+      2. What if you modify the workflow file and re-add it?
+      3. What if you remove a node that a workflow depends on?
+      4. What happens with a workflow that has no custom nodes?
+      5. What about a workflow with a node that can't be resolved?
+
+      Create test files as needed and document findings.
+
+  # Step 7: Test workflow with unresolvable node
+  - action: Test workflow with unknown node
+    command: |
+      cat > /workspace/bad_workflow.json << 'EOF'
+      {
+        "nodes": [
+          {
+            "id": 1,
+            "type": "TotallyFakeNodeThatDoesNotExist",
+            "pos": [100, 100]
+          }
+        ],
+        "links": []
+      }
+      EOF
+      cg -e production workflow add /workspace/bad_workflow.json
+    expect: |
+      Should handle gracefully.
+      Should report that node cannot be resolved.
+    on_failure: document  # This should fail, document how
+
+cleanup:
+  - command: rm -rf /workspace/*
+    ignore_errors: true
+
+success_criteria: |
+  - Workflow can be added to environment
+  - Missing nodes are detected correctly
+  - Node resolution finds correct packages
+  - Dependencies are installed properly
+  - Workflow shows as ready after sync
+  - Unknown nodes are handled gracefully with clear messages
