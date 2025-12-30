@@ -142,6 +142,33 @@ Configuration: `dev/cross-platform-test.toml` (defaults) and `dev/cross-platform
 - GitHub releases include AI-generated summaries (requires ANTHROPIC_API_KEY secret)
 - Code should be written assuming it should work across Linux, Windows, and Mac!
 
+## Issue Tracking (Beads)
+
+This project uses beads (`bd`) for issue tracking. All issues use the **`cg-`** prefix.
+
+```bash
+# Creating issues - always use cg- prefix (set automatically)
+bd create "Fix the bug" --type=bug --priority=2
+
+# Examples of issue IDs
+cg-abc      # Regular issue
+cg-xyz.1    # Child task of cg-xyz (epic)
+
+# Common commands
+bd ready              # Show unblocked work
+bd show cg-abc        # View issue details
+bd close cg-abc       # Close an issue
+bd sync               # Sync with remote
+```
+
+For multi-phase work, create an epic with child tasks:
+```bash
+bd create "Big feature" --type=epic
+bd create "Phase 1" --type=task --parent=cg-xxx
+bd create "Phase 2" --type=task --parent=cg-xxx
+bd dep add cg-xxx.2 cg-xxx.1  # Phase 2 depends on Phase 1
+```
+
 ## General
 Don't make any implementation overly complex. This is a one-person dev MVP project.
 We are still pre-customer - any unnecessary fallbacks, unnecessary versioning, testing overkill should be avoided.
