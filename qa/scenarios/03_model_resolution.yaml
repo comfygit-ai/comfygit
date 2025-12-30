@@ -1,0 +1,113 @@
+# Model Resolution Testing
+# Tests model download and management functionality
+
+name: Model Resolution
+description: |
+  Tests the model resolution and download functionality.
+  Covers registry lookup, download management, and error handling.
+category: model
+priority: medium
+
+requirements:
+  comfygit: ">=0.3.0"
+  disk_space: "2GB"
+  network: true
+
+setup:
+  - command: rm -rf /workspace/* /workspace/.*
+    description: Clean workspace
+    ignore_errors: true
+
+  - command: cg init --name model-test
+    description: Initialize workspace
+    timeout: 30
+
+  - command: cg env create production
+    description: Create environment (needed for model commands)
+    timeout: 300
+
+steps:
+  # Step 1: Search for models
+  - action: Search for available models
+    command: cg model search "sd1.5"
+    expect: |
+      Should return a list of models matching the query.
+      Should include source information.
+    timeout: 30
+
+  # Step 2: Check model registry
+  - action: List model categories
+    command: cg -e production model list
+    expect: |
+      Should show available model categories.
+      Should work even with no models installed.
+
+  # Step 3: Model info lookup
+  - action: Look up a specific model
+    command: cg model info "dreamshaper"
+    expect: |
+      Should show model details if found in registry.
+      Should show download sources.
+    on_failure: document
+    timeout: 30
+
+  # Step 4: Explore model resolution
+  - action: Explore model handling edge cases
+    explore: |
+      Test model resolution edge cases:
+      1. What happens with an invalid model name?
+      2. What happens with ambiguous model names?
+      3. How are CivitAI vs HuggingFace sources handled?
+      4. What's the error message for network failures?
+
+      Note: Don't actually download large models - just test resolution.
+
+  # Step 5: Test with workflow that needs models
+  - action: Create workflow with model reference
+    command: |
+      cat > /workspace/model_workflow.json << 'EOF'
+      {
+        "nodes": [
+          {
+            "id": 1,
+            "type": "CheckpointLoaderSimple",
+            "widgets_values": ["dreamshaper_v8.safetensors"]
+          },
+          {
+            "id": 2,
+            "type": "KSampler",
+            "pos": [400, 200]
+          }
+        ],
+        "links": []
+      }
+      EOF
+    expect: Workflow file created
+
+  # Step 6: Analyze workflow model requirements
+  - action: Analyze workflow for model requirements
+    command: cg -e production workflow add /workspace/model_workflow.json
+    expect: |
+      Should detect model reference.
+      Should identify that model is not installed.
+    on_failure: investigate
+    timeout: 60
+
+  # Step 7: Check workflow model status
+  - action: Check workflow model dependencies
+    command: cg -e production workflow status model_workflow
+    expect: |
+      Should show model requirement.
+      Should indicate model not available.
+    on_failure: document
+
+cleanup:
+  - command: rm -rf /workspace/*
+    ignore_errors: true
+
+success_criteria: |
+  - Model search returns results
+  - Model info lookups work
+  - Workflow model detection works
+  - Error messages are clear and actionable
+  - No crashes on edge cases
