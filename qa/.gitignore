@@ -2,6 +2,12 @@
 reports/*
 !reports/.gitkeep
 
+# Local environment config (may contain paths)
+.env
+
+# Placeholder for missing claude auth mount
+_claude-placeholder/
+
 # Temp files
 *.tmp
 *.log
@@ -9,3 +15,6 @@ reports/*
 # Python cache
 __pycache__/
 *.pyc
+
+# Entrypoint script (generated, not needed in image)
+entrypoint.sh

@@ -1,0 +1,74 @@
+# Docker Compose for ComfyGit QA Testing
+#
+# === Quick Start (Direct Host) ===
+#   cd qa
+#   docker compose up -d
+#   docker compose exec qa bash
+#   docker compose exec qa claude   # Test Claude auth
+#
+# === Docker-in-Docker (e.g., ACFS) ===
+#   cp .env.example .env
+#   # Edit .env with your host paths
+#   docker compose up -d
+#
+# === Running Scenarios ===
+#   docker compose exec qa python /qa/scripts/run_scenario.py --native /qa/scenarios/01_basic_workspace_setup.yaml
+#
+# === Using Local ComfyGit Code ===
+#   docker compose exec qa uv pip install --system /comfygit/packages/core /comfygit/packages/cli
+
+services:
+  qa:
+    build:
+      context: ..
+      dockerfile: qa/Dockerfile
+    image: comfygit-qa:local
+    container_name: comfygit-qa-dev
+
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        # Set up Claude auth
+        mkdir -p /root/.claude
+        if [ -f /claude-auth/.credentials.json ]; then
+          cp /claude-auth/.credentials.json /root/.claude/
+          chmod 600 /root/.claude/.credentials.json
+          echo "Claude auth: credentials copied"
+        elif [ -n "$$ANTHROPIC_API_KEY" ]; then
+          echo "Claude auth: using API key"
+        else
+          echo "Warning: No Claude auth - set CLAUDE_AUTH_PATH or ANTHROPIC_API_KEY"
+        fi
+        exec tail -f /dev/null
+
+    volumes:
+      # Claude auth source (ro) - credentials copied on startup
+      - ${CLAUDE_AUTH_PATH:-./_claude-placeholder}:/claude-auth:ro
+
+      # ComfyGit repo for local development
+      - ${COMFYGIT_PATH:-..}:/comfygit:ro
+
+      # QA outputs and live-editable files
+      - ${QA_REPORTS_PATH:-./reports}:/reports
+      - ${QA_SCENARIOS_PATH:-./scenarios}:/qa/scenarios:ro
+      - ${QA_INSTRUCTIONS_PATH:-./agent_instructions}:/qa/agent_instructions:ro
+
+    environment:
+      - ANTHROPIC_API_KEY
+      - COMFYGIT_HOME=/workspace
+      - QA_SCENARIOS=/qa/scenarios
+      - QA_INSTRUCTIONS=/qa/agent_instructions
+      - QA_REPORTS=/reports
+      - GIT_AUTHOR_NAME=QA Agent
+      - GIT_AUTHOR_EMAIL=qa@comfygit.dev
+      - GIT_COMMITTER_NAME=QA Agent
+      - GIT_COMMITTER_EMAIL=qa@comfygit.dev
+
+    working_dir: /workspace
+
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
