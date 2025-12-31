@@ -8,7 +8,7 @@
 #   docker compose up -d
 #   docker compose exec qa bash
 #   docker compose exec qa claude
-#   # ComfyUI accessible at http://localhost:8188
+#   # ComfyUI accessible at http://localhost:8191 (default avoids ACFS 8188-8190)
 #
 # === Multi-Agent Parallel Execution ===
 #   # Create shared volume (once)
@@ -55,10 +55,11 @@ services:
     # ==========================================================================
     # Port Mapping
     # ==========================================================================
-    # ComfyUI default port (8188 inside container)
-    # For multi-agent: set COMFYUI_PORT=8191, 8192, etc. to avoid conflicts
+    # ComfyUI runs on 8188 inside container, mapped to COMFYUI_PORT on host
+    # Default 8191 avoids conflict with ACFS (which uses 8188-8190)
+    # Multi-agent: AGENT_ID=1 → 8191, AGENT_ID=2 → 8192, etc.
     ports:
-      - "${COMFYUI_PORT:-8188}:8188"
+      - "${COMFYUI_PORT:-8191}:8188"
 
     volumes:
       # Shared volume for UV cache and per-agent workspaces
