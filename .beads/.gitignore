@@ -28,6 +28,6 @@ beads.right.jsonl
 beads.right.meta.json
 
 # On code branches (dev/main), ignore all data files.
-# The bead-sync branch tracks issues.jsonl, metadata.json, etc.
+# The beads-sync branch tracks issues.jsonl, metadata.json, etc.
 *
 !.gitignore
