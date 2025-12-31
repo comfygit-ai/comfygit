@@ -89,3 +89,6 @@ docs/contexts
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Beads issue tracking - synced via beads-sync branch only
+.beads/issues.jsonl
