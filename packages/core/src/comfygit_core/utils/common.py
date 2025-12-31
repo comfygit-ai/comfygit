@@ -79,10 +79,10 @@ def run_command(
 
 def format_size(size_bytes: int) -> str:
     """Format a size in bytes as human-readable string.
-    
+
     Args:
         size_bytes: Size in bytes
-        
+
     Returns:
         Human-readable size string (e.g., "1.5 MB")
     """
@@ -90,75 +90,92 @@ def format_size(size_bytes: int) -> str:
         return "0 B"
 
     size_names = ["B", "KB", "MB", "GB", "TB"]
-    size_index = 0
     size = float(size_bytes)
 
+    # Calculate the appropriate unit index
+    size_index = 0
     while size >= 1024.0 and size_index < len(size_names) - 1:
         size /= 1024.0
         size_index += 1
 
-    if size_index == 0:
-        return f"{int(size)} {size_names[size_index]}"
-    else:
-        return f"{size:.1f} {size_names[size_index]}"
+    # Format with no decimal places for bytes, 1 decimal place for larger units
+    format_str = f"{int(size)}" if size_index == 0 else f"{size:.1f}"
+    return f"{format_str} {size_names[size_index]}"
 
 
-def log_pyproject_content(pyproject_path: Path, context: str = "") -> None:
-    """Log pyproject.toml content in a nicely formatted way.
-    
+def _log_file_content(
+    file_path: Path,
+    file_type: str,
+    context: str = "",
+    max_lines: int | None = None,
+    preview_lines: tuple[int, int] = (30, 5),
+    count_non_empty: bool = False,
+) -> None:
+    """Generic function to log file content with formatting.
+
     Args:
-        pyproject_path: Path to pyproject.toml file
+        file_path: Path to the file
+        file_type: Description of the file type (e.g., "pyproject.toml", "requirements")
         context: Optional context string for the log message
+        max_lines: Maximum lines to show (None means show all)
+        preview_lines: Tuple of (head_lines, tail_lines) for preview mode
+        count_non_empty: If True, count non-comment, non-empty lines
     """
     try:
-        content = pyproject_path.read_text(encoding='utf-8')
-        # Add indentation to each line for nice formatting
-        indented_lines = ['' + line for line in content.split('\n')]
-        formatted_content = '\n'.join(indented_lines)
-
-        # Create the log message with separator lines
-        separator = '-' * 60
-        if context:
-            msg = f"{context}:\n{separator}\n{formatted_content}\n{separator}"
-        else:
-            msg = f"pyproject.toml content:\n{separator}\n{formatted_content}\n{separator}"
-
-        # Log as a single INFO message (change to DEBUG if too verbose)
-        logger.info(msg)
-    except Exception as e:
-        logger.debug(f"Could not log pyproject.toml: {e}")
-
-def log_requirements_content(requirements_file: Path, show_all: bool = True) -> None:
-    """Log the compiled requirements file content.
-    
-    Args:
-        requirements_file: Path to the compiled requirements file
-        show_all: If True, show all lines, otherwise show a summary
-    """
-    try:
-        content = requirements_file.read_text(encoding='utf-8')
+        content = file_path.read_text(encoding='utf-8')
         lines = content.split('\n')
 
-        # Count non-comment, non-empty lines
-        package_lines = [l for l in lines if l.strip() and not l.strip().startswith('#')]
+        # Count meaningful lines if requested
+        package_count_msg = ""
+        if count_non_empty:
+            package_lines = [l for l in lines if l.strip() and not l.strip().startswith('#')]
+            package_count_msg = f" ({len(package_lines)} packages)"
 
-        #
-        separator = '=' * 60
-        msg_lines = [
-            f"Compiled requirements file ({len(package_lines)} packages):",
-            separator
-        ]
+        # Create the header
+        separator = '=' * 60 if count_non_empty else '-' * 60
+        if context:
+            header = f"{context}{package_count_msg}:"
+        else:
+            header = f"{file_type} content{package_count_msg}:"
 
-        # Show first 10 and last 5 packages if there are many
-        if len(lines) > 50 and not show_all:
-            msg_lines.extend(lines[:30])
-            msg_lines.append(f"... ({len(lines) - 35} more lines) ...")
-            msg_lines.extend(lines[-5:])
+        msg_lines = [header, separator]
+
+        # Handle line limiting
+        if max_lines and len(lines) > max_lines:
+            head_count, tail_count = preview_lines
+            msg_lines.extend(lines[:head_count])
+            msg_lines.append(f"... ({len(lines) - head_count - tail_count} more lines) ...")
+            msg_lines.extend(lines[-tail_count:])
         else:
             msg_lines.extend(lines)
 
         msg_lines.append(separator)
-
         logger.info('\n'.join(msg_lines))
     except Exception as e:
-        logger.debug(f"Could not log requirements file: {e}")
+        logger.debug(f"Could not log {file_type}: {e}")
+
+
+def log_pyproject_content(pyproject_path: Path, context: str = "") -> None:
+    """Log pyproject.toml content in a nicely formatted way.
+
+    Args:
+        pyproject_path: Path to pyproject.toml file
+        context: Optional context string for the log message
+    """
+    _log_file_content(pyproject_path, "pyproject.toml", context)
+
+def log_requirements_content(requirements_file: Path, show_all: bool = True) -> None:
+    """Log the compiled requirements file content.
+
+    Args:
+        requirements_file: Path to the compiled requirements file
+        show_all: If True, show all lines, otherwise show a summary
+    """
+    _log_file_content(
+        requirements_file,
+        file_type="requirements",
+        context="Compiled requirements file",
+        max_lines=50 if not show_all else None,
+        preview_lines=(30, 5),
+        count_non_empty=True
+    )

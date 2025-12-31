@@ -58,27 +58,12 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Set
-from urllib.parse import urlparse, urlunparse
 
 from comfygit_core.logging.logging_config import get_logger, setup_logging
 from comfygit_core.utils.input_signature import create_node_key
+from comfygit_core.utils.git import normalize_github_url
 
 logger = get_logger(__name__)
-
-
-def normalize_github_url(url: str) -> str:
-    """Normalize GitHub URL for consistent matching."""
-    # Remove trailing .git
-    url = url.rstrip('/')
-    if url.endswith('.git'):
-        url = url[:-4]
-
-    # Parse and rebuild to ensure consistent format
-    parsed = urlparse(url.lower())
-    # Keep only scheme, netloc, and path
-    normalized = urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
-
-    return normalized
 
 
 class MappingsAugmenter:

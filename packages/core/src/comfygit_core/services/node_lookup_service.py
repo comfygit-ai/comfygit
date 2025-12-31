@@ -38,22 +38,17 @@ def _is_valid_git_ref(version: str | None) -> bool:
     if not version:
         return False
 
-    # Commit hash: 40 hex characters
+    # Special case: commit hash (exactly 40 hex characters)
     if len(version) == 40 and all(c in '0123456789abcdef' for c in version.lower()):
         return True
 
-    # Git-style tag: starts with 'v' followed by number
+    # Special case: Git-style tag (starts with 'v' + digit)
     if version.startswith('v') and len(version) > 1 and version[1].isdigit():
         return True
 
-    # Branch names or other refs: contain letters but don't look like pure semver
-    # Pure semver: digits and dots only (e.g., "1.11.1")
-    is_pure_semver = all(c.isdigit() or c == '.' for c in version)
-    if is_pure_semver:
-        return False
-
-    # Everything else (branch names like "main", "dev", "feature/foo") is valid
-    return True
+    # Reject pure semver (only digits and dots like "1.11.1")
+    # Everything else (branch names) is considered valid
+    return not all(c.isdigit() or c == '.' for c in version)
 
 
 class NodeLookupService:

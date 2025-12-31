@@ -72,26 +72,25 @@ def is_rate_limit_error(error: Exception) -> bool:
     Returns:
         True if this is a rate limit error
     """
-    if isinstance(error, urllib.error.HTTPError):
-        # GitHub returns 403 for rate limits
-        if error.code == 403:
-            # Check headers for rate limit indication
-            headers = error.headers
-            if headers.get("X-RateLimit-Remaining") == "0":
-                return True
-            # Also check for rate limit message in response
-            try:
-                error_data = error.read().decode("utf-8")
-                if (
-                    "rate limit" in error_data.lower()
-                    or "api rate limit" in error_data.lower()
-                ):
-                    return True
-            except Exception:
-                pass
-        # Some APIs return 429 for rate limits
-        elif error.code == 429:
+    if not isinstance(error, urllib.error.HTTPError):
+        return False
+
+    # Standard rate limit status code
+    if error.code == 429:
+        return True
+
+    # GitHub-specific rate limit handling (uses 403)
+    if error.code == 403:
+        # Check headers first (most reliable)
+        if error.headers.get("X-RateLimit-Remaining") == "0":
             return True
+
+        # Check response body as fallback
+        try:
+            error_data = error.read().decode("utf-8").lower()
+            return "rate limit" in error_data or "api rate limit" in error_data
+        except Exception:
+            pass
 
     return False
 
@@ -111,37 +110,14 @@ def retry_on_rate_limit(config: RetryConfig | None = None):
     def decorator(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            last_exception = None
-
-            for attempt in range(config.max_retries + 1):
-                try:
-                    return func(*args, **kwargs)
-
-                except Exception as e:
-                    last_exception = e
-
-                    # Check if this is a rate limit error
-                    if is_rate_limit_error(e):
-                        if attempt < config.max_retries:
-                            delay = calculate_backoff_delay(attempt, config)
-                            logger.warning(
-                                f"Rate limit hit in {func.__name__}, "
-                                f"retrying in {delay:.1f}s (attempt {attempt + 1}/{config.max_retries})"
-                            )
-                            time.sleep(delay)
-                            continue
-                        else:
-                            logger.error(
-                                f"Rate limit hit in {func.__name__}, "
-                                f"max retries ({config.max_retries}) exceeded"
-                            )
-
-                    # Re-raise if not a rate limit error
-                    raise
-
-            # If we get here, we've exhausted retries
-            if last_exception:
-                raise last_exception
+            # Use the shared retry logic
+            return retry_with_backoff(
+                func=func,
+                args=args,
+                kwargs=kwargs,
+                config=config,
+                on_retry=None
+            )
 
         return wrapper
 

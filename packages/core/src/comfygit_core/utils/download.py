@@ -139,68 +139,55 @@ def extract_archive(archive_path: Path, target_path: Path) -> None:
         raise ValueError(f"Unsupported or corrupted archive format: {archive_path}")
 
 
-def _try_extract_zip(archive_path: Path, target_path: Path) -> None:
-    """Try to extract as ZIP archive.
-    
+def _try_extract_archive(archive_path: Path, target_path: Path, format_info: tuple[str, str]) -> None:
+    """Generic archive extraction helper.
+
+    Args:
+        archive_path: Path to archive file
+        target_path: Directory to extract to
+        format_info: Tuple of (format_type, format_name) where:
+                    - format_type: 'zip' or tar mode like 'r:', 'r:gz', 'r:bz2'
+                    - format_name: Display name like 'ZIP', 'TAR.GZ'
+
     Raises:
-        zipfile.BadZipFile: If not a valid ZIP file
+        zipfile.BadZipFile/tarfile.ReadError: If not a valid archive of this type
         OSError: If extraction fails
     """
+    format_type, format_name = format_info
+
     try:
-        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
-            zip_ref.extractall(target_path)
-    except zipfile.BadZipFile:
+        if format_type == 'zip':
+            with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                zip_ref.extractall(target_path)
+        else:
+            # It's a tar format with the given mode
+            with tarfile.open(archive_path, format_type) as tar:
+                tar.extractall(target_path)
+    except (zipfile.BadZipFile, tarfile.ReadError):
+        # Expected errors for wrong format, let them propagate
         raise
     except Exception as e:
-        raise OSError(f"ZIP extraction failed: {e}")
+        raise OSError(f"{format_name} extraction failed: {e}")
+
+
+def _try_extract_zip(archive_path: Path, target_path: Path) -> None:
+    """Try to extract as ZIP archive."""
+    _try_extract_archive(archive_path, target_path, ('zip', 'ZIP'))
 
 
 def _try_extract_tar_gz(archive_path: Path, target_path: Path) -> None:
-    """Try to extract as gzipped TAR archive.
-    
-    Raises:
-        tarfile.ReadError: If not a valid gzipped TAR file
-        OSError: If extraction fails
-    """
-    try:
-        with tarfile.open(archive_path, 'r:gz') as tar:
-            tar.extractall(target_path)
-    except tarfile.ReadError:
-        raise
-    except Exception as e:
-        raise OSError(f"TAR.GZ extraction failed: {e}")
+    """Try to extract as gzipped TAR archive."""
+    _try_extract_archive(archive_path, target_path, ('r:gz', 'TAR.GZ'))
 
 
 def _try_extract_tar(archive_path: Path, target_path: Path) -> None:
-    """Try to extract as plain TAR archive.
-    
-    Raises:
-        tarfile.ReadError: If not a valid TAR file
-        OSError: If extraction fails
-    """
-    try:
-        with tarfile.open(archive_path, 'r:') as tar:
-            tar.extractall(target_path)
-    except tarfile.ReadError:
-        raise
-    except Exception as e:
-        raise OSError(f"TAR extraction failed: {e}")
+    """Try to extract as plain TAR archive."""
+    _try_extract_archive(archive_path, target_path, ('r:', 'TAR'))
 
 
 def _try_extract_tar_bz2(archive_path: Path, target_path: Path) -> None:
-    """Try to extract as bzip2 TAR archive.
-    
-    Raises:
-        tarfile.ReadError: If not a valid bzip2 TAR file
-        OSError: If extraction fails
-    """
-    try:
-        with tarfile.open(archive_path, 'r:bz2') as tar:
-            tar.extractall(target_path)
-    except tarfile.ReadError:
-        raise
-    except Exception as e:
-        raise OSError(f"TAR.BZ2 extraction failed: {e}")
+    """Try to extract as bzip2 TAR archive."""
+    _try_extract_archive(archive_path, target_path, ('r:bz2', 'TAR.BZ2'))
 
 
 def _log_extraction_failure(archive_path: Path) -> None:
