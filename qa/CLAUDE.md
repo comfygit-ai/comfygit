@@ -7,7 +7,10 @@ Agent-based QA testing using Claude to explore and find bugs in ComfyGit.
 ```bash
 cd qa
 
-# Build the container (first time only)
+# Create shared volume (first time only)
+docker volume create qa-shared
+
+# Build the container
 docker compose build
 
 # Start the container
@@ -21,6 +24,36 @@ docker compose exec qa claude
 ```
 
 **Note**: The container runs as the `qa` user (non-root) for security.
+
+## Multi-Agent Parallel Execution
+
+Run multiple QA agents in parallel for faster test coverage:
+
+```bash
+# Create shared volume (once)
+docker volume create qa-shared
+
+# Start multiple agents with unique IDs
+AGENT_ID=1 docker compose -p qa-1 up -d
+AGENT_ID=2 docker compose -p qa-2 up -d
+AGENT_ID=3 docker compose -p qa-3 up -d
+
+# Run different scenarios on each agent
+docker compose -p qa-1 exec qa python /qa/scripts/run_scenario.py /qa/scenarios/01_basic_workspace_setup.yaml
+docker compose -p qa-2 exec qa python /qa/scripts/run_scenario.py /qa/scenarios/02_workflow_sync.yaml
+docker compose -p qa-3 exec qa python /qa/scripts/run_scenario.py /qa/scenarios/03_model_resolution.yaml
+
+# Cleanup when done
+docker compose -p qa-1 down
+docker compose -p qa-2 down
+docker compose -p qa-3 down
+```
+
+**Architecture**:
+- Each agent gets its own workspace: `/shared/workspace-{AGENT_ID}`
+- All agents share a UV cache: `/shared/uv_cache` (fast dependency resolution)
+- Hardlinks between cache and .venv (same filesystem = no copy overhead)
+- Git identity includes AGENT_ID for traceability
 
 ## Setup Modes
 
@@ -63,13 +96,23 @@ COMFYGIT_PATH=/home/youruser/dev/projects/comfygit-ai/comfygit
 
 ## Using Local ComfyGit Code
 
-The container installs comfygit from PyPI by default. To test local changes:
+The entrypoint auto-installs from `/comfygit` mount if present (editable mode). This happens automatically on container start.
+
+To manually reinstall after making changes:
+
+```bash
+docker compose exec qa /qa/install-local.sh
+```
+
+Or directly:
 
 ```bash
 docker compose exec qa bash
-sudo uv pip install --system /comfygit/packages/core /comfygit/packages/cli
+sudo uv pip install --system -e /comfygit/packages/core -e /comfygit/packages/cli
 cg --version  # Verify local version
 ```
+
+**Note**: The shared UV cache (`/shared/uv_cache`) makes subsequent installs fast across all agents.
 
 ## Running Scenarios
 
@@ -133,6 +176,8 @@ cleanup:
 | File | Purpose |
 |------|---------|
 | `docker-compose.yml` | Container configuration |
+| `entrypoint.sh` | Container startup (auth, local install) |
+| `install-local.sh` | Reinstall local comfygit |
 | `.env` | Local path overrides (gitignored) |
 | `.env.example` | Template for .env |
 | `Dockerfile` | Container image definition |
@@ -146,11 +191,24 @@ cleanup:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLAUDE_CREDS_PATH` | `~/.claude/.credentials.json` | Path to credentials file |
+| `AGENT_ID` | `dev` | Agent identity (for parallel execution) |
+| `CLAUDE_CREDS_PATH` | (placeholder) | Path to credentials file |
 | `COMFYGIT_PATH` | `..` | Path to comfygit repo |
 | `QA_REPORTS_PATH` | `./reports` | Report output directory |
 | `QA_SCENARIOS_PATH` | `./scenarios` | Scenarios directory |
 | `ANTHROPIC_API_KEY` | - | Alternative to OAuth auth |
+
+## Shared Volume
+
+The `qa-shared` volume stores:
+- `/shared/uv_cache/` - Shared UV package cache (fast installs via hardlinks)
+- `/shared/workspace-{AGENT_ID}/` - Per-agent workspace directories
+- `/shared/.installed-{AGENT_ID}` - Marker files for local install tracking
+
+Create before first use:
+```bash
+docker volume create qa-shared
+```
 
 ## Troubleshooting
 
