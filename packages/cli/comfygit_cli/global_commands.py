@@ -13,6 +13,7 @@ from .cli_utils import get_workspace_or_exit
 from .logging.environment_logger import WorkspaceLogger, with_workspace_logging
 from .logging.logging_config import get_logger
 from .utils import create_progress_callback, paginate, show_civitai_auth_help, show_download_stats
+from .utils.cli_output import print_success, print_error, print_warning, print_info
 
 logger = get_logger(__name__)
 
@@ -91,7 +92,7 @@ class GlobalCommands:
         if explicit_models_dir:
             models_path = explicit_models_dir.resolve()
             if not models_path.exists() or not models_path.is_dir():
-                print(f"✗ Models directory not found: {models_path}", file=sys.stderr)
+                print_error(f"Models directory not found: {models_path}")
                 print("   Falling back to default models directory\n")
                 # Clear the flag and enable --yes to avoid interactive prompt
                 args.models_dir = None
@@ -119,10 +120,10 @@ class GlobalCommands:
                 print("📦 Fetching latest registry data...")
                 success = workspace.update_registry_data()
                 if success:
-                    print("✓ Registry data downloaded")
+                    print_success("Registry data downloaded")
                     logger.info("Registry data downloaded successfully")
                 else:
-                    print("⚠️  Could not fetch registry data")
+                    print_warning("Could not fetch registry data")
                     print("   Some features will be limited until registry data is available:")
                     print("   • Automatic node resolution from workflow files")
                     print("   • Node package search and discovery")
@@ -130,7 +131,7 @@ class GlobalCommands:
                     print("   Download later with: cg registry update")
                     logger.warning("Failed to fetch initial registry data")
 
-            print(f"✓ Workspace initialized at {workspace.path}")
+            print_success(f"Workspace initialized at {workspace.path}")
 
             # Handle models directory setup
             self._setup_models_directory(workspace, args)
@@ -144,7 +145,7 @@ class GlobalCommands:
             print("  2. Add custom nodes: cg -e <name> node add <node>")
             print("  3. Run ComfyUI: cg -e <name> run")
         except Exception as e:
-            print(f"✗ Failed to initialize workspace: {e}", file=sys.stderr)
+            print_error(f"Failed to initialize workspace: {e}")
             sys.exit(1)
 
     def _show_workspace_env_setup(self, workspace_path: Path) -> None:
@@ -152,7 +153,7 @@ class GlobalCommands:
         import os
 
         print("\n" + "="*70)
-        print("⚠️  CUSTOM WORKSPACE LOCATION")
+        print_warning("CUSTOM WORKSPACE LOCATION")
         print("="*70)
         print(f"\nWorkspace created at: {workspace_path}")
         print("\nTo use this workspace in future sessions, set COMFYGIT_HOME:")
@@ -226,7 +227,7 @@ class GlobalCommands:
 
                 # Validate directory exists
                 if not models_path.exists():
-                    print(f"✗ Directory not found: {models_path}")
+                    print_error(f"Directory not found: {models_path}")
                     retry = input("Try another path? (y/N): ").strip().lower()
                     if retry != 'y':
                         print("Using default directory instead")
@@ -235,7 +236,7 @@ class GlobalCommands:
                     continue
 
                 if not models_path.is_dir():
-                    print(f"✗ Not a directory: {models_path}")
+                    print_error(f"Not a directory: {models_path}")
                     retry = input("Try another path? (y/N): ").strip().lower()
                     if retry != 'y':
                         print("Using default directory instead")
@@ -296,7 +297,7 @@ class GlobalCommands:
                 print("  (No models found - directory is empty)")
         except Exception as e:
             logger.error(f"Failed to set models directory: {e}")
-            print(f"✗ Failed to scan models directory: {e}", file=sys.stderr)
+            print_error(f"Failed to scan models directory: {e}")
             print("   Using default models directory instead")
             self._show_default_models_dir(workspace)
 
@@ -325,7 +326,7 @@ class GlobalCommands:
 
         except Exception as e:
             logger.error(f"Failed to list environments: {e}")
-            print(f"✗ Failed to list environments: {e}", file=sys.stderr)
+            print_error(f"Failed to list environments: {e}")
             sys.exit(1)
 
     def debug(self, args: argparse.Namespace) -> None:
@@ -349,7 +350,7 @@ class GlobalCommands:
                 log_source = "workspace"
 
         if not log_file.exists():
-            print(f"✗ No logs found for {log_source}")
+            print_error(f"No logs found for {log_source}")
             print(f"   Expected at: {log_file}")
             return
 
@@ -358,7 +359,7 @@ class GlobalCommands:
             with open(log_file, encoding='utf-8') as f:
                 lines = f.readlines()
         except Exception as e:
-            print(f"✗ Failed to read log file: {e}", file=sys.stderr)
+            print_error(f"Failed to read log file: {e}")
             sys.exit(1)
 
         # Group lines into complete log records (header + continuation lines)
@@ -411,7 +412,7 @@ class GlobalCommands:
     @with_workspace_logging("migrate")
     def migrate(self, args: argparse.Namespace) -> None:
         """Migrate an existing ComfyUI installation (not implemented in MVP)."""
-        print("⚠️  Migration is not yet implemented in this MVP")
+        print_warning("Migration is not yet implemented in this MVP")
         print("\nFor now, you can:")
         print("  1. Create a new environment: cg create <name>")
         print("  2. Manually add your custom nodes:")
@@ -439,7 +440,7 @@ class GlobalCommands:
                 if models.exists():
                     print("  ✓ Models directory found")
             else:
-                print(f"✗ Path not found: {source_path}")
+                print_error(f"Path not found: {source_path}")
 
     @with_workspace_logging("import")
     def import_env(self, args: argparse.Namespace) -> None:
@@ -452,7 +453,7 @@ class GlobalCommands:
         workspace = self._get_or_create_workspace(args)
 
         if not args.path:
-            print("✗ Please specify path to import tarball or git URL")
+            print_error("Please specify path to import tarball or git URL")
             print("  Usage: cg import <path.tar.gz|git-url>")
             sys.exit(1)
 
@@ -468,7 +469,7 @@ class GlobalCommands:
         else:
             tarball_path = Path(args.path)
             if not tarball_path.exists():
-                print(f"✗ File not found: {tarball_path}")
+                print_error(f"File not found: {tarball_path}")
                 sys.exit(1)
             print(f"📦 Importing environment from {tarball_path.name}")
             print()
@@ -479,7 +480,7 @@ class GlobalCommands:
         else:
             env_name = input("Environment name: ").strip()
             if not env_name:
-                print("✗ Environment name required")
+                print_error("Environment name required")
                 sys.exit(1)
 
         # Determine model download strategy
@@ -671,11 +672,11 @@ class GlobalCommands:
             else:
                 env = self.workspace.get_active_environment()
                 if not env:
-                    print("✗ No active environment. Use: cg use <name>")
+                    print_error("No active environment. Use: cg use <name>")
                     print("   Or specify with: cg -e <name> export")
                     sys.exit(1)
         except Exception as e:
-            print(f"✗ Error getting environment: {e}")
+            print_error(f"Error getting environment: {e}")
             sys.exit(1)
 
         # Determine output path
@@ -704,7 +705,7 @@ class GlobalCommands:
 
             # Check if we need user confirmation
             if callbacks.models_without_sources and not args.allow_issues:
-                print("⚠️  Export validation:")
+                print_warning("Export validation:")
                 print(f"\n{len(callbacks.models_without_sources)} model(s) have no source URLs.\n")
 
                 # Show first 3 models initially
@@ -762,7 +763,7 @@ class GlobalCommands:
             from comfygit_core.models.exceptions import CDExportError
 
             if isinstance(e, CDExportError):
-                print(f"✗ {str(e)}")
+                print_error(f"{str(e)}")
 
                 # Show context-specific details
                 if e.context:
@@ -781,7 +782,7 @@ class GlobalCommands:
                 sys.exit(1)
 
             # Generic error handling
-            print(f"✗ Export failed: {e}")
+            print_error(f"Export failed: {e}")
             sys.exit(1)
 
         sys.exit(0)
@@ -862,7 +863,7 @@ class GlobalCommands:
 
         except Exception as e:
             logger.error(f"Failed to list models: {e}")
-            print(f"✗ Failed to list models: {e}", file=sys.stderr)
+            print_error(f"Failed to list models: {e}")
             sys.exit(1)
 
     @with_workspace_logging("model index find")
@@ -926,7 +927,7 @@ class GlobalCommands:
 
         except Exception as e:
             logger.error(f"Model search failed for query '{query}': {e}")
-            print(f"✗ Search failed: {e}", file=sys.stderr)
+            print_error(f"Search failed: {e}")
             sys.exit(1)
 
     @with_workspace_logging("model index show")
@@ -1017,7 +1018,7 @@ class GlobalCommands:
             print(f"  Filename: cg model index show {first_model.filename}")
         except Exception as e:
             logger.error(f"Failed to show model details for '{identifier}': {e}")
-            print(f"✗ Failed to show model: {e}", file=sys.stderr)
+            print_error(f"Failed to show model: {e}")
             sys.exit(1)
 
     # === Model Directory Commands ===
@@ -1031,7 +1032,7 @@ class GlobalCommands:
             info = self.workspace.get_registry_info()
 
             if not info['exists']:
-                print("✗ No registry data cached")
+                print_error("No registry data cached")
                 print("   Run 'cg index registry update' to fetch")
                 return
 
@@ -1044,7 +1045,7 @@ class GlobalCommands:
 
         except Exception as e:
             logger.error(f"Failed to get registry status: {e}")
-            print(f"✗ Failed to get registry status: {e}", file=sys.stderr)
+            print_error(f"Failed to get registry status: {e}")
             sys.exit(1)
 
     @with_workspace_logging("registry update")
@@ -1057,16 +1058,16 @@ class GlobalCommands:
 
             if success:
                 info = self.workspace.get_registry_info()
-                print("✓ Registry data updated successfully")
+                print_success("Registry data updated successfully")
                 if info['version']:
                     print(f"   Version: {info['version']}")
             else:
-                print("✗ Failed to update registry data")
+                print_error("Failed to update registry data")
                 print("   Using existing cache if available")
 
         except Exception as e:
             logger.error(f"Failed to update registry: {e}")
-            print(f"✗ Failed to update registry: {e}", file=sys.stderr)
+            print_error(f"Failed to update registry: {e}")
             sys.exit(1)
 
     @with_workspace_logging("model index dir")
@@ -1081,11 +1082,11 @@ class GlobalCommands:
             print(f"📁 Setting global models directory: {directory_path}")
 
             if not directory_path.exists():
-                print(f"✗ Directory does not exist: {directory_path}")
+                print_error(f"Directory does not exist: {directory_path}")
                 sys.exit(1)
 
             if not directory_path.is_dir():
-                print(f"✗ Path is not a directory: {directory_path}")
+                print_error(f"Path is not a directory: {directory_path}")
                 sys.exit(1)
 
             # Set the models directory and perform initial scan with progress
@@ -1097,7 +1098,7 @@ class GlobalCommands:
 
         except Exception as e:
             logger.error(f"Failed to set models directory '{directory_path}': {e}")
-            print(f"✗ Failed to set models directory: {e}", file=sys.stderr)
+            print_error(f"Failed to set models directory: {e}")
             sys.exit(1)
 
     @with_workspace_logging("model index sync")
@@ -1112,7 +1113,7 @@ class GlobalCommands:
             result = self.workspace.sync_model_directory(progress=progress)
 
             if result is None:
-                print("✗ No models directory configured")
+                print_error("No models directory configured")
                 print("   Run 'cg model index dir <path>' to set your models directory")
                 return
 
@@ -1120,7 +1121,7 @@ class GlobalCommands:
 
         except Exception as e:
             logger.error(f"Failed to sync models: {e}")
-            print(f"✗ Failed to sync: {e}", file=sys.stderr)
+            print_error(f"Failed to sync: {e}")
             sys.exit(1)
 
     @with_workspace_logging("model index status")
@@ -1157,7 +1158,7 @@ class GlobalCommands:
 
         except Exception as e:
             logger.error(f"Failed to get status: {e}")
-            print(f"✗ Failed to get status: {e}", file=sys.stderr)
+            print_error(f"Failed to get status: {e}")
             sys.exit(1)
 
     @with_workspace_logging("model download")
@@ -1194,7 +1195,7 @@ class GlobalCommands:
                 choice = input("Choice [Y]/m/c: ").strip().lower()
 
                 if choice == 'c':
-                    print("✗ Download cancelled")
+                    print_error("Download cancelled")
                     return
                 elif choice == 'm':
                     new_path = input("\nEnter path (relative to models dir): ").strip()
@@ -1202,7 +1203,7 @@ class GlobalCommands:
                         suggested_path = Path(new_path)
                         continue  # Show menu again with updated path
                     else:
-                        print("✗ Download cancelled")
+                        print_error("Download cancelled")
                         return
                 elif choice in ['y', '']:
                     break  # Confirmed, proceed to download
@@ -1225,7 +1226,7 @@ class GlobalCommands:
 
             # Handle result
             if not result.success:
-                print(f"✗ Download failed: {result.error}")
+                print_error(f"Download failed: {result.error}")
 
                 # Show Civitai auth help if needed
                 if "civitai.com" in url.lower() and result.error and (
@@ -1241,11 +1242,11 @@ class GlobalCommands:
                 show_download_stats(result.model)
                 logger.info(f"Successfully downloaded model to {result.model.relative_path}")
             else:
-                print("✓ Download complete")
+                print_success("Download complete")
 
         except Exception as e:
             logger.error(f"Model download failed: {e}")
-            print(f"✗ Download failed: {e}", file=sys.stderr)
+            print_error(f"Download failed: {e}")
             sys.exit(1)
 
     # === Model Source Management ===
@@ -1268,24 +1269,24 @@ class GlobalCommands:
         result = env.add_model_source(identifier, url)
 
         if result.success:
-            print(f"✓ Added source to {result.model.filename}")
+            print_success(f"Added source to {result.model.filename}")
             print(f"  {url}")
         else:
             # Handle errors
             if result.error == "model_not_found":
-                print(f"✗ Model not found: {identifier}", file=sys.stderr)
+                print_error(f"Model not found: {identifier}")
                 print("\nHint: Use hash prefix or exact filename", file=sys.stderr)
                 sys.exit(1)
 
             elif result.error == "ambiguous_filename":
-                print(f"✗ Multiple models match '{identifier}':", file=sys.stderr)
+                print_error(f"Multiple models match '{identifier}':")
                 for match in result.matches:
                     print(f"  • {match.relative_path} ({match.hash[:8]}...)", file=sys.stderr)
                 print(f"\nUse full hash: cg model add-source <hash> {url}", file=sys.stderr)
                 sys.exit(1)
 
             elif result.error == "url_exists":
-                print(f"✗ URL already exists for {result.model.filename}", file=sys.stderr)
+                print_error(f"URL already exists for {result.model.filename}")
                 sys.exit(1)
 
     def _add_source_interactive(self, env):
@@ -1293,7 +1294,7 @@ class GlobalCommands:
         statuses = env.get_models_without_sources()
 
         if not statuses:
-            print("✓ All models have download sources!")
+            print_success("All models have download sources!")
             return
 
         print("\n📦 Add Model Sources\n")
@@ -1370,10 +1371,10 @@ class GlobalCommands:
         """Set Civitai API key."""
         if key == "":
             self.workspace.workspace_config_manager.set_civitai_token(None)
-            print("✓ Civitai API key cleared")
+            print_success("Civitai API key cleared")
         else:
             self.workspace.workspace_config_manager.set_civitai_token(key)
-            print("✓ Civitai API key saved")
+            print_success("Civitai API key saved")
 
     def _set_uv_cache(self, path_str: str):
         """Set external UV cache path."""
@@ -1381,7 +1382,7 @@ class GlobalCommands:
 
         if path_str == "":
             self.workspace.workspace_config_manager.set_external_uv_cache(None)
-            print("✓ External UV cache cleared (using workspace-local cache)")
+            print_success("External UV cache cleared (using workspace-local cache)")
         else:
             path = Path(path_str).expanduser().resolve()
             if not path.exists():
@@ -1391,7 +1392,7 @@ class GlobalCommands:
                 print(f"Error: Path is not a directory: {path}")
                 return
             self.workspace.workspace_config_manager.set_external_uv_cache(path)
-            print(f"✓ External UV cache set to: {path}")
+            print_success(f"External UV cache set to: {path}")
 
     def _show_config(self):
         """Display current configuration."""
@@ -1456,7 +1457,7 @@ class GlobalCommands:
             return
 
         self.workspace.workspace_config_manager.set_civitai_token(key)
-        print("✓ API key saved")
+        print_success("API key saved")
 
     def _interactive_clear_setting(self):
         """Clear a configuration setting."""
@@ -1468,7 +1469,7 @@ class GlobalCommands:
 
         if choice == "1":
             self.workspace.workspace_config_manager.set_civitai_token(None)
-            print("✓ Civitai API key cleared")
+            print_success("Civitai API key cleared")
         elif choice == "c" or choice == "":
             print("  Cancelled")
         else:
@@ -1574,12 +1575,12 @@ class GlobalCommands:
         is_running, pid = is_orchestrator_running(metadata_dir)
 
         if not is_running:
-            print("✗ Orchestrator is not running")
+            print_error("Orchestrator is not running")
             print("  Start ComfyUI to launch the orchestrator")
             sys.exit(1)
 
         # Send restart command
-        print(f"✓ Sending restart command to orchestrator (PID {pid})")
+        print_success(f"Sending restart command to orchestrator (PID {pid})")
         safe_write_command(metadata_dir, {
             "command": "restart",
             "timestamp": time.time()
@@ -1596,10 +1597,10 @@ class GlobalCommands:
                 time.sleep(0.5)
                 is_running, new_pid = is_orchestrator_running(metadata_dir)
                 if is_running:
-                    print(f"✓ Orchestrator restarted (PID {new_pid})")
+                    print_success(f"Orchestrator restarted (PID {new_pid})")
                     return
 
-            print("⚠️  Restart may still be in progress")
+            print_warning("Restart may still be in progress")
 
     def orch_kill(self, args: argparse.Namespace) -> None:
         """Shutdown orchestrator."""
@@ -1618,7 +1619,7 @@ class GlobalCommands:
         is_running, pid = is_orchestrator_running(metadata_dir)
 
         if not is_running:
-            print("✗ Orchestrator is not running")
+            print_error("Orchestrator is not running")
             if pid:
                 print(f"  (stale PID file exists: {pid})")
             return
@@ -1628,24 +1629,24 @@ class GlobalCommands:
         if switch_status:
             state = switch_status.get("state", "")
             if state not in ["complete", "failed", "aborted"]:
-                print(f"⚠️  Orchestrator is currently switching environments (state: {state})")
+                print_warning(f"Orchestrator is currently switching environments (state: {state})")
                 if not args.force:
                     response = input("   Shutdown anyway? [y/N]: ").strip().lower()
                     if response not in ['y', 'yes']:
-                        print("✗ Shutdown cancelled")
+                        print_error("Shutdown cancelled")
                         return
 
         if args.force:
             # Force kill (SIGTERM then SIGKILL if needed)
-            print(f"✓ Force killing orchestrator (PID {pid})")
+            print_success(f"Force killing orchestrator (PID {pid})")
             # Sends SIGTERM, waits 3s for cleanup, then SIGKILL if still alive
             kill_orchestrator_process(pid, force=False)
-            print("✓ Orchestrator terminated")
+            print_success("Orchestrator terminated")
             print("\nNote: ComfyUI should have been shut down gracefully.")
             print("  If still running, check with: ps aux | grep 'ComfyUI/main.py'")
         else:
             # Graceful shutdown via command
-            print(f"✓ Sending shutdown command to orchestrator (PID {pid})")
+            print_success(f"Sending shutdown command to orchestrator (PID {pid})")
             safe_write_command(metadata_dir, {
                 "command": "shutdown",
                 "timestamp": time.time()
@@ -1656,9 +1657,9 @@ class GlobalCommands:
             time.sleep(1)
             is_running, _ = is_orchestrator_running(metadata_dir)
             if not is_running:
-                print("✓ Orchestrator shut down")
+                print_success("Orchestrator shut down")
             else:
-                print("⚠️  Orchestrator may still be shutting down")
+                print_warning("Orchestrator may still be shutting down")
 
     def orch_clean(self, args: argparse.Namespace) -> None:
         """Clean orchestrator state files."""
@@ -1696,7 +1697,7 @@ class GlobalCommands:
 
         # Confirm if orchestrator is running
         if is_running and not args.force:
-            print(f"⚠️  Warning: Orchestrator is currently running (PID {pid})")
+            print_warning(f"Warning: Orchestrator is currently running (PID {pid})")
             print("\nThis will forcefully clean orchestrator state.")
             print("Files to remove:")
             for filename in files_to_show:
@@ -1708,7 +1709,7 @@ class GlobalCommands:
 
             response = input("\nContinue? [y/N]: ").strip().lower()
             if response not in ['y', 'yes']:
-                print("✗ Cleaning cancelled")
+                print_error("Cleaning cancelled")
                 return
 
         # Kill orchestrator if requested
@@ -1753,7 +1754,7 @@ class GlobalCommands:
         log_file = metadata_dir / "orchestrator.log"
 
         if not log_file.exists():
-            print("✗ No orchestrator log file found")
+            print_error("No orchestrator log file found")
             print(f"  Expected: {log_file}")
             return
 

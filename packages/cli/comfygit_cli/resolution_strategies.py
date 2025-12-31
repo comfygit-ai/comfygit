@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .utils.cli_output import print_success, print_error, print_warning, print_info
+
 if TYPE_CHECKING:
     from comfygit_core.models.commit import ModelResolutionRequest
     from comfygit_core.models.shared import ModelWithLocation
@@ -55,7 +57,7 @@ class InteractiveModelResolver:
                         # Create unique key for request
                         req_key = f"{req.workflow_name}:{req.node_id}:{req.widget_index}"
                         resolutions[req_key] = req.candidates[idx]
-                        print(f"✓ Selected: {req.candidates[idx].filename}")
+                        print_success(f"Selected: {req.candidates[idx].filename}")
                         break
 
                 print("Invalid choice, please try again.")

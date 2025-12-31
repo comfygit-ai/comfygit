@@ -7,6 +7,8 @@ from comfygit_core.models.shared import ModelWithLocation
 from comfygit_core.models.workflow import BatchDownloadCallbacks
 from comfygit_core.utils.common import format_size
 
+from .cli_output import print_success, print_error, print_warning, print_info
+
 
 def create_progress_callback() -> Callable[[int, int | None], None]:
     """Create a reusable progress callback for model downloads.
@@ -36,7 +38,7 @@ def show_download_stats(model: ModelWithLocation | None) -> None:
     if not model:
         return
     size_str = format_size(model.file_size)
-    print(f"✓ Downloaded and indexed: {model.relative_path}")
+    print_success(f"Downloaded and indexed: {model.relative_path}")
     print(f"  Size: {size_str}")
     print(f"  Hash: {model.hash}")
 
@@ -112,7 +114,7 @@ class ModelSyncProgress(ModelScanProgress):
                     changes.append(f"{result.added_count} added")
                 if result.updated_count > 0:
                     changes.append(f"{result.updated_count} updated")
-                print(f"✓ Model index synced: {', '.join(changes)}")
+                print_success(f"Model index synced: {', '.join(changes)}")
             else:
                 # Clear the line completely if no changes
                 print("\r\033[K", end='', flush=True)  # Clear line completely

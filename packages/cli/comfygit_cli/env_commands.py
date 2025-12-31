@@ -13,6 +13,7 @@ from comfygit_core.utils.uv_error_handler import handle_uv_error
 
 from .formatters.error_formatter import NodeErrorFormatter
 from .strategies.interactive import InteractiveModelStrategy, InteractiveNodeStrategy
+from .utils.cli_output import print_success, print_error, print_warning, print_info
 
 if TYPE_CHECKING:
     from comfygit_core.core.environment import Environment
@@ -73,7 +74,7 @@ class EnvironmentCommands:
                 env = self.workspace.get_environment(args.target_env)
                 return env
             except Exception:
-                print(f"✗ Unknown environment: {args.target_env}")
+                print_error(f"Unknown environment: {args.target_env}")
                 print("Available environments:")
                 for e in self.workspace.list_environments():
                     print(f"  • {e.name}")
@@ -82,7 +83,7 @@ class EnvironmentCommands:
         # Fall back to active environment
         active = self.workspace.get_active_environment()
         if not active:
-            print("✗ No environment specified. Either:")
+            print_error("No environment specified. Either:")
             print("  • Use -e flag: cg -e my-env <command>")
             print("  • Set active: cg use <name>")
             sys.exit(1)
@@ -119,13 +120,13 @@ class EnvironmentCommands:
 
             was_probed = not had_backend
             if was_probed:
-                print("⚠️  No PyTorch backend configured. Auto-detecting...")
-                print(f"✓ Backend detected and saved: {backend}")
+                print_warning("No PyTorch backend configured. Auto-detecting...")
+                print_success(f"Backend detected and saved: {backend}")
                 print("   To change: cg env-config torch-backend set <backend>")
 
             return backend, was_probed
         except Exception as e:
-            print(f"✗ Error probing PyTorch backend: {e}")
+            print_error(f"Error probing PyTorch backend: {e}")
             print("   Try setting it explicitly: cg env-config torch-backend set <backend>")
             sys.exit(1)
 
@@ -246,7 +247,7 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Environment creation failed for '{args.name}': {e}", exc_info=True)
-            print(f"✗ Failed to create environment: {e}", file=sys.stderr)
+            print_error(f"Failed to create environment: {e}")
             sys.exit(1)
 
         if args.use:
@@ -256,12 +257,12 @@ class EnvironmentCommands:
             except Exception as e:
                 if logger:
                     logger.error(f"Failed to set active environment '{args.name}': {e}", exc_info=True)
-                print(f"✗ Failed to set active environment: {e}", file=sys.stderr)
+                print_error(f"Failed to set active environment: {e}")
                 sys.exit(1)
 
-        print(f"✓ Environment created: {args.name}")
+        print_success(f"Environment created: {args.name}")
         if args.use:
-            print(f"✓ Active environment set to: {args.name}")
+            print_success(f"Active environment set to: {args.name}")
             print("\nNext steps:")
             print("  • Run ComfyUI: cg run")
             print("  • Add nodes: cg node add <node-name>")
@@ -282,10 +283,10 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Failed to set active environment '{args.name}': {e}", exc_info=True)
-            print(f"✗ Failed to set active environment: {e}", file=sys.stderr)
+            print_error(f"Failed to set active environment: {e}")
             sys.exit(1)
 
-        print(f"✓ Active environment set to: {args.name}")
+        print_success(f"Active environment set to: {args.name}")
         print("You can now run commands without the -e flag")
 
     @with_env_logging("delete")
@@ -294,7 +295,7 @@ class EnvironmentCommands:
         # Check that environment exists (don't require active environment)
         env_path = self.workspace.paths.environments / args.name
         if not env_path.exists():
-            print(f"✗ Environment '{args.name}' not found")
+            print_error(f"Environment '{args.name}' not found")
             print("\nAvailable environments:")
             for env in self.workspace.list_environments():
                 print(f"  • {env.name}")
@@ -314,10 +315,10 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Environment deletion failed for '{args.name}': {e}", exc_info=True)
-            print(f"✗ Failed to delete environment: {e}", file=sys.stderr)
+            print_error(f"Failed to delete environment: {e}")
             sys.exit(1)
 
-        print(f"✓ Environment deleted: {args.name}")
+        print_success(f"Environment deleted: {args.name}")
 
     # === Commands that operate IN environments ===
 
@@ -357,7 +358,7 @@ class EnvironmentCommands:
 
         # Validate backend format
         if not env.pytorch_manager.is_valid_backend(backend):
-            print(f"✗ Invalid backend: {backend}")
+            print_error(f"Invalid backend: {backend}")
             print()
             print("Valid formats:")
             print("  • cu118, cu121, cu124, cu126, cu128 (CUDA)")
@@ -379,12 +380,12 @@ class EnvironmentCommands:
         try:
             resolved = env.pytorch_manager.probe_and_set_backend(python_version, backend)
         except PyTorchProbeError as e:
-            print(f"✗ Error probing PyTorch: {e}")
+            print_error(f"Error probing PyTorch: {e}")
             sys.exit(1)
 
         # Show what was stored
         versions = env.pytorch_manager.get_versions()
-        print(f"✓ PyTorch backend set to: {resolved}")
+        print_success(f"PyTorch backend set to: {resolved}")
         if versions:
             for pkg, ver in versions.items():
                 print(f"   {pkg}={ver}")
@@ -412,7 +413,7 @@ class EnvironmentCommands:
         try:
             _, detected = probe_pytorch_versions(python_version, "auto")
         except PyTorchProbeError as e:
-            print(f"✗ Error probing PyTorch: {e}")
+            print_error(f"Error probing PyTorch: {e}")
             sys.exit(1)
 
         # Get current backend (if any)
@@ -451,7 +452,7 @@ class EnvironmentCommands:
         if torch_backend_override:
             print(f"🔧 Using PyTorch backend override: {torch_backend}")
         elif was_probed:
-            print(f"✓ Backend detected and saved: {torch_backend}")
+            print_success(f"Backend detected and saved: {torch_backend}")
             print(f"   To change: cg env-config torch-backend set <backend>")
         else:
             print(f"🔧 Using PyTorch backend: {torch_backend}")
@@ -496,7 +497,7 @@ class EnvironmentCommands:
         if torch_backend_override:
             print(f"🔧 Using PyTorch backend override: {torch_backend}")
         elif was_probed:
-            print(f"✓ Backend detected and saved: {torch_backend}")
+            print_success(f"Backend detected and saved: {torch_backend}")
             print(f"   To change: cg env-config torch-backend set <backend>")
         else:
             print(f"🔧 Using PyTorch backend: {torch_backend}")
@@ -560,7 +561,7 @@ class EnvironmentCommands:
                     current = current[key]
                 config = {args.section: current}
             except (KeyError, TypeError):
-                print(f"✗ Section not found: {args.section}")
+                print_error(f"Section not found: {args.section}")
                 print("\nAvailable sections:")
                 print("  • project")
                 print("  • tool.comfygit")
@@ -616,13 +617,13 @@ class EnvironmentCommands:
 
             # Show detached HEAD warning even in clean state
             if status.git.current_branch is None:
-                print("⚠️  You are in detached HEAD state")
+                print_warning("You are in detached HEAD state")
                 print("   Any commits you make will not be saved to a branch!")
                 print("   Create a branch: cg checkout -b <branch-name>")
                 print()  # Extra spacing before clean state messages
 
             print("\n✓ No workflows")
-            print("✓ No uncommitted changes")
+            print_success("No uncommitted changes")
 
             # Show legacy manager notice even in clean state
             self._show_legacy_manager_notice(env)
@@ -633,7 +634,7 @@ class EnvironmentCommands:
 
         # Detached HEAD warning (shown prominently at top)
         if status.git.current_branch is None:
-            print("⚠️  You are in detached HEAD state")
+            print_warning("You are in detached HEAD state")
             print("   Any commits you make will not be saved to a branch!")
             print("   Create a branch: cg checkout -b <branch-name>")
             print()  # Extra spacing
@@ -1088,7 +1089,7 @@ class EnvironmentCommands:
             current_branch = env.get_current_branch()
             if current_branch is None:
                 print()
-                print("⚠️  You are currently in detached HEAD state")
+                print_warning("You are currently in detached HEAD state")
                 print("   Commits will not be saved to any branch!")
                 print("   Create a branch: cg checkout -b <branch-name>")
                 print()
@@ -1100,7 +1101,7 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Failed to read commit history for environment '{env.name}': {e}", exc_info=True)
-            print(f"✗ Could not read commit history: {e}", file=sys.stderr)
+            print_error(f"Could not read commit history: {e}")
             sys.exit(1)
 
     # === Node management ===
@@ -1122,7 +1123,7 @@ class EnvironmentCommands:
                 if success:
                     print("✓")
                 else:
-                    print(f"✗ ({error})")
+                    print_error(f"({error})")
 
             from comfygit_core.models.workflow import NodeInstallCallbacks
             callbacks = NodeInstallCallbacks(
@@ -1173,7 +1174,7 @@ class EnvironmentCommands:
             formatted = NodeErrorFormatter.format_registry_error(e)
             if logger:
                 logger.error(f"Registry data unavailable for node add: {e}", exc_info=True)
-            print(f"✗ Cannot add node - registry data unavailable", file=sys.stderr)
+            print_error(f"Cannot add node - registry data unavailable")
             print(formatted, file=sys.stderr)
             sys.exit(1)
         except CDDependencyConflictError as e:
@@ -1188,20 +1189,20 @@ class EnvironmentCommands:
             formatted = NodeErrorFormatter.format_conflict_error(e)
             if logger:
                 logger.error(f"Node conflict for '{node_name}': {e}", exc_info=True)
-            print(f"✗ Cannot add node '{node_name}'", file=sys.stderr)
+            print_error(f"Cannot add node '{node_name}'")
             print(formatted, file=sys.stderr)
             sys.exit(1)
         except Exception as e:
             if logger:
                 logger.error(f"Node add failed for '{node_name}': {e}", exc_info=True)
-            print(f"✗ Failed to add node '{node_name}'", file=sys.stderr)
+            print_error(f"Failed to add node '{node_name}'")
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
 
         if args.dev:
-            print(f"✓ Development node '{node_info.name}' added and tracked")
+            print_success(f"Development node '{node_info.name}' added and tracked")
         else:
-            print(f"✓ Node '{node_info.name}' added to pyproject.toml")
+            print_success(f"Node '{node_info.name}' added to pyproject.toml")
 
         print(f"\nRun 'cg -e {env.name} status' to review changes")
 
@@ -1222,7 +1223,7 @@ class EnvironmentCommands:
                 if success:
                     print("✓")
                 else:
-                    print(f"✗ ({error})")
+                    print_error(f"({error})")
 
             from comfygit_core.models.workflow import NodeInstallCallbacks
             callbacks = NodeInstallCallbacks(
@@ -1262,23 +1263,23 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Node remove failed for '{node_name}': {e}", exc_info=True)
-            print(f"✗ Failed to remove node '{node_name}'", file=sys.stderr)
+            print_error(f"Failed to remove node '{node_name}'")
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
 
         # Render result based on node type and action
         if result.filesystem_action == "none":
             # Untrack mode - no filesystem changes
-            print(f"✓ Node '{result.name}' removed from tracking")
+            print_success(f"Node '{result.name}' removed from tracking")
             print("   (filesystem unchanged)")
         elif result.source == "development":
             if result.filesystem_action == "disabled":
-                print(f"ℹ️  Development node '{result.name}' removed from tracking")
+                print_info(f"️  Development node '{result.name}' removed from tracking")
                 print(f"   Files preserved at: custom_nodes/{result.name}.disabled/")
             else:
-                print(f"✓ Development node '{result.name}' removed from tracking")
+                print_success(f"Development node '{result.name}' removed from tracking")
         else:
-            print(f"✓ Node '{result.name}' removed from environment")
+            print_success(f"Node '{result.name}' removed from environment")
             if result.filesystem_action == "deleted":
                 print("   (cached globally, can reinstall)")
 
@@ -1296,11 +1297,11 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Failed to get unused nodes: {e}", exc_info=True)
-            print(f"✗ Failed to get unused nodes: {e}", file=sys.stderr)
+            print_error(f"Failed to get unused nodes: {e}")
             sys.exit(1)
 
         if not unused:
-            print("✓ No unused nodes found")
+            print_success("No unused nodes found")
             return
 
         # Display table
@@ -1330,7 +1331,7 @@ class EnvironmentCommands:
             if success:
                 print("✓")
             else:
-                print(f"✗ ({error})")
+                print_error(f"({error})")
 
         from comfygit_core.models.workflow import NodeInstallCallbacks
         callbacks = NodeInstallCallbacks(
@@ -1348,7 +1349,7 @@ class EnvironmentCommands:
 
         print(f"\n✓ Removed {success_count} node(s)")
         if failed:
-            print(f"✗ Failed to remove {len(failed)} node(s):")
+            print_error(f"Failed to remove {len(failed)} node(s):")
             for node_id, error in failed:
                 print(f"  • {node_id}: {error}")
             sys.exit(1)
@@ -1401,7 +1402,7 @@ class EnvironmentCommands:
             )
 
             if result.changed:
-                print(f"✓ {result.message}")
+                print_success(f"{result.message}")
 
                 if result.source == 'development':
                     if result.requirements_added:
@@ -1415,12 +1416,12 @@ class EnvironmentCommands:
 
                 print("\nRun 'cg status' to review changes")
             else:
-                print(f"ℹ️  {result.message}")
+                print_info(f"️  {result.message}")
 
         except Exception as e:
             if logger:
                 logger.error(f"Node update failed for '{args.node_name}': {e}", exc_info=True)
-            print(f"✗ Failed to update node '{args.node_name}'", file=sys.stderr)
+            print_error(f"Failed to update node '{args.node_name}'")
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
 
@@ -1440,11 +1441,11 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Constraint add failed: {e}", exc_info=True)
-            print("✗ Failed to add constraints", file=sys.stderr)
+            print_error("Failed to add constraints")
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
 
-        print(f"✓ Added {len(args.packages)} constraint(s) to pyproject.toml")
+        print_success(f"Added {len(args.packages)} constraint(s) to pyproject.toml")
         print(f"\nRun 'cg -e {env.name} constraint list' to view all constraints")
 
     @with_env_logging("constraint list")
@@ -1481,12 +1482,12 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Constraint remove failed: {e}", exc_info=True)
-            print("✗ Failed to remove constraints", file=sys.stderr)
+            print_error("Failed to remove constraints")
             print(f"   {e}", file=sys.stderr)
             sys.exit(1)
 
         if removed_count > 0:
-            print(f"✓ Removed {removed_count} constraint(s) from pyproject.toml")
+            print_success(f"Removed {removed_count} constraint(s) from pyproject.toml")
         else:
             print("No constraints were removed")
 
@@ -1501,14 +1502,14 @@ class EnvironmentCommands:
 
         # Validate arguments: must provide either packages or requirements file
         if not args.packages and not args.requirements:
-            print("✗ Error: Must specify packages or use -r/--requirements", file=sys.stderr)
+            print_error("Error: Must specify packages or use -r/--requirements")
             print("Examples:", file=sys.stderr)
             print("  cg py add requests pillow", file=sys.stderr)
             print("  cg py add -r requirements.txt", file=sys.stderr)
             sys.exit(1)
 
         if args.packages and args.requirements:
-            print("✗ Error: Cannot specify both packages and -r/--requirements", file=sys.stderr)
+            print_error("Error: Cannot specify both packages and -r/--requirements")
             sys.exit(1)
 
         # Resolve requirements file path to absolute path (UV runs in .cec directory)
@@ -1516,7 +1517,7 @@ class EnvironmentCommands:
         if args.requirements:
             requirements_file = args.requirements.resolve()
             if not requirements_file.exists():
-                print(f"✗ Error: Requirements file not found: {args.requirements}", file=sys.stderr)
+                print_error(f"Error: Requirements file not found: {args.requirements}")
                 sys.exit(1)
 
         # Display what we're doing
@@ -1541,7 +1542,7 @@ class EnvironmentCommands:
                 logger.error(f"Failed to add dependencies: {e}", exc_info=True)
                 if e.stderr:
                     logger.error(f"UV stderr:\n{e.stderr}")
-            print(f"✗ Failed to add packages", file=sys.stderr)
+            print_error(f"Failed to add packages")
             if e.stderr:
                 print(f"\n{e.stderr}", file=sys.stderr)
             else:
@@ -1567,7 +1568,7 @@ class EnvironmentCommands:
             try:
                 result = env.pyproject.dependencies.remove_from_group(group_name, args.packages)
             except ValueError as e:
-                print(f"✗ {e}", file=sys.stderr)
+                print_error(f"{e}")
                 sys.exit(1)
 
             # Show results
@@ -1600,7 +1601,7 @@ class EnvironmentCommands:
                 logger.error(f"Failed to remove dependencies: {e}", exc_info=True)
                 if e.stderr:
                     logger.error(f"UV stderr:\n{e.stderr}")
-            print(f"✗ Failed to remove packages", file=sys.stderr)
+            print_error(f"Failed to remove packages")
             if e.stderr:
                 print(f"\n{e.stderr}", file=sys.stderr)
             else:
@@ -1639,7 +1640,7 @@ class EnvironmentCommands:
         try:
             env.pyproject.dependencies.remove_group(group_name)
         except ValueError as e:
-            print(f"✗ {e}", file=sys.stderr)
+            print_error(f"{e}")
             sys.exit(1)
 
         print(f"\n✓ Removed dependency group '{group_name}'")
@@ -1720,7 +1721,7 @@ class EnvironmentCommands:
         status = env.status()
 
         if status.is_synced:
-            print("✓ No changes to apply")
+            print_success("No changes to apply")
             return
 
         # Get preview for display and later use
@@ -1743,7 +1744,7 @@ class EnvironmentCommands:
             )
 
             if not has_changes:
-                print("✓ No changes to apply (environment is synced)")
+                print_success("No changes to apply (environment is synced)")
                 return
 
             print("This will apply the following changes:")
@@ -1827,7 +1828,7 @@ class EnvironmentCommands:
             if success:
                 print("✓")
             else:
-                print(f"✗ ({error})")
+                print_error(f"({error})")
 
         node_callbacks = NodeInstallCallbacks(
             on_node_start=on_node_start,
@@ -1885,10 +1886,10 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Sync failed for environment '{env.name}': {e}", exc_info=True)
-            print(f"✗ Failed to apply changes: {e}", file=sys.stderr)
+            print_error(f"Failed to apply changes: {e}")
             sys.exit(1)
 
-        print("✓ Changes applied successfully!")
+        print_success("Changes applied successfully!")
         print(f"\nEnvironment '{env.name}' is ready to use")
 
     @with_env_logging("checkout")
@@ -1904,11 +1905,11 @@ class EnvironmentCommands:
                 start_point = args.ref if args.ref is not None else "HEAD"
                 print(f"Creating and switching to branch '{args.branch}'...")
                 env.create_and_switch_branch(args.branch, start_point=start_point)
-                print(f"✓ Switched to new branch '{args.branch}'")
+                print_success(f"Switched to new branch '{args.branch}'")
             else:
                 # Just checkout ref - ref is required when not using -b
                 if args.ref is None:
-                    print("✗ Error: ref argument is required when not using -b", file=sys.stderr)
+                    print_error("Error: ref argument is required when not using -b")
                     sys.exit(1)
 
                 print(f"Checking out '{args.ref}'...")
@@ -1921,15 +1922,15 @@ class EnvironmentCommands:
                 # Check if detached HEAD
                 current_branch = env.get_current_branch()
                 if current_branch is None:
-                    print(f"✓ HEAD is now at {args.ref} (detached)")
+                    print_success(f"HEAD is now at {args.ref} (detached)")
                     print("  You are in 'detached HEAD' state. To keep changes:")
                     print(f"    cg checkout -b <new-branch-name>")
                 else:
-                    print(f"✓ Switched to branch '{current_branch}'")
+                    print_success(f"Switched to branch '{current_branch}'")
         except Exception as e:
             if logger:
                 logger.error(f"Checkout failed: {e}", exc_info=True)
-            print(f"✗ Checkout failed: {e}", file=sys.stderr)
+            print_error(f"Checkout failed: {e}")
             sys.exit(1)
 
     @with_env_logging("branch")
@@ -1956,7 +1957,7 @@ class EnvironmentCommands:
                 # Show help if in detached HEAD
                 if is_detached:
                     print()
-                    print("⚠️  You are in detached HEAD state")
+                    print_warning("You are in detached HEAD state")
                     print("   To save your work, create a branch:")
                     print("   cg checkout -b <branch-name>")
             elif args.delete or args.force_delete:
@@ -1964,16 +1965,16 @@ class EnvironmentCommands:
                 force = args.force_delete
                 print(f"Deleting branch '{args.name}'...")
                 env.delete_branch(args.name, force=force)
-                print(f"✓ Deleted branch '{args.name}'")
+                print_success(f"Deleted branch '{args.name}'")
             else:
                 # Create branch (don't switch)
                 print(f"Creating branch '{args.name}'...")
                 env.create_branch(args.name)
-                print(f"✓ Created branch '{args.name}'")
+                print_success(f"Created branch '{args.name}'")
         except Exception as e:
             if logger:
                 logger.error(f"Branch operation failed: {e}", exc_info=True)
-            print(f"✗ Branch operation failed: {e}", file=sys.stderr)
+            print_error(f"Branch operation failed: {e}")
             sys.exit(1)
 
     @with_env_logging("switch")
@@ -1984,11 +1985,11 @@ class EnvironmentCommands:
         try:
             print(f"Switching to branch '{args.branch}'...")
             env.switch_branch(args.branch, create=args.create)
-            print(f"✓ Switched to branch '{args.branch}'")
+            print_success(f"Switched to branch '{args.branch}'")
         except Exception as e:
             if logger:
                 logger.error(f"Switch failed: {e}", exc_info=True)
-            print(f"✗ Switch failed: {e}", file=sys.stderr)
+            print_error(f"Switch failed: {e}")
             sys.exit(1)
 
     @with_env_logging("reset")
@@ -2014,11 +2015,11 @@ class EnvironmentCommands:
 
             print(f"Resetting to '{args.ref}' (mode: {mode})...")
             env.reset(args.ref, mode=mode, strategy=strategy, force=args.yes)
-            print(f"✓ Reset to '{args.ref}'")
+            print_success(f"Reset to '{args.ref}'")
         except Exception as e:
             if logger:
                 logger.error(f"Reset failed: {e}", exc_info=True)
-            print(f"✗ Reset failed: {e}", file=sys.stderr)
+            print_error(f"Reset failed: {e}")
             sys.exit(1)
 
     @with_env_logging("merge")
@@ -2029,7 +2030,7 @@ class EnvironmentCommands:
         try:
             current = env.get_current_branch()
             if current is None:
-                print("✗ Cannot merge while in detached HEAD state")
+                print_error("Cannot merge while in detached HEAD state")
                 sys.exit(1)
 
             # Phase 1: Preview
@@ -2099,7 +2100,7 @@ class EnvironmentCommands:
                 # Mixed resolutions - use atomic executor for per-file resolution
                 result = env.execute_atomic_merge(args.branch, resolutions)
                 if not result.success:
-                    print(f"✗ Merge failed: {result.error}", file=sys.stderr)
+                    print_error(f"Merge failed: {result.error}")
                     sys.exit(1)
             else:
                 # Global strategy or no resolutions - use standard merge
@@ -2109,11 +2110,11 @@ class EnvironmentCommands:
                     strategy_option=strategy_option,
                 )
 
-            print(f"✓ Merged '{args.branch}' into '{current}'")
+            print_success(f"Merged '{args.branch}' into '{current}'")
         except Exception as e:
             if logger:
                 logger.error(f"Merge failed: {e}", exc_info=True)
-            print(f"✗ Merge failed: {e}", file=sys.stderr)
+            print_error(f"Merge failed: {e}")
             sys.exit(1)
 
     @with_env_logging("revert")
@@ -2124,11 +2125,11 @@ class EnvironmentCommands:
         try:
             print(f"Reverting commit '{args.commit}'...")
             env.revert_commit(args.commit)
-            print(f"✓ Reverted commit '{args.commit}'")
+            print_success(f"Reverted commit '{args.commit}'")
         except Exception as e:
             if logger:
                 logger.error(f"Revert failed: {e}", exc_info=True)
-            print(f"✗ Revert failed: {e}", file=sys.stderr)
+            print_error(f"Revert failed: {e}")
             sys.exit(1)
 
     @with_env_logging("commit")
@@ -2139,7 +2140,7 @@ class EnvironmentCommands:
         # Warn if in detached HEAD before allowing commit
         current_branch = env.get_current_branch()
         if current_branch is None and not args.yes:
-            print("⚠️  Warning: You are in detached HEAD state!")
+            print_warning("Warning: You are in detached HEAD state!")
             print("   Commits made here will not be saved to any branch.")
             print()
             print("Options:")
@@ -2163,13 +2164,13 @@ class EnvironmentCommands:
 
             # Check if there are ANY committable changes (workflows OR git)
             if not env.has_committable_changes():
-                print("✓ No changes to commit")
+                print_success("No changes to commit")
                 return
 
         except Exception as e:
             if logger:
                 logger.error(f"Workflow analysis failed: {e}", exc_info=True)
-            print(f"✗ Failed to analyze workflows: {e}", file=sys.stderr)
+            print_error(f"Failed to analyze workflows: {e}")
             sys.exit(1)
 
         # Check commit safety
@@ -2193,7 +2194,7 @@ class EnvironmentCommands:
         except Exception as e:
             if logger:
                 logger.error(f"Commit failed for environment '{env.name}': {e}", exc_info=True)
-            print(f"✗ Commit failed: {e}", file=sys.stderr)
+            print_error(f"Commit failed: {e}")
             sys.exit(1)
 
         # Display results on success
@@ -2221,7 +2222,7 @@ class EnvironmentCommands:
 
         # Check remote exists
         if not env.git_manager.has_remote(args.remote):
-            print(f"✗ Remote '{args.remote}' not configured")
+            print_error(f"Remote '{args.remote}' not configured")
             print()
             # Check if other remotes exist
             remotes = env.git_manager.list_remotes()
@@ -2259,12 +2260,12 @@ class EnvironmentCommands:
             except Exception as e:
                 if logger:
                     logger.error(f"Preview failed: {e}", exc_info=True)
-                print(f"✗ Preview failed: {e}", file=sys.stderr)
+                print_error(f"Preview failed: {e}")
                 sys.exit(1)
 
         # Check for uncommitted changes first
         if env.has_committable_changes() and not getattr(args, 'force', False):
-            print("⚠️  You have uncommitted changes")
+            print_warning("You have uncommitted changes")
             print()
             print("💡 Options:")
             print("  • Commit: cg commit -m 'message'")
@@ -2336,7 +2337,7 @@ class EnvironmentCommands:
                 if success:
                     print("✓")
                 else:
-                    print(f"✗ ({error})")
+                    print_error(f"({error})")
 
             node_callbacks = NodeInstallCallbacks(
                 on_node_start=on_node_start,
@@ -2418,7 +2419,7 @@ class EnvironmentCommands:
                 print("   5. git commit")
                 print("   6. cg repair  # Sync environment")
             else:
-                print(f"✗ Pull failed: {e}", file=sys.stderr)
+                print_error(f"Pull failed: {e}")
             sys.exit(1)
         except OSError as e:
             # Network, auth, or other git errors
@@ -2438,12 +2439,12 @@ class EnvironmentCommands:
                 print("   5. git commit")
                 print("   6. cg repair  # Sync environment")
             else:
-                print(f"✗ Pull failed: {e}", file=sys.stderr)
+                print_error(f"Pull failed: {e}")
             sys.exit(1)
         except Exception as e:
             if logger:
                 logger.error(f"Pull failed: {e}", exc_info=True)
-            print(f"✗ Pull failed: {e}", file=sys.stderr)
+            print_error(f"Pull failed: {e}")
             sys.exit(1)
 
     @with_env_logging("push")
@@ -2453,7 +2454,7 @@ class EnvironmentCommands:
 
         # Check for uncommitted changes
         if env.has_committable_changes():
-            print("⚠️  You have uncommitted changes")
+            print_warning("You have uncommitted changes")
             print()
             print("💡 Commit first:")
             print("   cg commit -m 'your message'")
@@ -2461,7 +2462,7 @@ class EnvironmentCommands:
 
         # Check remote exists
         if not env.git_manager.has_remote(args.remote):
-            print(f"✗ Remote '{args.remote}' not configured")
+            print_error(f"Remote '{args.remote}' not configured")
             print()
             # Check if other remotes exist
             remotes = env.git_manager.list_remotes()
@@ -2501,18 +2502,18 @@ class EnvironmentCommands:
             # No remote or workflow issues
             if logger:
                 logger.error(f"Push failed: {e}", exc_info=True)
-            print(f"✗ Push failed: {e}", file=sys.stderr)
+            print_error(f"Push failed: {e}")
             sys.exit(1)
         except OSError as e:
             # Network, auth, or git errors
             if logger:
                 logger.error(f"Push failed: {e}", exc_info=True)
-            print(f"✗ Push failed: {e}", file=sys.stderr)
+            print_error(f"Push failed: {e}")
             sys.exit(1)
         except Exception as e:
             if logger:
                 logger.error(f"Push failed: {e}", exc_info=True)
-            print(f"✗ Push failed: {e}", file=sys.stderr)
+            print_error(f"Push failed: {e}")
             sys.exit(1)
 
     @with_env_logging("remote")
@@ -2526,20 +2527,20 @@ class EnvironmentCommands:
             if subcommand == "add":
                 # Add remote
                 if not args.name or not args.url:
-                    print("✗ Usage: cg remote add <name> <url>")
+                    print_error("Usage: cg remote add <name> <url>")
                     sys.exit(1)
 
                 env.git_manager.add_remote(args.name, args.url)
-                print(f"✓ Added remote '{args.name}': {args.url}")
+                print_success(f"Added remote '{args.name}': {args.url}")
 
             elif subcommand == "remove":
                 # Remove remote
                 if not args.name:
-                    print("✗ Usage: cg remote remove <name>")
+                    print_error("Usage: cg remote remove <name>")
                     sys.exit(1)
 
                 env.git_manager.remove_remote(args.name)
-                print(f"✓ Removed remote '{args.name}'")
+                print_success(f"Removed remote '{args.name}'")
 
             elif subcommand == "list":
                 # List remotes
@@ -2556,17 +2557,17 @@ class EnvironmentCommands:
                         print(f"  {name}\t{url} ({remote_type})")
 
             else:
-                print(f"✗ Unknown remote command: {subcommand}")
+                print_error(f"Unknown remote command: {subcommand}")
                 print("   Usage: cg remote [add|remove|list]")
                 sys.exit(1)
 
         except ValueError as e:
-            print(f"✗ {e}", file=sys.stderr)
+            print_error(f"{e}")
             sys.exit(1)
         except OSError as e:
             if logger:
                 logger.error(f"Remote operation failed: {e}", exc_info=True)
-            print(f"✗ {e}", file=sys.stderr)
+            print_error(f"{e}")
             sys.exit(1)
 
     # === Workflow management ===
@@ -2620,13 +2621,13 @@ class EnvironmentCommands:
             # Interactive: select workflow
             workflow_name = self._select_workflow_interactive(env)
             if not workflow_name:
-                print("✗ No workflow selected")
+                print_error("No workflow selected")
                 return
 
         # Get workflow models
         models = env.pyproject.workflows.get_workflow_models(workflow_name)
         if not models:
-            print(f"✗ No models found in workflow '{workflow_name}'")
+            print_error(f"No models found in workflow '{workflow_name}'")
             return
 
         # Determine model (direct or interactive)
@@ -2642,9 +2643,9 @@ class EnvironmentCommands:
             )
 
             if success:
-                print(f"✓ Updated '{model_identifier}' importance to: {new_importance}")
+                print_success(f"Updated '{model_identifier}' importance to: {new_importance}")
             else:
-                print(f"✗ Model '{model_identifier}' not found in workflow '{workflow_name}'")
+                print_error(f"Model '{model_identifier}' not found in workflow '{workflow_name}'")
                 sys.exit(1)
         else:
             # Interactive: loop over all models
@@ -2712,7 +2713,7 @@ class EnvironmentCommands:
         all_workflows = status.new + status.modified + status.synced
 
         if not all_workflows:
-            print("✗ No workflows found")
+            print_error("No workflows found")
             return None
 
         print("\n📋 Available workflows:")
@@ -2742,7 +2743,7 @@ class EnvironmentCommands:
             if choice in all_workflows:
                 return choice
 
-        print(f"✗ Invalid selection: {choice}")
+        print_error(f"Invalid selection: {choice}")
         return None
 
     @with_env_logging("workflow resolve", get_env_name=lambda self, args: self._get_env(args).name)
@@ -2775,19 +2776,19 @@ class EnvironmentCommands:
             formatted = NodeErrorFormatter.format_registry_error(e)
             if logger:
                 logger.error(f"Registry data unavailable for workflow resolve: {e}", exc_info=True)
-            print(f"✗ Cannot resolve workflow - registry data unavailable", file=sys.stderr)
+            print_error(f"Cannot resolve workflow - registry data unavailable")
             print(formatted, file=sys.stderr)
             sys.exit(1)
         except FileNotFoundError as e:
             if logger:
                 logger.error(f"Resolution failed for '{args.name}': {e}", exc_info=True)
             workflow_path = env.workflow_manager.comfyui_workflows / f"{args.name}.json"
-            print(f"✗ Workflow '{args.name}' not found at {workflow_path}")
+            print_error(f"Workflow '{args.name}' not found at {workflow_path}")
             sys.exit(1)
         except Exception as e:
             if logger:
                 logger.error(f"Resolution failed for '{args.name}': {e}", exc_info=True)
-            print(f"✗ Failed to resolve dependencies: {e}", file=sys.stderr)
+            print_error(f"Failed to resolve dependencies: {e}")
             sys.exit(1)
 
         # Phase 2: Check for uninstalled nodes and prompt for installation
@@ -2835,11 +2836,11 @@ class EnvironmentCommands:
                             try:
                                 # Try to extract meaningful error
                                 user_msg = error.split(":", 1)[1].strip() if ":" in error else error
-                                print(f"✗ ({user_msg})")
+                                print_error(f"({user_msg})")
                             except:
-                                print(f"✗ ({error})")
+                                print_error(f"({error})")
                         else:
-                            print(f"✗ ({error})")
+                            print_error(f"({error})")
 
                 callbacks = NodeInstallCallbacks(
                     on_node_start=on_node_start,
@@ -2967,7 +2968,7 @@ class EnvironmentCommands:
                     expected = m.expected_categories[0] if m.expected_categories else "unknown"
                     print(f"    {m.actual_category}/{m.name} → {expected}/")
             else:
-                print("✓ No changes needed - all dependencies already resolved")
+                print_success("No changes needed - all dependencies already resolved")
 
     # ================================================================================
     # Manager Commands - Per-environment comfygit-manager management
@@ -3007,10 +3008,10 @@ class EnvironmentCommands:
         # Ensure backend is configured (same as sync/run commands)
         had_backend = env.pytorch_manager.has_backend()
         if not had_backend:
-            print("⚠️  No PyTorch backend configured. Auto-detecting...")
+            print_warning("No PyTorch backend configured. Auto-detecting...")
             python_version = self._get_python_version(env)
             backend = env.pytorch_manager.ensure_backend(python_version)
-            print(f"✓ Backend detected and saved: {backend}")
+            print_success(f"Backend detected and saved: {backend}")
             print("   To change: cg env-config torch-backend set <backend>\n")
 
         status = env.get_manager_status()

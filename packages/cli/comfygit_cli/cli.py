@@ -21,6 +21,7 @@ from .completion_commands import CompletionCommands
 from .env_commands import EnvironmentCommands
 from .global_commands import GlobalCommands
 from .logging.logging_config import setup_logging
+from .utils.cli_output import print_success, print_error, print_warning, print_info
 
 
 def _make_help_func(parser: argparse.ArgumentParser) -> Callable[[argparse.Namespace], None]:
@@ -56,7 +57,7 @@ def _check_for_old_docker_installation() -> None:
 
     # Show warning (compact, informative)
     print("\n" + "="*70)
-    print("ℹ️  OLD DOCKER-BASED COMFYDOCK DETECTED")
+    print_info("️  OLD DOCKER-BASED COMFYDOCK DETECTED")
     print("="*70)
     print("\nYou have an old Docker-based ComfyDock (v0.3.x) at ~/.comfydock")
     print("This is the NEW ComfyGit v1.0+ (UV-based).")
@@ -115,7 +116,7 @@ def main() -> None:
         print("\n✗ Interrupted")
         sys.exit(130)
     except Exception as e:
-        print(f"✗ Error: {e}", file=sys.stderr)
+        print_error(f"Error: {e}")
         sys.exit(1)
 
 

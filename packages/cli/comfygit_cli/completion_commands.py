@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from .utils.cli_output import print_success, print_error, print_warning, print_info
+
 
 class CompletionCommands:
     """Handle shell completion installation and management."""
@@ -65,7 +67,7 @@ class CompletionCommands:
     @classmethod
     def _print_manual_install_instructions(cls, shell: str, config_file: Path, reason: str):
         """Print helpful instructions when config file cannot be modified."""
-        print(f"✗ Cannot modify {config_file}")
+        print_error(f"Cannot modify {config_file}")
         print(f"\nReason: {reason}")
         print("\nThis is common with Home Manager, dotfile managers, and similar tools.")
         print("\nTo enable completions, add this to your shell configuration:")
@@ -122,10 +124,10 @@ class CompletionCommands:
             )
             return True
         except subprocess.CalledProcessError as e:
-            print(f"✗ Failed to install argcomplete: {e.stderr}")
+            print_error(f"Failed to install argcomplete: {e.stderr}")
             return False
         except FileNotFoundError:
-            print("✗ 'uv' command not found. Please install uv first.")
+            print_error("'uv' command not found. Please install uv first.")
             return False
 
     @classmethod
@@ -210,7 +212,7 @@ class CompletionCommands:
         shell, config_file = self._detect_shell()
 
         if not shell:
-            print("✗ Could not detect shell (bash or zsh)")
+            print_error("Could not detect shell (bash or zsh)")
             print("  Your SHELL environment variable is:", os.environ.get('SHELL', 'not set'))
             print("\nManual setup:")
             print("  Add these lines to your shell config file:")
@@ -220,7 +222,7 @@ class CompletionCommands:
 
         # Check if already installed
         if self._is_completion_installed(config_file):
-            print(f"✓ Tab completion is already installed in {config_file}")
+            print_success(f"Tab completion is already installed in {config_file}")
             print(f"\nTo activate in current shell, run:")
             print(f"  source {config_file}")
             return
@@ -242,7 +244,7 @@ class CompletionCommands:
                 print("\nThen run:")
                 print("  cg completion install")
                 sys.exit(1)
-            print("✓ argcomplete installed")
+            print_success("argcomplete installed")
 
         # Install completion
         try:
@@ -257,7 +259,7 @@ class CompletionCommands:
             print(f"  cg use <TAB>")
             print(f"  cg workflow resolve <TAB>")
         except Exception as e:
-            print(f"✗ Failed to install completion: {e}")
+            print_error(f"Failed to install completion: {e}")
             sys.exit(1)
 
     def uninstall(self, args):
@@ -265,20 +267,20 @@ class CompletionCommands:
         shell, config_file = self._detect_shell()
 
         if not shell:
-            print("✗ Could not detect shell (bash or zsh)")
+            print_error("Could not detect shell (bash or zsh)")
             sys.exit(1)
 
         if not self._is_completion_installed(config_file):
-            print(f"✓ Tab completion is not installed")
+            print_success(f"Tab completion is not installed")
             return
 
         try:
             self._remove_completion_from_config(config_file)
-            print(f"✓ Tab completion uninstalled")
+            print_success(f"Tab completion uninstalled")
             print(f"\nRemoved from: {config_file}")
             print(f"\nRestart your shell for changes to take effect.")
         except Exception as e:
-            print(f"✗ Failed to uninstall completion: {e}")
+            print_error(f"Failed to uninstall completion: {e}")
             sys.exit(1)
 
     def status(self, args):
