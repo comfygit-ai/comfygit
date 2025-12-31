@@ -303,7 +303,7 @@ class TestGitSyncStatus:
         # Create non-bare remote (so we can add commits to it)
         remote_repo = tmp_path / "remote-repo"
         remote_repo.mkdir()
-        subprocess.run(["git", "init"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=remote_repo, check=True, capture_output=True)
 

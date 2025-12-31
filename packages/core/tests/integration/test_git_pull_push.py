@@ -247,12 +247,12 @@ class TestGitPush:
         # Create bare remote repo
         bare_repo = tmp_path / "bare-repo"
         bare_repo.mkdir()
-        subprocess.run(["git", "init", "--bare"], cwd=bare_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "--bare", "-b", "main"], cwd=bare_repo, check=True, capture_output=True)
 
         # Create regular remote repo to populate bare repo
         remote_repo = tmp_path / "remote-repo"
         remote_repo.mkdir()
-        subprocess.run(["git", "init"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=remote_repo, check=True, capture_output=True)
 
@@ -302,12 +302,12 @@ nodes = {}
         # Create bare remote
         bare_repo = tmp_path / "bare-repo"
         bare_repo.mkdir()
-        subprocess.run(["git", "init", "--bare"], cwd=bare_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "--bare", "-b", "main"], cwd=bare_repo, check=True, capture_output=True)
 
         # Create and push initial content
         remote_repo = tmp_path / "remote-repo"
         remote_repo.mkdir()
-        subprocess.run(["git", "init"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=remote_repo, check=True, capture_output=True)
 
@@ -464,7 +464,7 @@ nodes = {}
         # Create first repo (will be the remote) with a different initial commit
         remote_repo = tmp_path / "remote-repo"
         remote_repo.mkdir()
-        subprocess.run(["git", "init"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=remote_repo, check=True, capture_output=True)
 
@@ -489,7 +489,7 @@ nodes = {}
         # Create another repo for initial import
         first_repo = tmp_path / "first-repo"
         first_repo.mkdir()
-        subprocess.run(["git", "init"], cwd=first_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=first_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=first_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=first_repo, check=True, capture_output=True)
 
@@ -544,12 +544,12 @@ class TestGitPushForce:
         # Create bare remote
         bare_repo = tmp_path / "bare-repo"
         bare_repo.mkdir()
-        subprocess.run(["git", "init", "--bare"], cwd=bare_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "--bare", "-b", "main"], cwd=bare_repo, check=True, capture_output=True)
 
         # Create and push initial content
         remote_repo = tmp_path / "remote-repo"
         remote_repo.mkdir()
-        subprocess.run(["git", "init"], cwd=remote_repo, check=True, capture_output=True)
+        subprocess.run(["git", "init", "-b", "main"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=remote_repo, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=remote_repo, check=True, capture_output=True)
 
