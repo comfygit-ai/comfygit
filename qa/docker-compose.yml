@@ -91,12 +91,39 @@ services:
 
     working_dir: /shared/workspace-${AGENT_ID:-dev}
 
+    # ==========================================================================
+    # Resource Limits
+    # ==========================================================================
+    # Each QA agent gets enough resources to run ComfyUI workflows
+    # With 3-5 agents at 16GB each, stays within host capacity
     deploy:
       resources:
         limits:
-          memory: 4G
+          cpus: '4'
+          memory: 16G
         reservations:
-          memory: 1G
+          cpus: '1'
+          memory: 2G
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, compute, utility]
+
+    # Shared memory for ML frameworks (PyTorch, etc.)
+    shm_size: 4gb
+
+    # Security options for profiling/debugging if needed
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+
+    # Logging limits to prevent disk fill
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
 
 volumes:
   qa-shared:
