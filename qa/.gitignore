@@ -15,6 +15,3 @@ _claude-placeholder/
 # Python cache
 __pycache__/
 *.pyc
-
-# Entrypoint script (generated, not needed in image)
-entrypoint.sh

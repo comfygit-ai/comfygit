@@ -20,6 +20,8 @@ docker compose exec qa bash
 docker compose exec qa claude
 ```
 
+**Note**: The container runs as the `qa` user (non-root) for security.
+
 ## Setup Modes
 
 ### Direct Host (Default)
@@ -32,7 +34,7 @@ docker compose up -d
 ```
 
 Default configuration:
-- Claude auth: `~/.claude` mounted
+- Claude auth: `~/.claude/.credentials.json` mounted (credentials only)
 - ComfyGit repo: parent directory (`..`)
 - Reports: `./reports`
 
@@ -55,7 +57,7 @@ docker inspect acfs-dev | grep '"Source".*dev"'
 
 Example `.env` for ACFS:
 ```bash
-CLAUDE_AUTH_PATH=/var/lib/docker/volumes/acfs-setup_claude-auth/_data
+CLAUDE_CREDS_PATH=/var/lib/docker/volumes/acfs-setup_claude-auth/_data/.credentials.json
 COMFYGIT_PATH=/home/youruser/dev/projects/comfygit-ai/comfygit
 ```
 
@@ -65,7 +67,7 @@ The container installs comfygit from PyPI by default. To test local changes:
 
 ```bash
 docker compose exec qa bash
-uv pip install --system /comfygit/packages/core /comfygit/packages/cli
+sudo uv pip install --system /comfygit/packages/core /comfygit/packages/cli
 cg --version  # Verify local version
 ```
 
@@ -144,7 +146,7 @@ cleanup:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CLAUDE_AUTH_PATH` | `~/.claude` | Path to Claude credentials |
+| `CLAUDE_CREDS_PATH` | `~/.claude/.credentials.json` | Path to credentials file |
 | `COMFYGIT_PATH` | `..` | Path to comfygit repo |
 | `QA_REPORTS_PATH` | `./reports` | Report output directory |
 | `QA_SCENARIOS_PATH` | `./scenarios` | Scenarios directory |
@@ -155,7 +157,7 @@ cleanup:
 ### "No Claude auth configured"
 
 Either:
-1. Set `CLAUDE_AUTH_PATH` to directory containing `.credentials.json`
+1. Set `CLAUDE_CREDS_PATH` to path of `.credentials.json` file
 2. Set `ANTHROPIC_API_KEY` environment variable
 3. For ACFS: Ensure `claude-auth` volume exists and is seeded
 
