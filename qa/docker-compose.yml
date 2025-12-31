@@ -8,15 +8,22 @@
 #   docker compose up -d
 #   docker compose exec qa bash
 #   docker compose exec qa claude
+#   # ComfyUI accessible at http://localhost:8188
 #
 # === Multi-Agent Parallel Execution ===
 #   # Create shared volume (once)
 #   docker volume create qa-shared
 #
-#   # Start multiple agents with unique IDs
-#   AGENT_ID=1 docker compose -p qa-1 up -d
-#   AGENT_ID=2 docker compose -p qa-2 up -d
-#   AGENT_ID=3 docker compose -p qa-3 up -d
+#   # Start multiple agents with unique IDs and ports
+#   # Port scheme: 8190 + AGENT_ID (agent 1 → 8191, agent 2 → 8192, etc.)
+#   AGENT_ID=1 COMFYUI_PORT=8191 docker compose -p qa-1 up -d
+#   AGENT_ID=2 COMFYUI_PORT=8192 docker compose -p qa-2 up -d
+#   AGENT_ID=3 COMFYUI_PORT=8193 docker compose -p qa-3 up -d
+#
+#   # Access ComfyUI for each agent
+#   # Agent 1: http://localhost:8191
+#   # Agent 2: http://localhost:8192
+#   # Agent 3: http://localhost:8193
 #
 #   # Run scenarios on specific agents
 #   docker compose -p qa-1 exec qa python /qa/scripts/run_scenario.py /qa/scenarios/01_basic_workspace_setup.yaml
@@ -44,6 +51,14 @@ services:
 
     # Keep container running (entrypoint handles setup)
     command: ["tail", "-f", "/dev/null"]
+
+    # ==========================================================================
+    # Port Mapping
+    # ==========================================================================
+    # ComfyUI default port (8188 inside container)
+    # For multi-agent: set COMFYUI_PORT=8191, 8192, etc. to avoid conflicts
+    ports:
+      - "${COMFYUI_PORT:-8188}:8188"
 
     volumes:
       # Shared volume for UV cache and per-agent workspaces
