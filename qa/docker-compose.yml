@@ -1,5 +1,7 @@
 # Docker Compose for ComfyGit QA Testing
 #
+# Runs as non-root 'qa' user for security.
+#
 # === Quick Start (Direct Host) ===
 #   cd qa
 #   docker compose up -d
@@ -15,7 +17,7 @@
 #   docker compose exec qa python /qa/scripts/run_scenario.py --native /qa/scenarios/01_basic_workspace_setup.yaml
 #
 # === Using Local ComfyGit Code ===
-#   docker compose exec qa uv pip install --system /comfygit/packages/core /comfygit/packages/cli
+#   docker compose exec qa sudo uv pip install --system /comfygit/packages/core /comfygit/packages/cli
 
 services:
   qa:
@@ -25,25 +27,12 @@ services:
     image: comfygit-qa:local
     container_name: comfygit-qa-dev
 
-    entrypoint: ["/bin/bash", "-c"]
-    command:
-      - |
-        # Set up Claude auth
-        mkdir -p /root/.claude
-        if [ -f /claude-auth/.credentials.json ]; then
-          cp /claude-auth/.credentials.json /root/.claude/
-          chmod 600 /root/.claude/.credentials.json
-          echo "Claude auth: credentials copied"
-        elif [ -n "$$ANTHROPIC_API_KEY" ]; then
-          echo "Claude auth: using API key"
-        else
-          echo "Warning: No Claude auth - set CLAUDE_AUTH_PATH or ANTHROPIC_API_KEY"
-        fi
-        exec tail -f /dev/null
+    # Keep container running (entrypoint handles auth setup as qa user with sudo)
+    command: ["tail", "-f", "/dev/null"]
 
     volumes:
-      # Claude auth source (ro) - credentials copied on startup
-      - ${CLAUDE_AUTH_PATH:-./_claude-placeholder}:/claude-auth:ro
+      # Claude credentials only (not full .claude dir - QA has its own config)
+      - ${CLAUDE_CREDS_PATH:-./_claude-placeholder}:/mnt/claude-credentials.json:ro
 
       # ComfyGit repo for local development
       - ${COMFYGIT_PATH:-..}:/comfygit:ro
@@ -54,7 +43,12 @@ services:
       - ${QA_INSTRUCTIONS_PATH:-./agent_instructions}:/qa/agent_instructions:ro
 
     environment:
+      # Terminal colors (passthrough from host)
+      - TERM=xterm-256color
+      - COLORTERM=truecolor
+      # Claude API (alternative to OAuth)
       - ANTHROPIC_API_KEY
+      # ComfyGit
       - COMFYGIT_HOME=/workspace
       - QA_SCENARIOS=/qa/scenarios
       - QA_INSTRUCTIONS=/qa/agent_instructions
