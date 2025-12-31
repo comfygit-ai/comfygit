@@ -282,9 +282,62 @@ docker run --rm -v $(pwd)/reports:/reports comfygit-qa --native ...
 ls -la reports/
 ```
 
-## Next Steps (Phase 3)
+## Phase 3: Multi-Agent Parallel Execution
 
-- Parallel agent execution (5+ agents)
-- Report aggregation and trend analysis
-- Automatic regression test generation from findings
+Phase 3 adds infrastructure for running multiple QA agents in parallel.
+
+### Architecture
+
+```
+qa-shared volume
+├── uv_cache/              # Shared UV package cache (fast installs via hardlinks)
+├── workspace-1/           # Agent 1's isolated workspace
+├── workspace-2/           # Agent 2's isolated workspace
+├── workspace-N/           # Agent N's isolated workspace
+└── .installed-{N}         # Per-agent install markers
+```
+
+### Quick Start (Multi-Agent)
+
+```bash
+cd qa
+
+# Create shared volume (once)
+docker volume create qa-shared
+
+# Start multiple agents
+AGENT_ID=1 docker compose -p qa-1 up -d
+AGENT_ID=2 docker compose -p qa-2 up -d
+AGENT_ID=3 docker compose -p qa-3 up -d
+
+# Run different scenarios on each
+docker compose -p qa-1 exec qa python /qa/scripts/run_scenario.py /qa/scenarios/01_basic_workspace_setup.yaml
+docker compose -p qa-2 exec qa python /qa/scripts/run_scenario.py /qa/scenarios/02_workflow_sync.yaml
+docker compose -p qa-3 exec qa python /qa/scripts/run_scenario.py /qa/scenarios/03_model_resolution.yaml
+
+# Cleanup
+docker compose -p qa-1 down
+docker compose -p qa-2 down
+docker compose -p qa-3 down
+```
+
+### Benefits
+
+- **Isolation**: Each agent has its own workspace directory
+- **Fast installs**: Shared UV cache enables hardlinks (same filesystem)
+- **Local code**: Entrypoint auto-installs from `/comfygit` mount
+- **Traceability**: Git identity includes AGENT_ID
+
+### Local ComfyGit Development
+
+The entrypoint auto-installs from `/comfygit` mount if present. To reinstall after changes:
+
+```bash
+docker compose -p qa-1 exec qa /qa/install-local.sh
+```
+
+## Next Steps (Phase 4)
+
+- Python orchestrator for parallel scenario execution
+- Report aggregation across agents
 - CI/CD integration for weekly runs
