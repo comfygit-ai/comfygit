@@ -133,8 +133,8 @@ class EnvironmentCommands:
     def _show_legacy_manager_notice(self, env: Environment) -> None:
         """Show legacy manager notice if environment uses symlinked manager."""
         try:
-            status = env.get_manager_status()
-            if status.is_legacy:
+            # Use lightweight check that doesn't make API calls
+            if env.is_legacy_manager():
                 print("")
                 print("Legacy manager detected. Run 'cg manager update' to migrate.")
         except Exception:

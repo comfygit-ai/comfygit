@@ -9,23 +9,21 @@ from comfygit_core.utils.workflow_hash import normalize_workflow
 @pytest.fixture
 def workflow_manager(tmp_path):
     """Create a minimal WorkflowManager for testing normalization."""
-    with patch('comfygit_core.managers.workflow_manager.GlobalNodeResolver'):
-        with patch('comfygit_core.managers.workflow_manager.ModelResolver'):
-            # Create a mock workflow cache
-            from comfygit_core.caching.workflow_cache import WorkflowCacheRepository
-            cache_db = WorkflowCacheRepository(tmp_path / "workflows.db")
+    # Create a mock workflow cache
+    from comfygit_core.caching.workflow_cache import WorkflowCacheRepository
+    cache_db = WorkflowCacheRepository(tmp_path / "workflows.db")
 
-            manager = WorkflowManager(
-                comfyui_path=Path("/tmp/comfyui"),
-                cec_path=Path("/tmp/cec"),
-                pyproject=Mock(),
-                model_repository=Mock(),
-                node_mapping_repository=Mock(),
-                model_downloader=Mock(),
-                workflow_cache=cache_db,
-                environment_name="test-env"
-            )
-            return manager
+    manager = WorkflowManager(
+        comfyui_path=Path("/tmp/comfyui"),
+        cec_path=Path("/tmp/cec"),
+        pyproject=Mock(),
+        model_repository=Mock(),
+        node_mapping_repository=Mock(),
+        model_downloader=Mock(),
+        workflow_cache=cache_db,
+        environment_name="test-env"
+    )
+    return manager
 
 
 def test_normalize_workflow_removes_volatile_fields(workflow_manager):
@@ -140,8 +138,9 @@ def test_apply_resolution_preserves_existing_sources(workflow_manager):
     workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
     workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
     workflow_manager.pyproject.load = Mock(return_value={'tool': {'comfygit': {'workflows': {'test_workflow': {}}}}})
+    workflow_manager.pyproject.path = Path("/tmp/test/.cec/cec.toml")
     workflow_manager.update_workflow_model_paths = Mock()
-    workflow_manager.model_repository.get_sources = Mock(return_value=[
+    workflow_manager.path_manager.model_repository.get_sources = Mock(return_value=[
         {'url': 'https://civitai.com/model/123', 'type': 'civitai', 'metadata': {}, 'added_time': 0}
     ])
 
@@ -204,8 +203,9 @@ def test_apply_resolution_empty_sources_for_new_models(workflow_manager):
     workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
     workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
     workflow_manager.pyproject.load = Mock(return_value={'tool': {'comfygit': {'workflows': {'test_workflow': {}}}}})
+    workflow_manager.pyproject.path = Path("/tmp/test/.cec/cec.toml")
     workflow_manager.update_workflow_model_paths = Mock()
-    workflow_manager.model_repository.get_sources = Mock(return_value=[])
+    workflow_manager.path_manager.model_repository.get_sources = Mock(return_value=[])
 
     # Create resolution result
     model_with_location = ModelWithLocation(
@@ -260,7 +260,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CheckpointLoaderSimple"
         relative_path = "checkpoints/SD1.5/helloyoung25d_V15jvae.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "SD1.5/helloyoung25d_V15jvae.safetensors"
 
@@ -269,7 +269,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "LoraLoader"
         relative_path = "loras/realistic/detail_tweaker.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "realistic/detail_tweaker.safetensors"
 
@@ -278,7 +278,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "VAELoader"
         relative_path = "vae/vae-ft-mse-840000.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "vae-ft-mse-840000.safetensors"
 
@@ -287,7 +287,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "ControlNetLoader"
         relative_path = "controlnet/depth/control_v11f1p_sd15_depth.pth"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "depth/control_v11f1p_sd15_depth.pth"
 
@@ -296,7 +296,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CheckpointLoader"  # Can load from checkpoints or configs
         relative_path = "checkpoints/model.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "model.safetensors"
 
@@ -305,7 +305,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CheckpointLoaderSimple"
         relative_path = "custom_folder/model.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "custom_folder/model.safetensors"
 
@@ -314,7 +314,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CustomUnknownNode"
         relative_path = "checkpoints/model.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "checkpoints/model.safetensors"
 
@@ -323,7 +323,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CheckpointLoaderSimple"
         relative_path = "SD1.5/model.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "SD1.5/model.safetensors"
 
@@ -332,7 +332,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CheckpointLoaderSimple"
         relative_path = "checkpoints/SD1.5/special/subfolder/model.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "SD1.5/special/subfolder/model.safetensors"
 
@@ -341,7 +341,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CheckpointLoaderSimple"
         relative_path = "model.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "model.safetensors"
 
@@ -350,7 +350,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "UpscaleModelLoader"
         relative_path = "upscale_models/4x-UltraSharp.pth"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "4x-UltraSharp.pth"
 
@@ -359,7 +359,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CheckpointLoaderSimple"
         relative_path = r"checkpoints\SD1.5\model.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "SD1.5/model.safetensors"
 
@@ -368,7 +368,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "CheckpointLoaderSimple"
         relative_path = r"checkpoints\v1-5-pruned-emaonly-fp16.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "v1-5-pruned-emaonly-fp16.safetensors"
 
@@ -377,7 +377,7 @@ class TestStripBaseDirectoryForNode:
         node_type = "LoraLoader"
         relative_path = r"loras\style/detail_tweaker.safetensors"
 
-        result = workflow_manager._strip_base_directory_for_node(node_type, relative_path)
+        result = workflow_manager.path_manager.strip_base_directory_for_node(node_type, relative_path)
 
         assert result == "style/detail_tweaker.safetensors"
 
@@ -451,11 +451,12 @@ class TestOptionalUnresolvedModelPersistence:
         workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
         workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
         workflow_manager.pyproject.load = Mock(return_value={'tool': {'comfygit': {'workflows': {'test_workflow': {}}}}})
+        workflow_manager.pyproject.path = Path("/tmp/test/.cec/cec.toml")
         workflow_manager.pyproject.models.add_model = Mock()
         workflow_manager.pyproject.models.cleanup_orphans = Mock()
 
         # Mock model config and workflow path updates
-        with patch.object(workflow_manager.model_resolver, 'model_config') as mock_config:
+        with patch.object(workflow_manager.path_manager.model_resolver, 'model_config') as mock_config:
             mock_config.get_directories_for_node.return_value = []
 
             with patch.object(workflow_manager, 'update_workflow_model_paths'):
@@ -542,11 +543,12 @@ class TestOptionalUnresolvedModelPersistence:
         workflow_manager.pyproject.workflows.remove_custom_node_mapping = Mock()
         workflow_manager.pyproject.workflows.remove_workflows = Mock(return_value=0)
         workflow_manager.pyproject.load = Mock(return_value={'tool': {'comfygit': {'workflows': {'test': {}}}}})
+        workflow_manager.pyproject.path = Path("/tmp/test/.cec/cec.toml")
         workflow_manager.pyproject.models.add_model = Mock()
         workflow_manager.pyproject.models.cleanup_orphans = Mock()
-        workflow_manager.model_repository.get_sources = Mock(return_value=[])
+        workflow_manager.path_manager.model_repository.get_sources = Mock(return_value=[])
 
-        with patch.object(workflow_manager.model_resolver, 'model_config') as mock_config:
+        with patch.object(workflow_manager.path_manager.model_resolver, 'model_config') as mock_config:
             mock_config.get_directories_for_node.return_value = []
 
             with patch.object(workflow_manager, 'update_workflow_model_paths'):

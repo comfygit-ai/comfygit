@@ -324,6 +324,27 @@ class Environment:
             is_tracked=is_tracked,
         )
 
+    def is_legacy_manager(self) -> bool:
+        """Check if the manager is using legacy symlink installation.
+
+        This is a lightweight method that only checks for symlinks without
+        making any API calls to fetch version information.
+
+        Returns:
+            True if manager is installed via symlink (legacy), False otherwise
+        """
+        from ..constants import MANAGER_NODE_ID
+        from ..utils.symlink_utils import is_link
+
+        # Check if tracked in pyproject (modern per-env manager)
+        nodes = self.pyproject.nodes.get_existing()
+        if MANAGER_NODE_ID in nodes:
+            return False  # Tracked = not legacy
+
+        # Not tracked - check for legacy symlink at registry ID path
+        legacy_path = self.custom_nodes_path / MANAGER_NODE_ID
+        return is_link(legacy_path)
+
     def update_manager(
         self,
         version: str = "latest",
