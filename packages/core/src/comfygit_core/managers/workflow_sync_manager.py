@@ -140,11 +140,14 @@ class WorkflowSyncManager:
             logger.warning(f"Error comparing workflows '{name}': {e}")
             return True
 
-    def copy_all_workflows(self) -> dict[str, Path | None]:
+    def copy_all_workflows(self) -> dict[str, Path | str | None]:
         """Copy ALL workflows from ComfyUI to .cec for commit.
 
         Returns:
-            Dictionary of workflow names to Path
+            Dictionary of workflow names to:
+            - Path: if copy succeeded
+            - None: if copy failed
+            - "deleted": if workflow was removed from .cec
         """
         results = {}
 

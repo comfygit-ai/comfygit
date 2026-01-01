@@ -1,13 +1,14 @@
 """ModelDownloadManager - Handle model downloads from various sources."""
 
+from __future__ import annotations
+
 import shutil
 from pathlib import Path
 from urllib.parse import urlparse
-
+from typing import TYPE_CHECKING
 
 from ..logging.logging_config import get_logger
 from ..models.exceptions import ComfyDockError
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..repositories.model_repository import ModelRepository

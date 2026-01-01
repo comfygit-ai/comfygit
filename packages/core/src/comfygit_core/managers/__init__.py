@@ -9,10 +9,10 @@ from .model_path_manager import ModelPathManager
 from .model_symlink_manager import ModelSymlinkManager
 from .node_manager import NodeManager
 from .pyproject_manager import PyprojectManager
-from .pytorch_backend_manager import PytorchBackendManager
+from .pytorch_backend_manager import PyTorchBackendManager
 from .system_node_symlink_manager import SystemNodeSymlinkManager
 from .user_content_symlink_manager import UserContentSymlinkManager
-from .uv_project_manager import UvProjectManager
+from .uv_project_manager import UVProjectManager
 from .workflow_analyzer import WorkflowAnalyzer
 from .workflow_manager import WorkflowManager
 from .workflow_model_download_manager import WorkflowModelDownloadManager
@@ -29,10 +29,10 @@ __all__ = [
     "ModelSymlinkManager",
     "NodeManager",
     "PyprojectManager",
-    "PytorchBackendManager",
+    "PyTorchBackendManager",
     "SystemNodeSymlinkManager",
     "UserContentSymlinkManager",
-    "UvProjectManager",
+    "UVProjectManager",
     "WorkflowAnalyzer",
     "WorkflowManager",
     "WorkflowModelDownloadManager",

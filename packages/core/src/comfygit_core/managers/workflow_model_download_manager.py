@@ -10,9 +10,9 @@ from ..models.workflow import DownloadResult, WorkflowNodeWidgetRef
 from ..services.model_downloader import DownloadRequest
 
 if TYPE_CHECKING:
-    from ..models.workflow import ResolutionResult
+    from ..models.workflow import BatchDownloadCallbacks, ResolutionResult
     from ..repositories.model_repository import ModelRepository
-    from ..services.model_downloader import BatchDownloadCallbacks, ModelDownloader
+    from ..services.model_downloader import ModelDownloader
     from .pyproject_manager import PyprojectManager
 
 logger = get_logger(__name__)

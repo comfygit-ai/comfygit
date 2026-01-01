@@ -31,12 +31,13 @@ class WorkflowDependencyParser:
         self.model_config = model_config or ModelConfig.load()
         self.cec_path = cec_path
 
+        # Store workflow path and name
+        self.workflow_path = workflow_path
+        self.workflow_name = workflow_path.stem
+
         # Load workflow
         self.workflow = WorkflowRepository.load(workflow_path)
         logger.debug(f"Loaded workflow '{workflow_path.stem}' with {len(self.workflow.nodes)} nodes")
-
-        # Store workflow name for pyproject lookup
-        self.workflow_name = workflow_path.stem
 
     def analyze_dependencies(self) -> WorkflowDependencies:
         """Analyze workflow for model information and node types"""
@@ -45,7 +46,10 @@ class WorkflowDependencyParser:
 
             if not nodes_data:
                 logger.warning("No nodes found in workflow")
-                return WorkflowDependencies(workflow_name=self.workflow_name)
+                return WorkflowDependencies(
+                    workflow_name=self.workflow_name,
+                    workflow_path=str(self.workflow_path)
+                )
             
             found_models: list[WorkflowNodeWidgetRef] = []
             builtin_nodes: list[WorkflowNode] = []
@@ -77,6 +81,7 @@ class WorkflowDependencyParser:
                 
             return WorkflowDependencies(
                 workflow_name=self.workflow_name,
+                workflow_path=str(self.workflow_path),
                 found_models=found_models,
                 builtin_nodes=builtin_nodes,
                 non_builtin_nodes=missing_nodes
@@ -84,7 +89,10 @@ class WorkflowDependencyParser:
 
         except Exception as e:
             logger.error(f"Failed to analyze workflow dependencies: {e}")
-            return WorkflowDependencies(workflow_name=self.workflow_name)
+            return WorkflowDependencies(
+                workflow_name=self.workflow_name,
+                workflow_path=str(self.workflow_path)
+            )
 
     def _extract_model_node_refs(self, node_id: str, node_info: WorkflowNode) -> List["WorkflowNodeWidgetRef"]:
         """Extract possible model references from a single node.

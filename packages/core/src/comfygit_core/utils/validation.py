@@ -107,6 +107,9 @@ def validate_parent_directory_exists(path: Path, description: str) -> None:
 def validate_git_repository(path: Path, description: Optional[str] = None) -> None:
     """Ensure a path is a git repository.
 
+    Handles both normal git repos (with .git directory) and git worktrees
+    (with .git file that points to the main repo).
+
     Args:
         path: Path to check
         description: Optional description (defaults to "Directory")
@@ -117,8 +120,9 @@ def validate_git_repository(path: Path, description: Optional[str] = None) -> No
     desc = description or "Directory"
     ensure_directory_exists(path, desc)
 
-    git_dir = path / ".git"
-    if not git_dir.exists():
+    git_path = path / ".git"
+    # Git repos have .git as directory, worktrees have .git as file
+    if not git_path.exists():
         raise CDEnvironmentError(f"{desc} is not a git repository: {path}")
 
 

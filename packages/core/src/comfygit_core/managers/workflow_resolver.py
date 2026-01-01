@@ -232,6 +232,7 @@ class WorkflowResolver:
 
         return ResolutionResult(
             workflow_name=workflow_name,
+            workflow_path=analysis.workflow_path,
             nodes_resolved=nodes_resolved,
             nodes_unresolved=nodes_unresolved,
             nodes_ambiguous=nodes_ambiguous,
@@ -462,9 +463,10 @@ class WorkflowResolver:
                     for ref in all_refs_in_group:
                         remaining_models_unresolved.append(ref)
 
-        # Build updated result
+        # Build updated result (preserve workflow_path from original resolution)
         result = ResolutionResult(
             workflow_name=workflow_name,
+            workflow_path=resolution.workflow_path,
             nodes_resolved=nodes_to_add,
             nodes_unresolved=remaining_nodes_unresolved,
             nodes_ambiguous=remaining_nodes_ambiguous,
@@ -476,12 +478,16 @@ class WorkflowResolver:
         # Batch update workflow JSON with all resolved model paths
         # This ensures all model paths are synced after interactive resolution
         # Uses consistent node IDs from same parse session (no cache mismatch issues)
-        self.model_path_manager.update_workflow_model_paths(
-            self._get_workflow_path(workflow_name),
-            result,
-            self.workflow_cache,
-            self.environment_name
-        )
+        workflow_path = Path(result.workflow_path) if result.workflow_path else None
+        if workflow_path and workflow_path.exists():
+            self.model_path_manager.update_workflow_model_paths(
+                workflow_path,
+                result,
+                self.workflow_cache,
+                self.environment_name
+            )
+        else:
+            logger.debug(f"Skipping workflow path update in fix_resolution - workflow not found at {result.workflow_path}")
 
         return result
 
@@ -968,9 +974,13 @@ class WorkflowResolver:
             self.pyproject.save(config)
 
         # Phase 3: Update workflow JSON with resolved paths
-        self.model_path_manager.update_workflow_model_paths(
-            self._get_workflow_path(workflow_name),
-            resolution,
-            self.workflow_cache,
-            self.environment_name
-        )
+        workflow_path = Path(resolution.workflow_path) if resolution.workflow_path else None
+        if workflow_path and workflow_path.exists():
+            self.model_path_manager.update_workflow_model_paths(
+                workflow_path,
+                resolution,
+                self.workflow_cache,
+                self.environment_name
+            )
+        else:
+            logger.debug(f"Skipping workflow path update - workflow not found at {resolution.workflow_path}")

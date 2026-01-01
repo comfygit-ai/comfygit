@@ -656,6 +656,7 @@ class WorkflowNodeWidgetRef:
 class WorkflowDependencies:
     """Complete workflow dependency analysis results."""
     workflow_name: str
+    workflow_path: str = ""  # Full path to workflow JSON file
     found_models: list[WorkflowNodeWidgetRef] = field(default_factory=list)
     builtin_nodes: list[WorkflowNode] = field(default_factory=list)
     non_builtin_nodes: list[WorkflowNode] = field(default_factory=list)
@@ -722,6 +723,7 @@ class DownloadResult:
 class ResolutionResult:
     """Result of resolution check or application."""
     workflow_name: str
+    workflow_path: str = ""  # Full path to workflow JSON file
     nodes_resolved: List[ResolvedNodePackage] = field(default_factory=list)  # Nodes resolved/added
     nodes_unresolved: List[WorkflowNode] = field(default_factory=list)  # Nodes not found
     nodes_ambiguous: List[List[ResolvedNodePackage]] = field(default_factory=list)  # Nodes with multiple matches

@@ -45,18 +45,20 @@ def download_and_extract_archive(url: str, target_path: Path) -> None:
                 logger.warning(f"Failed to clean up temp file: {temp_file_path}")
 
 
-def download_file(url: str, suffix: str | None = None) -> Path:
+def download_file(url: str, suffix: str | None = None, timeout: int = 60) -> Path:
     """Download a file to a temporary location.
-    
+
     Args:
         url: URL to download from
         suffix: Optional file suffix for the temp file
-        
+        timeout: Request timeout in seconds (default 60)
+
     Returns:
         Path to downloaded file
-        
+
     Raises:
         OSError: If download fails
+        urllib.error.URLError: If connection times out
     """
     try:
         if not suffix:
@@ -65,7 +67,13 @@ def download_file(url: str, suffix: str | None = None) -> Path:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
             logger.info(f"Downloading from {url}")
 
-            with urllib.request.urlopen(url) as response:
+            # Create request with User-Agent header (some servers reject requests without it)
+            request = urllib.request.Request(
+                url,
+                headers={'User-Agent': 'ComfyGit/1.0 (https://github.com/comfygit-ai)'}
+            )
+
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 # Read in chunks for large files
                 chunk_size = 8192
                 total_size = 0
@@ -139,6 +147,28 @@ def extract_archive(archive_path: Path, target_path: Path) -> None:
         raise ValueError(f"Unsupported or corrupted archive format: {archive_path}")
 
 
+def _is_path_safe(member_path: str, target_path: Path) -> bool:
+    """Check if an archive member path is safe (doesn't escape target directory).
+
+    Prevents Zip Slip / Path Traversal attacks (CVE-2007-4559).
+
+    Args:
+        member_path: Path from archive member (filename)
+        target_path: Target extraction directory
+
+    Returns:
+        True if path is safe to extract, False if it would escape target directory
+    """
+    # Resolve the full path that would be created
+    # Use os.path.join first to handle absolute paths in member_path
+    import os
+    full_path = os.path.normpath(os.path.join(target_path, member_path))
+
+    # Check if the resolved path is still within target_path
+    target_resolved = os.path.normpath(target_path)
+    return full_path.startswith(target_resolved + os.sep) or full_path == target_resolved
+
+
 def _try_extract_archive(archive_path: Path, target_path: Path, format_info: tuple[str, str]) -> None:
     """Generic archive extraction helper.
 
@@ -152,19 +182,35 @@ def _try_extract_archive(archive_path: Path, target_path: Path, format_info: tup
     Raises:
         zipfile.BadZipFile/tarfile.ReadError: If not a valid archive of this type
         OSError: If extraction fails
+        ValueError: If archive contains unsafe paths (path traversal attempt)
     """
     format_type, format_name = format_info
 
     try:
         if format_type == 'zip':
             with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                # Validate all paths before extracting (prevent Zip Slip)
+                for member in zip_ref.namelist():
+                    if not _is_path_safe(member, target_path):
+                        raise ValueError(
+                            f"Unsafe path in archive (possible path traversal attack): {member}"
+                        )
                 zip_ref.extractall(target_path)
         else:
             # It's a tar format with the given mode
             with tarfile.open(archive_path, format_type) as tar:
+                # Validate all paths before extracting (prevent path traversal)
+                for member in tar.getmembers():
+                    if not _is_path_safe(member.name, target_path):
+                        raise ValueError(
+                            f"Unsafe path in archive (possible path traversal attack): {member.name}"
+                        )
                 tar.extractall(target_path)
     except (zipfile.BadZipFile, tarfile.ReadError):
         # Expected errors for wrong format, let them propagate
+        raise
+    except ValueError:
+        # Path traversal detected, propagate as-is
         raise
     except Exception as e:
         raise OSError(f"{format_name} extraction failed: {e}")

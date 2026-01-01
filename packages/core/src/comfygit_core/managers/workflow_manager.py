@@ -15,7 +15,7 @@ from ..models.workflow import (
     WorkflowSyncStatus,
 )
 from ..resolvers.model_resolver import ModelResolver
-from ..services.model_downloader import BatchDownloadCallbacks
+from ..models.workflow import BatchDownloadCallbacks
 from .model_path_manager import ModelPathManager
 from .workflow_analyzer import WorkflowAnalyzer
 from .workflow_model_download_manager import WorkflowModelDownloadManager
@@ -57,6 +57,7 @@ class WorkflowManager:
         self.comfyui_path = comfyui_path
         self.cec_path = cec_path
         self.pyproject = pyproject
+        self.workflow_cache = workflow_cache
         self.environment_name = environment_name
 
         # Initialize specialized managers
@@ -96,6 +97,16 @@ class WorkflowManager:
         )
 
     # ========== Workflow sync methods - delegate to sync_manager ==========
+
+    @property
+    def comfyui_workflows(self) -> Path:
+        """Path to ComfyUI workflows directory."""
+        return self.sync_manager.comfyui_workflows
+
+    @property
+    def cec_workflows(self) -> Path:
+        """Path to .cec workflows directory."""
+        return self.sync_manager.cec_workflows
 
     def get_workflow_path(self, name: str) -> Path:
         """Check if workflow exists in ComfyUI directory and return path."""
