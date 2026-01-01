@@ -243,8 +243,8 @@ class Workspace:
             legacy_envs = []
             for env in self.list_environments():
                 try:
-                    status = env.get_manager_status()
-                    if status.is_legacy:
+                    # Use lightweight check that doesn't make API calls
+                    if env.is_legacy_manager():
                         legacy_envs.append(env.name)
                 except Exception:
                     pass  # Skip environments that can't be checked
