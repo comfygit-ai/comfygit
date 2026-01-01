@@ -32,9 +32,13 @@ def test_is_legacy_manager_with_symlink():
     env.pyproject.nodes.get_existing.return_value = {}  # No tracked nodes
     env.custom_nodes_path = Path("/fake/custom_nodes")
 
-    with patch("comfygit_core.core.environment.is_link", return_value=True):
+    expected_path = env.custom_nodes_path / MANAGER_NODE_ID
+    with patch("comfygit_core.utils.symlink_utils.is_link") as mock_is_link:
+        mock_is_link.return_value = True
         # Use real method bound to mock
         result = Environment.is_legacy_manager(env)
+        # Verify is_link was called with the correct path
+        mock_is_link.assert_called_once_with(expected_path)
 
     assert result is True
 
@@ -46,8 +50,12 @@ def test_is_legacy_manager_with_no_manager():
     env.pyproject.nodes.get_existing.return_value = {}  # No tracked nodes
     env.custom_nodes_path = Path("/fake/custom_nodes")
 
-    with patch("comfygit_core.core.environment.is_link", return_value=False):
+    expected_path = env.custom_nodes_path / MANAGER_NODE_ID
+    with patch("comfygit_core.utils.symlink_utils.is_link") as mock_is_link:
+        mock_is_link.return_value = False
         # Use real method bound to mock
         result = Environment.is_legacy_manager(env)
+        # Verify is_link was called with the correct path
+        mock_is_link.assert_called_once_with(expected_path)
 
     assert result is False
