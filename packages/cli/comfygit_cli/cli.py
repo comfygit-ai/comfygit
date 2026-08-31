@@ -546,6 +546,13 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument("--python", default="3.11", help="Python version")
     create_parser.add_argument("--comfyui", help="ComfyUI version")
     create_parser.add_argument(
+        "--comfyui-repository",
+        help=(
+            "ComfyUI Git repository URL. Use with --comfyui to pin a fork "
+            "or alternate upstream; defaults to canonical ComfyUI."
+        ),
+    )
+    create_parser.add_argument(
         "--torch-backend",
         default="auto",
         metavar="BACKEND",

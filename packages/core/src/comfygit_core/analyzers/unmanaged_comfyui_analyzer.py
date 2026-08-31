@@ -77,6 +77,11 @@ def scan_unmanaged_comfyui(
         ignored_custom_node_names=ignored_custom_node_names,
     )
     version, commit = _detect_comfyui_version(comfyui_path)
+    repository = (
+        _git_output(comfyui_path, "remote", "get-url", "origin")
+        if _is_git_checkout(comfyui_path)
+        else None
+    )
 
     if not workflows:
         warnings.append("No saved workflow JSON files were found.")
@@ -88,6 +93,7 @@ def scan_unmanaged_comfyui(
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}",
         comfyui_version=version,
         comfyui_commit=commit,
+        comfyui_repository=repository,
         workflows=workflows,
         model_references=model_references,
         models_scanned=models_scanned,

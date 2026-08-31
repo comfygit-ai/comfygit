@@ -218,6 +218,8 @@ class BuildReadiness:
     environment_name: str
     python_version: str | None
     comfyui_version: str | None
+    comfyui_repository: str | None
+    comfyui_commit_sha: str | None
     workflows: tuple[BuildWorkflowSummary, ...] = ()
     custom_nodes: tuple[BuildCustomNodeSummary, ...] = ()
     python_dependencies: tuple[str, ...] = ()
@@ -231,6 +233,8 @@ class BuildReadiness:
             "environment_name": self.environment_name,
             "python_version": self.python_version,
             "comfyui_version": self.comfyui_version,
+            "comfyui_repository": self.comfyui_repository,
+            "comfyui_commit_sha": self.comfyui_commit_sha,
             "workflows": [workflow.to_dict() for workflow in self.workflows],
             "custom_nodes": [node.to_dict() for node in self.custom_nodes],
             "python_dependencies": list(self.python_dependencies),

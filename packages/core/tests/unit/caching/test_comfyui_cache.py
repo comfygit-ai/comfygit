@@ -38,7 +38,7 @@ class TestComfyUICacheManager:
             )
 
             cache_key = cache.generate_cache_key(spec)
-            assert cache_key == "release_v0.3.20"
+            assert cache_key == "source_b37a65348125_commit_abc123"
 
     def test_generate_cache_key_for_commit(self):
         """SHOULD generate commit_abc123 for commit hash."""
@@ -52,7 +52,7 @@ class TestComfyUICacheManager:
             )
 
             cache_key = cache.generate_cache_key(spec)
-            assert cache_key == "commit_abc123"
+            assert cache_key == "source_b37a65348125_commit_abc123"
 
     def test_generate_cache_key_for_branch(self):
         """SHOULD generate branch_main for branch ref."""
@@ -67,7 +67,7 @@ class TestComfyUICacheManager:
 
             cache_key = cache.generate_cache_key(spec)
             # Branches should use commit SHA for cache key
-            assert cache_key == "commit_def456"
+            assert cache_key == "source_b37a65348125_commit_def456"
 
     def test_generate_cache_key_from_string(self):
         """SHOULD handle simple version string."""
@@ -76,6 +76,29 @@ class TestComfyUICacheManager:
 
             cache_key = cache.generate_cache_key("v0.3.20")
             assert cache_key == "version_v0.3.20"
+
+    def test_repository_identity_separates_same_commit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ComfyUICacheManager(cache_base_path=Path(tmpdir))
+            canonical = ComfyUISpec(
+                version="abc123",
+                version_type="commit",
+                commit_sha="abc123",
+            )
+            fork = ComfyUISpec(
+                version="abc123",
+                version_type="commit",
+                commit_sha="abc123",
+                repository="https://github.com/kijai/ComfyUI.git",
+            )
+
+            assert cache.generate_cache_key(canonical) != cache.generate_cache_key(fork)
+
+    def test_moving_branch_without_commit_is_not_restored(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = ComfyUICacheManager(cache_base_path=Path(tmpdir))
+            spec = ComfyUISpec(version="master", version_type="branch")
+            assert cache.get_cached_comfyui(spec) is None
 
     def test_cache_comfyui_stores_version_metadata(self):
         """SHOULD store version, type, and commit SHA in metadata."""
@@ -96,13 +119,18 @@ class TestComfyUICacheManager:
             cache.cache_comfyui(spec, comfyui_dir)
 
             # Check metadata
-            metadata_file = cache.store_dir / "release_v0.3.20" / "metadata.json"
+            metadata_file = (
+                cache.store_dir
+                / "source_b37a65348125_commit_abc123def456"
+                / "metadata.json"
+            )
             assert metadata_file.exists()
 
             metadata = json.loads(metadata_file.read_text())
             assert metadata["version"] == "v0.3.20"
             assert metadata["version_type"] == "release"
             assert metadata["commit_sha"] == "abc123def456"
+            assert metadata["repository"] == "https://github.com/Comfy-Org/ComfyUI.git"
 
     def test_cache_comfyui_includes_git_directory(self):
         """SHOULD cache entire ComfyUI directory including .git."""

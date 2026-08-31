@@ -93,6 +93,7 @@ PYPROJECT_SCHEMA_VERSION = 2
 DEFAULT_REGISTRY_URL = "https://api.comfy.org"
 DEFAULT_GITHUB_URL = "https://github.com"
 GITHUB_API_BASE = "https://api.github.com"
+DEFAULT_COMFYUI_REPOSITORY = "https://github.com/Comfy-Org/ComfyUI.git"
 
 GITHUB_NODE_MAPPINGS_URL = "https://raw.githubusercontent.com/comfygit-ai/comfygit-registry-data/main/data/node_mappings.json"
 GITHUB_COMFYUI_BUILTINS_BY_VERSION_URL = "https://raw.githubusercontent.com/comfygit-ai/comfygit-registry-data/main/data/comfyui_builtins_by_version.json"

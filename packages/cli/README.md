@@ -235,6 +235,7 @@ cg create NAME
   --template PATH      Template manifest
   --python VERSION     Python version (default: 3.11)
   --comfyui VERSION    ComfyUI version
+  --comfyui-repository URL  ComfyUI Git repository (canonical by default)
   --torch-backend BACKEND  PyTorch backend (auto/cpu/cu128/rocm6.3/xpu)
   --use                Set as active environment
 

@@ -73,7 +73,14 @@ class SemanticMerger:
         """Preserve local environment metadata from base."""
         base_cg = base_config.get("tool", {}).get("comfygit", {})
 
-        for key in ["comfyui_version", "python_version", "torch_backend"]:
+        for key in [
+            "comfyui_repository",
+            "comfyui_version",
+            "comfyui_version_type",
+            "comfyui_commit_sha",
+            "python_version",
+            "torch_backend",
+        ]:
             if key in base_cg:
                 result["tool"]["comfygit"][key] = base_cg[key]
 

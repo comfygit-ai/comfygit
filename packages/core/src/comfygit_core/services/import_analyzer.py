@@ -62,6 +62,8 @@ class ImportAnalysis:
     # ComfyUI version
     comfyui_version: str | None
     comfyui_version_type: str | None
+    comfyui_repository: str | None
+    comfyui_commit_sha: str | None
 
     # Models breakdown
     models: list[ModelAnalysis]
@@ -144,6 +146,8 @@ class ImportAnalyzer:
             manifest_toml=manifest_toml,
             comfyui_version=comfygit_config.get("comfyui_version"),
             comfyui_version_type=comfygit_config.get("comfyui_version_type"),
+            comfyui_repository=comfygit_config.get("comfyui_repository"),
+            comfyui_commit_sha=comfygit_config.get("comfyui_commit_sha"),
             models=models,
             total_models=len(models),
             models_locally_available=sum(1 for m in models if m.locally_available),

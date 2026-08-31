@@ -88,6 +88,8 @@ class EnvironmentInventory:
     manifest_sha256: str
     complete: bool
     comfyui_revision: str | None
+    comfyui_repository: str
+    comfyui_commit_sha: str | None
     python_version: str | None
     model_dependencies: tuple[EnvironmentDependency, ...]
     custom_node_dependencies: tuple[EnvironmentDependency, ...]

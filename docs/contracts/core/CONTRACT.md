@@ -212,6 +212,20 @@ snapshots, and domain edit affordances. Code that must inspect or mutate raw
 TOML should stay in pyproject storage, migration, merge/diff, import-inspection,
 or manifest implementation modules.
 
+### CGCORE-MAN-01B [LIVE]: ComfyUI source identity is portable and immutable
+Validation: TEST
+
+The environment manifest may declare the ComfyUI Git repository separately
+from its human-facing branch, tag, or version intent. Exact reconstruction must
+prefer the recorded full commit SHA when one is present, clone that commit from
+the declared repository, and verify both the materialized origin and HEAD before
+the checkout is accepted or cached. Manifests without an explicit repository
+retain the canonical ComfyUI repository as a backwards-compatible default.
+
+Repository identity and commit identity are part of the ComfyUI cache key. A
+checkout from a fork must never satisfy a cache request for the canonical
+repository merely because the branch or tag label is the same.
+
 ### CGCORE-MAN-02 [LIVE]: Machine-local configuration is not committed as manifest truth
 Validation: TEST
 

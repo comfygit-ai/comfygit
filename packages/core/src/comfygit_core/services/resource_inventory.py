@@ -193,6 +193,8 @@ class WorkspaceResourceInventoryService:
             manifest_sha256=manifest_sha256,
             complete=is_environment_complete(environment.cec_path),
             comfyui_revision=snapshot.comfyui_version,
+            comfyui_repository=snapshot.comfyui_repository,
+            comfyui_commit_sha=snapshot.comfyui_commit_sha,
             python_version=snapshot.python_version,
             model_dependencies=tuple(
                 sorted(

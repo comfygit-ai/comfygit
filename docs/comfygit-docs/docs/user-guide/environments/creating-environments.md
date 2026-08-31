@@ -25,11 +25,24 @@ cg create cpu-test --torch-backend cpu
 cg create cuda-test --torch-backend cu128
 ```
 
+Create against a fork or an unmerged upstream commit:
+
+```bash
+cg create experimental-h3 \
+  --comfyui-repository https://github.com/kijai/ComfyUI.git \
+  --comfyui 10febb01d7be73d1491cf5e5347b5ab8b6c2c09e \
+  --use
+```
+
+ComfyGit records the actual full commit in the manifest and verifies both the
+repository origin and commit during later import and materialization.
+
 ## Common Options
 
 ```bash
 cg create my-env --python 3.11
 cg create my-env --comfyui v0.3.68
+cg create my-env --comfyui-repository https://github.com/owner/ComfyUI.git --comfyui COMMIT
 cg create my-env --no-manager
 cg create my-env --yes
 ```

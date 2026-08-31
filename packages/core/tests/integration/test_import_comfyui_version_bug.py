@@ -46,10 +46,10 @@ nodes = {}
         # Track what version is requested (override fixture's mock)
         cloned_version = None
 
-        def track_clone_version(target_path, version):
+        def track_clone_version(target_path, version, **kwargs):
             nonlocal cloned_version
             cloned_version = version
-            return mock_comfyui_clone(target_path, version)
+            return mock_comfyui_clone(target_path, version, **kwargs)
 
         # ACT - Import the environment (fixture handles subprocess mocking)
         with patch('comfygit_core.utils.comfyui_ops.clone_comfyui', side_effect=track_clone_version):
@@ -64,8 +64,10 @@ nodes = {}
         assert cloned_version == "v0.3.15", \
             f"Expected version 'v0.3.15' but got '{cloned_version}'"
 
-    def test_import_uses_version_not_commit_sha(self, test_workspace, mock_comfyui_clone, mock_github_api):
-        """SHOULD use comfyui_version (tag/branch), NOT commit_sha (can't shallow clone)."""
+    def test_import_prefers_immutable_commit_and_declared_repository(
+        self, test_workspace, mock_comfyui_clone, mock_github_api
+    ):
+        """SHOULD clone the pinned commit from the manifest repository."""
         # ARRANGE
         export_tarball = test_workspace.paths.root / "test_export.tar.gz"
         export_content = test_workspace.paths.root / "export_content"
@@ -81,7 +83,9 @@ dependencies = []
 
 [tool.comfygit]
 comfyui_version = "v0.3.15"
-comfyui_commit_sha = "abc123def456"
+comfyui_version_type = "release"
+comfyui_commit_sha = "abc123def456789012345678901234567890abcd"
+comfyui_repository = "https://github.com/example/ComfyUI.git"
 python_version = "3.12"
 nodes = {}
 """
@@ -94,11 +98,13 @@ nodes = {}
 
         # Track what version is requested (override fixture's mock)
         cloned_version = None
+        cloned_repository = None
 
-        def track_clone_version(target_path, version):
-            nonlocal cloned_version
+        def track_clone_version(target_path, version, **kwargs):
+            nonlocal cloned_version, cloned_repository
             cloned_version = version
-            return mock_comfyui_clone(target_path, version)
+            cloned_repository = kwargs.get("repository")
+            return mock_comfyui_clone(target_path, version, **kwargs)
 
         # ACT (fixture handles subprocess mocking)
         with patch('comfygit_core.utils.comfyui_ops.clone_comfyui', side_effect=track_clone_version):
@@ -107,6 +113,6 @@ nodes = {}
                 name="imported-env2"
             )
 
-        # ASSERT - Should use version tag (can shallow clone), not commit SHA (can't shallow clone)
-        assert cloned_version == "v0.3.15", \
-            f"Expected version tag 'v0.3.15' but got '{cloned_version}'. Commit SHA can't be shallow cloned!"
+        # ASSERT - immutable commit and source repository are authoritative.
+        assert cloned_version == "abc123def456789012345678901234567890abcd"
+        assert cloned_repository == "https://github.com/example/ComfyUI.git"

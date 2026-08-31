@@ -34,6 +34,19 @@ ComfyGit-specific environment metadata belongs under `[tool.comfygit]` tables.
 Standard Python project metadata and dependency groups should continue to use
 standard `pyproject.toml` locations where possible.
 
+### CGSPEC-MAN-02A [LIVE]: ComfyUI repository and commit provenance are explicit
+Validation: TEST
+
+`[tool.comfygit]` may store `comfyui_repository`, `comfyui_version`,
+`comfyui_version_type`, and `comfyui_commit_sha`. The repository identifies the
+Git object store, the version retains author-facing branch/tag intent, and the
+full commit SHA is the immutable materialization authority. Missing repository
+metadata defaults to the canonical ComfyUI repository for older manifests.
+
+Import and materialization must not silently fall back to another repository or
+to a moving branch when a pinned commit is declared. Repository URLs and commit
+SHAs are portable non-secret provenance; credentials remain host-scoped.
+
 ### CGSPEC-MAN-03 [LIVE]: Workflows are named manifest entries
 Validation: TEST
 

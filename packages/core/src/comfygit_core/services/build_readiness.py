@@ -61,6 +61,8 @@ def build_readiness_from_pyproject_toml(
             environment_name="",
             python_version=None,
             comfyui_version=None,
+            comfyui_repository=None,
+            comfyui_commit_sha=None,
             blockers=(f"pyproject.toml is not valid TOML: {exc}",),
         )
 
@@ -95,6 +97,8 @@ def build_readiness_from_manifest_dict(
             environment_name=_raw_environment_name(plain_manifest),
             python_version=_raw_manifest_python_version(plain_manifest),
             comfyui_version=_raw_comfyui_version(plain_manifest),
+            comfyui_repository=None,
+            comfyui_commit_sha=None,
             blockers=(f"pyproject.toml manifest could not be interpreted: {exc}",),
         )
     if has_comfygit_manifest:
@@ -106,6 +110,8 @@ def build_readiness_from_manifest_dict(
         environment_name=readiness.environment_name,
         python_version=readiness.python_version,
         comfyui_version=readiness.comfyui_version,
+        comfyui_repository=readiness.comfyui_repository,
+        comfyui_commit_sha=readiness.comfyui_commit_sha,
         workflows=readiness.workflows,
         custom_nodes=readiness.custom_nodes,
         python_dependencies=readiness.python_dependencies,
@@ -175,12 +181,18 @@ def build_readiness_from_manifest_snapshot(
         warnings.append("No Python version is declared; build policy must choose a default.")
     if not snapshot.comfyui_version:
         warnings.append("No ComfyUI version is declared; build policy must choose a default.")
+    if not snapshot.comfyui_commit_sha:
+        warnings.append(
+            "No immutable ComfyUI commit is declared; materialization may resolve moving version intent."
+        )
 
     return BuildReadiness(
         status="blocked" if blockers else "ready",
         environment_name=_environment_name(snapshot),
         python_version=_manifest_python_version(snapshot),
         comfyui_version=snapshot.comfyui_version,
+        comfyui_repository=snapshot.comfyui_repository,
+        comfyui_commit_sha=snapshot.comfyui_commit_sha,
         workflows=workflows,
         custom_nodes=custom_nodes,
         python_dependencies=tuple(python_dependencies),

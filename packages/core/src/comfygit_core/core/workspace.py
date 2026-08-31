@@ -631,6 +631,7 @@ class Workspace:
         name: str,
         python_version: str = "3.12",
         comfyui_version: str | None = None,
+        comfyui_repository: str | None = None,
         template_path: Path | None = None,
         torch_backend: str = "auto",
         no_manager: bool = False,
@@ -642,6 +643,7 @@ class Workspace:
             name: Environment name
             python_version: Python version (e.g., "3.12")
             comfyui_version: ComfyUI version
+            comfyui_repository: ComfyUI Git repository (canonical by default)
             template_path: Optional template to copy from
             torch_backend: PyTorch backend (auto, cpu, cu118, cu121, etc.)
             no_manager: Skip comfygit-manager install (headless mode)
@@ -685,6 +687,7 @@ class Workspace:
                 workspace=self,
                 python_version=python_version,
                 comfyui_version=comfyui_version,
+                comfyui_repository=comfyui_repository,
                 torch_backend=torch_backend,
                 no_manager=no_manager,
                 progress=progress,

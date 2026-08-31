@@ -44,7 +44,11 @@ def import_unmanaged_comfyui_environment(
     create_kwargs: dict[str, object] = {
         "name": name,
         "python_version": preview.python_version,
-        "comfyui_version": _comfyui_create_version(preview.comfyui_version),
+        "comfyui_version": (
+            preview.comfyui_commit
+            or _comfyui_create_version(preview.comfyui_version)
+        ),
+        "comfyui_repository": preview.comfyui_repository,
         "torch_backend": torch_backend,
     }
     if callbacks:

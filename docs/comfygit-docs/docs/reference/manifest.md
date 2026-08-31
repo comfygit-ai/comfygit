@@ -11,7 +11,7 @@ materialize, Manager, and `cg serve` all read from this state.
 The manifest records:
 
 - project metadata and Python dependency declarations
-- ComfyUI version intent
+- ComfyUI repository, version intent, and immutable commit provenance
 - custom node package metadata
 - custom node dependency groups
 - workflow entries
@@ -45,6 +45,22 @@ cg manifest --ide
 
 Use ComfyGit commands or Manager actions for normal edits. Direct manifest edits
 should be followed by `cg sync` or `cg repair` to reconcile runtime state.
+
+## ComfyUI Source Pinning
+
+Portable environments may select a fork while remaining exactly reproducible:
+
+```toml
+[tool.comfygit]
+comfyui_repository = "https://github.com/kijai/ComfyUI.git"
+comfyui_version = "vsa"
+comfyui_version_type = "branch"
+comfyui_commit_sha = "10febb01d7be73d1491cf5e5347b5ab8b6c2c09e"
+```
+
+The branch or tag is descriptive intent. When `comfyui_commit_sha` is present,
+import and materialization clone and verify that exact commit from the declared
+repository. Older manifests without `comfyui_repository` use canonical ComfyUI.
 
 ## Related Pages
 

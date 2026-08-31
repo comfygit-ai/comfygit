@@ -259,6 +259,7 @@ class EnvironmentCommands:
             workspace.create_environment(
                 name=args.name,
                 comfyui_version=args.comfyui,
+                comfyui_repository=getattr(args, "comfyui_repository", None),
                 python_version=args.python,
                 template_path=args.template,
                 torch_backend=args.torch_backend,

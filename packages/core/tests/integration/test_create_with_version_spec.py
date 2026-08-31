@@ -172,3 +172,19 @@ def test_create_stores_actual_commit_sha_after_clone(test_workspace, mock_comfyu
     assert commit_sha is not None, "Should store commit SHA after clone"
     # Commit SHA should be 40 hex characters
     assert isinstance(commit_sha, str), "Commit SHA should be a string"
+
+
+def test_create_stores_declared_comfyui_repository(
+    test_workspace, mock_comfyui_clone, mock_github_api
+):
+    repository = "https://github.com/kijai/ComfyUI.git"
+    env = test_workspace.create_environment(
+        "fork-env",
+        comfyui_version="a" * 40,
+        comfyui_repository=repository,
+    )
+    config = env.pyproject.load()["tool"]["comfygit"]
+    assert config["comfyui_repository"] == repository
+    assert config["comfyui_version"] == "a" * 40
+    assert config["comfyui_version_type"] == "commit"
+    assert config["comfyui_commit_sha"] == "a" * 40

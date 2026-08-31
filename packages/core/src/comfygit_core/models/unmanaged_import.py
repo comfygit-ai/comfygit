@@ -83,6 +83,7 @@ class UnmanagedComfyUIImportPreview:
     python_version: str
     comfyui_version: str | None
     comfyui_commit: str | None
+    comfyui_repository: str | None = None
     workflows: list[UnmanagedWorkflowScan] = field(default_factory=list)
     model_references: list[UnmanagedModelReferenceScan] = field(default_factory=list)
     models_scanned: bool = True
