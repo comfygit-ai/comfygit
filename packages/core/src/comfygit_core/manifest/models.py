@@ -30,7 +30,7 @@ class ModelHandler(BaseHandler):
             CDPyprojectError: If save fails
         """
         is_batch = config is not None
-        if not is_batch:
+        if config is None:
             config = self.load()
 
         # Ensure sections exist
@@ -42,7 +42,9 @@ class ModelHandler(BaseHandler):
         if model.hash in models_section:
             existing_dict = models_section[model.hash]
             existing_sources = existing_dict.get('sources', [])
-            model.sources = list(set(existing_sources + model.sources))
+            model.sources = list(dict.fromkeys(existing_sources + model.sources))
+            if model.criticality is None:
+                model.criticality = existing_dict.get("criticality")
 
         # Serialize to inline table for compact representation
         model_dict = model.to_toml_dict()
@@ -105,7 +107,7 @@ class ModelHandler(BaseHandler):
             config: Optional in-memory config for batched writes. If None, loads and saves immediately.
         """
         is_batch = config is not None
-        if not is_batch:
+        if config is None:
             config = self.load()
 
         # Collect all model hashes referenced by ANY workflow
@@ -122,6 +124,10 @@ class ModelHandler(BaseHandler):
 
         # Get all hashes in global models table (from in-memory config)
         models_section = config.get("tool", {}).get("comfygit", {}).get("models", {})
+        referenced_hashes.update(
+            key for key, value in models_section.items()
+            if value.get("criticality") in ("required", "optional")
+        )
         global_hashes = set(models_section.keys())
 
         # Remove orphans (in global but not referenced)

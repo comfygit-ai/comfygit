@@ -298,6 +298,14 @@ read/write APIs through Environment. The legacy core-side UI-workflow conversion
 path is no longer a supported contract authoring or runtime dependency; runtime
 execution should consume Manager-captured API prompt artifacts.
 
+### CGCORE-EXEC-01A [LIVE]: File outputs include native 3D artifacts
+Validation: TEST
+
+Declared `file` contract outputs MUST read ComfyUI history `files` and `3d`
+entries. Artifacts with the same filename, subfolder, and storage type across
+these keys MUST be returned once, preserving first-seen order. This permits
+native SaveGLB outputs without an application-specific export node.
+
 ### CGCORE-EXEC-02 [LIVE]: Core contract execution stays transport-agnostic
 Validation: STATIC
 
@@ -432,6 +440,25 @@ Validation: MIXED
 Model files are tracked by metadata such as filename, category, relative path,
 hash, sources, and workflow references. The model bytes themselves stay external
 to the Python package and environment manifest.
+
+### CGCORE-DEP-02C [LIVE]: Environments may explicitly require models independently of workflows
+Validation: TEST
+
+A global model entry may declare `criticality = "required"` or `"optional"`
+to make it an explicit environment dependency. This supports applications that
+construct prompts dynamically and custom loaders whose model requirements do
+not belong to a saved workflow. Entries without this field remain the existing
+workflow-derived model catalog; absence must not invent an environment-wide
+requirement.
+
+Explicit environment dependencies participate in build/source readiness,
+missing-model reporting, materialization and sync download policy, and reference
+inventory. Workflow cleanup must retain them and model metadata updates must
+preserve their declared criticality. A required environment declaration cannot
+be downgraded by an optional workflow reference. `--models skip` acquires no model
+bytes, `required` selects required dependencies, and `all` also selects optional
+dependencies. Callers must not need a synthetic workflow to acquire or retain
+an environment dependency.
 
 ### CGCORE-DEP-02A [PARTIAL]: Workflows may declare indexed models without graph references
 Validation: TEST

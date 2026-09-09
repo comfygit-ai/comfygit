@@ -2,7 +2,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from comfygit_core.models.shared import ModelWithLocation, NodeInfo
 from comfygit_core.models.workflow import WorkflowNodeWidgetRef
@@ -134,6 +134,11 @@ class ManifestModel:
     relative_path: str
     category: str
     sources: list[str] = field(default_factory=list)
+    criticality: Literal["required", "optional"] | None = None
+
+    def __post_init__(self) -> None:
+        if self.criticality not in (None, "required", "optional"):
+            raise ValueError(f"Invalid environment model criticality: {self.criticality}")
 
     def to_toml_dict(self) -> dict[str, Any]:
         """Serialize to TOML-compatible dict."""
@@ -145,6 +150,8 @@ class ManifestModel:
         }
         if self.sources:
             result["sources"] = self.sources
+        if self.criticality is not None:
+            result["criticality"] = self.criticality
         return result
 
     @classmethod
@@ -156,7 +163,8 @@ class ManifestModel:
             size=data["size"],
             relative_path=data["relative_path"],
             category=data.get("category", "unknown"),
-            sources=data.get("sources", [])
+            sources=data.get("sources", []),
+            criticality=data.get("criticality"),
         )
 
     @classmethod

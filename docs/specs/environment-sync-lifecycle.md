@@ -181,6 +181,11 @@ user-data deletion semantics.
 
 ## Import
 
+An import's internal sync must defer its completion marker until the remaining
+model acquisition phase succeeds. Failure to acquire a model selected by the
+requested strategy must raise before the completion marker or final import
+commit; `skip` explicitly omits acquisition from this completion check.
+
 ### CGSYNC-IMPORT-01 [LIVE]: Import is an authoring setup flow
 Validation: MIXED
 
@@ -193,6 +198,14 @@ the runtime hydration flow with stricter defaults described in
 `docs/specs/environment-materialization-lifecycle.md`.
 
 ## Custom Node Lifecycle
+
+### CGSYNC-NODE-00 [LIVE]: Git acquisition includes pinned submodules
+Validation: TEST
+
+Git clone hydration must initialize recursive submodules after checking out the
+requested parent revision, using each recorded gitlink commit rather than a
+moving branch. Git-node cache reuse must reject missing or mismatched submodule
+checkouts. Submodule acquisition failure must fail the parent acquisition.
 
 ### CGSYNC-NODE-01 [LIVE]: Node install and update mutate manifest, filesystem, and uv as one lifecycle
 Validation: TEST

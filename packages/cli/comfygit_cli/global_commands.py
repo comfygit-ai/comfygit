@@ -853,7 +853,7 @@ class GlobalCommands:
                     print(f"   Model download failed: {model_name} ({workflow_name})")
 
             def on_download_batch_start(self, count: int):
-                print(f"   Downloading {count} model(s)")
+                print(f"   Preparing {count} model(s)")
 
             def on_download_file_start(self, name: str, idx: int, total: int):
                 print(f"   [{idx}/{total}] {name}")
@@ -863,12 +863,12 @@ class GlobalCommands:
 
             def on_download_file_complete(self, name: str, success: bool, error: str | None):
                 if success:
-                    print(f"   Downloaded: {name}")
+                    print(f"   Available: {name}")
                 else:
                     print(f"   Download failed: {name}: {error}")
 
             def on_download_batch_complete(self, success: int, total: int):
-                print(f"   Downloaded {success}/{total} model(s)")
+                print(f"   Available {success}/{total} model(s)")
 
         try:
             workspace = self._get_or_create_workspace_at(

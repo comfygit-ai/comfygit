@@ -126,3 +126,16 @@ def test_maintains_list_cached_nodes(temp_cache, sample_node_info, tmp_path):
 
     cached_nodes = cache.list_cached_nodes()
     assert len(cached_nodes) > 0, "Should have cached nodes"
+
+
+@pytest.mark.parametrize("prefix,expected", [("-", False), ("+", False), ("U", False), (" ", True)])
+def test_cache_rejects_unhydrated_or_changed_submodules(temp_cache, sample_node_info, tmp_path, monkeypatch, prefix, expected):
+    from subprocess import CompletedProcess
+    cache = CustomNodeCacheManager(temp_cache)
+    source = tmp_path / "node"
+    source.mkdir()
+    (source / ".gitmodules").write_text('[submodule "dep"]\npath = dep\nurl = https://example.test/dep.git\n')
+    (source / ".git").mkdir()
+    cache.cache_node(sample_node_info, source)
+    monkeypatch.setattr('comfygit_core.utils.git._git', lambda *args, **kwargs: CompletedProcess([],0,stdout=prefix+'a'*40+' dep\n'))
+    assert cache.is_cached(sample_node_info) is expected

@@ -1017,6 +1017,7 @@ class Environment:
         overlay_names: list[str] | None = None,
         extras: list[str] | None = None,
         all_extras: bool = False,
+        mark_complete: bool = True,
     ) -> SyncResult:
         """Apply changes: sync packages, nodes, workflows, and models with environment.
 
@@ -1034,6 +1035,7 @@ class Environment:
             overlay_names: One-time overlay names for this sync call.
             extras: Optional list of extras to install
             all_extras: Install all optional extras
+            mark_complete: False when import still has acquisition steps to finish.
 
         Returns:
             SyncResult with details of what was synced
@@ -1060,6 +1062,7 @@ class Environment:
             overlay_names=overlay_names,
             extras=extras,
             all_extras=all_extras,
+            mark_complete=mark_complete,
         )
 
     # =====================================================
@@ -3298,7 +3301,7 @@ class Environment:
         try:
             # During import, don't remove ComfyUI builtins (fresh clone has example files)
             # Enable verbose to show real-time uv output during dependency installation
-            sync_result = self.sync(remove_extra_nodes=False, sync_callbacks=callbacks, verbose=True)
+            sync_result = self.sync(remove_extra_nodes=False, sync_callbacks=callbacks, verbose=True, mark_complete=False)
             if sync_result.success and sync_result.nodes_installed and callbacks:
                 for node_name in sync_result.nodes_installed:
                     callbacks.on_node_installed(node_name)
@@ -3325,19 +3328,6 @@ class Environment:
         if callbacks:
             callbacks.on_phase("resolve_models", f"Resolving workflows ({model_strategy} strategy)...")
 
-        # Always prepare models to copy sources from global table, even for "skip"
-        # This ensures download intents are preserved for later resolution
-        workflows_with_intents = self.model_manager.prepare_import_with_model_strategy(model_strategy)
-
-        # Only auto-resolve if not "skip" strategy
-        workflows_to_resolve = [] if model_strategy == "skip" else workflows_with_intents
-
-        # prepare_import_with_model_strategy() may update pyproject model entries.
-        # Invalidate per-workflow cache entries so resolve_workflow() sees fresh
-        # download intents instead of stale session-cached resolutions.
-        for workflow_name in workflows_to_resolve:
-            self.workflow_cache.invalidate(self.name, workflow_name)
-
         # Resolve workflows with download intents
         from ..models.workflow import BatchDownloadCallbacks
         from ..strategies.auto import AutoModelStrategy, AutoNodeStrategy
@@ -3354,6 +3344,23 @@ class Environment:
                 on_file_complete=callbacks.on_download_file_complete,
                 on_batch_complete=callbacks.on_download_batch_complete
             )
+
+        for download in self.model_manager.download_environment_models(model_strategy, download_callbacks):
+            if not download.success:
+                download_failures.append(("environment", download.filename))
+
+        # Always prepare models to copy sources from global table, even for "skip"
+        # This ensures download intents are preserved for later resolution
+        workflows_with_intents = self.model_manager.prepare_import_with_model_strategy(model_strategy)
+
+        # Only auto-resolve if not "skip" strategy
+        workflows_to_resolve = [] if model_strategy == "skip" else workflows_with_intents
+
+        # prepare_import_with_model_strategy() may update pyproject model entries.
+        # Invalidate per-workflow cache entries so resolve_workflow() sees fresh
+        # download intents instead of stale session-cached resolutions.
+        for workflow_name in workflows_to_resolve:
+            self.workflow_cache.invalidate(self.name, workflow_name)
 
         for workflow_name in workflows_to_resolve:
             try:
@@ -3384,12 +3391,25 @@ class Environment:
                     callbacks.on_workflow_resolved(workflow_name, successful_downloads)
 
             except Exception as e:
+                download_failures.append((workflow_name, str(e)))
                 if callbacks:
                     callbacks.on_error(f"Failed to resolve {workflow_name}: {e}")
 
         # Report download failures
         if download_failures and callbacks:
             callbacks.on_download_failures(download_failures)
+
+        if download_failures and model_strategy != "skip":
+            from ..models.exceptions import CDModelDownloadError
+
+            formatted_failures = ", ".join(
+                f"{model_name} (from {workflow_name})"
+                for workflow_name, model_name in download_failures
+            )
+            raise CDModelDownloadError(
+                f"{len(download_failures)} model(s) failed to download: {formatted_failures}",
+                failures=download_failures
+            )
 
         if no_manager:
             self._set_headless_marker()
@@ -3403,18 +3423,6 @@ class Environment:
         if create_import_commit and self.git_manager.has_uncommitted_changes():
             self.git_manager.commit_with_identity("Imported environment", add_all=True)
             logger.info("Committed import changes")
-
-        if download_failures and model_strategy != "skip":
-            from ..models.exceptions import CDModelDownloadError
-
-            formatted_failures = ", ".join(
-                f"{model_name} (from {workflow_name})"
-                for workflow_name, model_name in download_failures
-            )
-            raise CDModelDownloadError(
-                f"{len(download_failures)} model(s) failed to download: {formatted_failures}",
-                failures=download_failures
-            )
 
         logger.info("Import finalization completed successfully")
 

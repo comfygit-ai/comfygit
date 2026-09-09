@@ -142,6 +142,15 @@ def build_readiness_from_manifest_snapshot(
         _workflow_summary(workflow, model_catalog=snapshot.models)
         for workflow in snapshot.workflows.values()
     )
+    environment_models = tuple(
+        BuildModelSummary(
+            filename=model.filename, category=model.category,
+            criticality=model.criticality, content_hash=model.hash,
+            relative_path=model.relative_path, size_bytes=model.size,
+            sources=tuple(model.sources),
+        )
+        for model in snapshot.models.values() if model.criticality is not None
+    )
     custom_nodes = tuple(
         _custom_node_summary(identifier, node)
         for identifier, node in snapshot.nodes.items()
@@ -164,8 +173,8 @@ def build_readiness_from_manifest_snapshot(
         dependency_proof.append(proof)
         _collect_issue(proof, warnings=warnings, blockers=blockers)
 
-    for workflow in workflows:
-        for model in workflow.models:
+    for models in (environment_models, *(workflow.models for workflow in workflows)):
+        for model in models:
             proof = _classify_model_dependency(
                 model,
                 model_catalog=snapshot.models,
@@ -194,6 +203,7 @@ def build_readiness_from_manifest_snapshot(
         comfyui_repository=snapshot.comfyui_repository,
         comfyui_commit_sha=snapshot.comfyui_commit_sha,
         workflows=workflows,
+        environment_models=environment_models,
         custom_nodes=custom_nodes,
         python_dependencies=tuple(python_dependencies),
         dependency_proof=tuple(dependency_proof),
@@ -495,7 +505,7 @@ def _model_summary(
     return BuildModelSummary(
         filename=filename,
         category=category,
-        criticality=model.criticality,
+        criticality=("required" if catalog_entry and catalog_entry.criticality == "required" else model.criticality),
         status=model.status,
         content_hash=model.hash,
         relative_path=relative_path,

@@ -164,7 +164,9 @@ def collect_model_source_warnings(source: ReadinessInput) -> list[ModelSourceWar
             if not key:
                 continue
 
-            criticality = _dependency_criticality(workflow_model.criticality)
+            criticality = _dependency_criticality(
+                "required" if model_data.criticality == "required" else workflow_model.criticality
+            )
             warning = warnings_by_key.get(key)
             if warning is None:
                 warning = ModelSourceWarning(
@@ -190,7 +192,7 @@ def collect_model_source_warnings(source: ReadinessInput) -> list[ModelSourceWar
         warnings_by_key[key] = ModelSourceWarning(
             filename=model_data.filename or "unknown",
             hash=model_data.hash,
-            criticality="required",
+            criticality=_dependency_criticality(model_data.criticality or "required"),
             workflows=[],
             source_candidates=model_source_candidates(context, model_data),
         )

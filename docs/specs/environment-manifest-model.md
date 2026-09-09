@@ -310,6 +310,22 @@ should mean "not known to the active environment" rather than "not in a stale
 ComfyGit table." This remains partial while all model index presentation and
 query paths are not yet consistently environment-aware.
 
+### CGSPEC-MODEL-03B [LIVE]: Explicit environment model requirements survive workflow reconciliation
+Validation: TEST
+
+`[tool.comfygit.models.<hash>]` may include an explicit `criticality` of
+`required` or `optional`. These entries retain the ordinary indexed content
+identity, size, category, relative path and source fields, but are dependencies
+of the environment itself even when no saved workflow refers to them. Omission
+keeps catalog-only semantics. Invalid explicit values are manifest errors.
+
+Orphan cleanup preserves these declarations, and enrichment from the local
+index or a workflow does not silently erase their criticality. Source/readiness
+and missing-model checks include them. Import/materialization and sync honor
+the selected model strategy, verify expected model identity, reuse an available
+copy at the required path, and fail requested acquisition when it cannot be
+completed. Their sources are portable manifest proof, not private index hints.
+
 ### CGSPEC-MODEL-04 [LIVE]: Workflow model dependencies may be manually declared
 Validation: TEST
 

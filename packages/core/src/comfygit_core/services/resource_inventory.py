@@ -133,10 +133,20 @@ class WorkspaceResourceInventoryService:
         manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
 
         model_dependencies: dict[tuple[str, str | None], EnvironmentDependency] = {}
+        for model in snapshot.models.values():
+            if model.criticality is not None:
+                model_dependencies[(model.hash, model.relative_path)] = EnvironmentDependency(
+                    kind="model", identifier=model.hash, criticality=model.criticality,
+                    workflow_names=(), content_hash=model.hash,
+                    relative_path=model.relative_path,
+                    source=model.sources[0] if model.sources else None,
+                )
         for workflow_name, workflow in snapshot.workflows.items():
             for model in workflow.models:
                 identifier = model.hash or model.relative_path or model.filename
-                key = (identifier, model.relative_path)
+                catalog = snapshot.models.get(model.hash or "")
+                relative_path = model.relative_path or (catalog.relative_path if catalog else None)
+                key = (identifier, relative_path)
                 existing = model_dependencies.get(key)
                 workflow_names = set(existing.workflow_names if existing else ())
                 workflow_names.add(workflow_name)
@@ -150,8 +160,9 @@ class WorkspaceResourceInventoryService:
                     ),
                     workflow_names=tuple(sorted(workflow_names)),
                     content_hash=model.hash,
-                    relative_path=model.relative_path,
-                    source=model.sources[0] if model.sources else None,
+                    relative_path=relative_path,
+                    source=(model.sources[0] if model.sources else
+                            catalog.sources[0] if catalog and catalog.sources else None),
                 )
 
         node_dependencies = tuple(

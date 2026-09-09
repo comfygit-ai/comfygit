@@ -37,6 +37,7 @@ class DownloadRequest:
     url: str
     target_path: Path  # Full path in global models directory
     workflow_name: str | None = None
+    reuse_by_source: bool = True
 
 
 @dataclass
@@ -495,7 +496,7 @@ class ModelDownloader:
         temp_path: Path | None = None
         try:
             # Step 1: Check if already downloaded
-            existing = self.repository.find_by_source_url(request.url)
+            existing = self.repository.find_by_source_url(request.url) if request.reuse_by_source else None
             if existing:
                 logger.info(f"Model already downloaded from URL: {existing.relative_path}")
                 return DownloadResult(success=True, model=existing)

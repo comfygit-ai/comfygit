@@ -5,11 +5,13 @@ Handles source management, missing model detection, and import preparation.
 """
 from __future__ import annotations
 
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
 from ..logging.logging_config import get_logger
 from ..models.shared import ModelSourceResult, ModelSourceStatus
+from ..models.workflow import BatchDownloadCallbacks, DownloadResult
+from ..services.model_downloader import DownloadRequest
 
 if TYPE_CHECKING:
     from ..repositories.model_repository import ModelRepository
@@ -44,7 +46,7 @@ class EnvironmentModelManager:
     def _normalize_model_relative_path(relative_path: str) -> str:
         normalized = relative_path.replace("\\", "/").strip()
         path = PurePosixPath(normalized)
-        if not normalized or path.is_absolute() or ".." in path.parts:
+        if not normalized or path.is_absolute() or PureWindowsPath(normalized).drive or ".." in path.parts:
             raise ValueError(f"Model path must be relative to the models directory: {relative_path}")
         return path.as_posix()
 
@@ -280,6 +282,16 @@ class EnvironmentModelManager:
         # Second pass: Check global models table for any models not in repository
         global_models = self.pyproject.models.get_all()
         for global_model in global_models:
+            if global_model.criticality is not None and not self._get_available_workflow_model(global_model):
+                existing = missing_by_hash.get(global_model.hash)
+                if existing is None:
+                    missing_by_hash[global_model.hash] = MissingModelInfo(
+                        model=global_model, workflow_names=[],
+                        criticality=global_model.criticality,
+                        can_download=bool(global_model.sources),
+                    )
+                elif global_model.criticality == "required":
+                    existing.criticality = "required"
             if global_model.hash not in missing_by_hash:
                 if not self.model_repository.get_model(global_model.hash):
                     # Find which workflows use this model
@@ -306,6 +318,58 @@ class EnvironmentModelManager:
                         )
 
         return list(missing_by_hash.values())
+
+    def download_environment_models(
+        self, strategy: str = "all", callbacks: BatchDownloadCallbacks | None = None,
+    ) -> list[DownloadResult]:
+        """Acquire explicit environment requirements, including dynamic-prompt assets."""
+        if strategy not in ("skip", "required", "all"):
+            raise ValueError(f"Unknown model strategy: {strategy}")
+        if strategy == "skip":
+            return []
+        models = [model for model in self.pyproject.get_manifest_snapshot().models.values()
+                  if model.criticality is not None
+                  and (strategy == "all" or model.criticality == "required")]
+        results: list[DownloadResult] = []
+        if callbacks and callbacks.on_batch_start and models:
+            callbacks.on_batch_start(len(models))
+        for index, model in enumerate(models, 1):
+            if callbacks and callbacks.on_file_start:
+                callbacks.on_file_start(model.filename, index, len(models))
+            try:
+                relative_path = self._normalize_model_relative_path(model.relative_path)
+                target = self.model_downloader.models_dir / relative_path
+                target.resolve().relative_to(self.model_downloader.models_dir.resolve())
+                existing = self._get_available_workflow_model(model)
+                if existing:
+                    result = DownloadResult(True, model.filename, model=existing, reused=True)
+                elif target.exists():
+                    raise ValueError(f"Model destination already exists without matching indexed identity: {relative_path}")
+                elif not model.sources:
+                    raise ValueError(f"No download source for environment model: {model.filename}")
+                else:
+                    downloaded = self.model_downloader.download(
+                        DownloadRequest(url=model.sources[0], target_path=target, reuse_by_source=False),
+                        progress_callback=callbacks.on_file_progress if callbacks else None,
+                    )
+                    if not downloaded.success or downloaded.model is None:
+                        raise ValueError(downloaded.error or "Model download failed")
+                    if downloaded.model.hash != model.hash or downloaded.model.file_size != model.size:
+                        raise ValueError(f"Downloaded model identity mismatch for {model.filename}")
+                    result = DownloadResult(True, model.filename, model=downloaded.model)
+                for url in model.sources:
+                    self.model_repository.add_source(
+                        model_hash=model.hash,
+                        source_type=self.model_downloader.detect_url_type(url), source_url=url,
+                    )
+            except Exception as exc:
+                result = DownloadResult(False, model.filename, error=str(exc))
+            results.append(result)
+            if callbacks and callbacks.on_file_complete:
+                callbacks.on_file_complete(model.filename, result.success, result.error)
+        if callbacks and callbacks.on_batch_complete and models:
+            callbacks.on_batch_complete(sum(result.success for result in results), len(results))
+        return results
 
     def prepare_import_with_model_strategy(self, strategy: str = "all") -> list[str]:
         """Prepare import by converting missing models to download intents.
@@ -337,6 +401,12 @@ class EnvironmentModelManager:
             for idx, model in enumerate(models):
                 # Existing download intent (already unresolved with sources)
                 if model.status == "unresolved":
+                    # An app may have acquired a manual model after a skip import.
+                    # Reuse that exact identity without requiring an editable graph.
+                    if model.declared_by == "manual" and self._get_available_workflow_model(model):
+                        model.status = "resolved"
+                        models_modified = True
+                        continue
                     if model.sources:
                         has_download_intents = True
                         if model.criticality == "required":
