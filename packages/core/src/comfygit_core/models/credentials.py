@@ -14,6 +14,8 @@ class CredentialProvider(str, Enum):
 
 
 class CredentialSource(str, Enum):
+    EXPLICIT = "explicit"
+    ANONYMOUS = "anonymous"
     ENVIRONMENT = "environment"
     SECURE_STORE = "secure_store"
     PROVIDER_NATIVE = "provider_native"

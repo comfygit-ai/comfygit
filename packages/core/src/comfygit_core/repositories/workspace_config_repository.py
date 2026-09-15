@@ -1,7 +1,9 @@
 import json
 import os
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from comfygit_core.models.exceptions import ComfyDockError
@@ -34,13 +36,15 @@ class WorkspaceConfigRepository:
         config_file: Path,
         default_models_path: Path | None = None,
         credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
     ):
         self.config_file_path = config_file
         self._default_models_path = default_models_path
         harden_private_file(config_file)
         self.credential_service = CredentialService(
             self,
-            credential_store or KeyringCredentialStore(),
+            credential_store if credential_store is not None else KeyringCredentialStore(),
+            credential_overrides=credential_overrides,
             native_resolvers={
                 CredentialProvider.HUGGINGFACE: get_huggingface_native_token,
             },
@@ -193,9 +197,15 @@ class WorkspaceConfigRepository:
     def get_huggingface_token(self) -> str | None:
         """Resolve Hugging Face auth from environment, secure store, or provider login.
 
-        Priority: environment > workspace secure store > active Hugging Face login.
+        Priority: caller override > environment > secure store > provider login > legacy.
         """
         return self.credential_service.resolve(CredentialProvider.HUGGINGFACE)
+
+    def get_huggingface_download_token(self) -> str | Literal[False] | None:
+        """Translate explicit anonymous access into the Hub SDK's opt-out value."""
+        if self.credential_service.is_anonymous(CredentialProvider.HUGGINGFACE):
+            return False
+        return self.get_huggingface_token()
 
     def set_github_token(self, token: str | None):
         """Set or clear a GitHub credential in secure machine-local storage."""

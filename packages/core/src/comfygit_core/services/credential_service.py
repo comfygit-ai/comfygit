@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 from ..logging.logging_config import get_logger
@@ -46,24 +46,31 @@ class CredentialService:
         config_repository: WorkspaceConfigRepository,
         credential_store: CredentialStore,
         native_resolvers: dict[CredentialProvider, Callable[[], str | None]] | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
     ):
         self.config_repository = config_repository
         self.credential_store = credential_store
         self.native_resolvers = native_resolvers or {}
+        self._overrides = dict(credential_overrides or {})
+        if any(
+            value is not None and (not isinstance(value, str) or not value.strip())
+            for value in self._overrides.values()
+        ):
+            raise ValueError("Credential overrides must be nonempty tokens or None for anonymous access")
 
     def resolve(self, provider: CredentialProvider) -> str | None:
+        if provider in self._overrides:
+            return self._overrides[provider]
         if value := self._environment_value(provider):
             return value
 
-        self.migrate_legacy_credentials()
+        self.migrate_legacy_credentials(provider)
         workspace_id = self.config_repository.ensure_workspace_id()
         try:
             if value := self.credential_store.get(workspace_id, provider):
                 return value
         except CDCredentialStoreError:
-            if value := self.config_repository.get_legacy_credential(provider):
-                return value
-            return self._native_value(provider)
+            pass
 
         if value := self._native_value(provider):
             return value
@@ -90,54 +97,51 @@ class CredentialService:
         if store_error is not None:
             raise store_error
 
+    def is_anonymous(self, provider: CredentialProvider) -> bool:
+        return provider in self._overrides and self._overrides[provider] is None
+
     def status(self, provider: CredentialProvider) -> CredentialStatus:
+        if provider in self._overrides:
+            configured = self._overrides[provider] is not None
+            return CredentialStatus(
+                provider, configured,
+                CredentialSource.EXPLICIT if configured else CredentialSource.ANONYMOUS,
+            )
         if self._environment_value(provider):
             return CredentialStatus(provider, True, CredentialSource.ENVIRONMENT)
 
-        migration = self.migrate_legacy_credentials()
+        migration = self.migrate_legacy_credentials(provider)
         workspace_id = self.config_repository.ensure_workspace_id()
+        storage_error = None
         try:
             if self.credential_store.get(workspace_id, provider):
                 return CredentialStatus(provider, True, CredentialSource.SECURE_STORE)
         except CDCredentialStoreError as exc:
-            legacy = self.config_repository.get_legacy_credential(provider)
-            if legacy is None:
-                native = self._native_value(provider)
-                if native is not None:
-                    return CredentialStatus(
-                        provider=provider,
-                        configured=True,
-                        source=CredentialSource.PROVIDER_NATIVE,
-                        storage_available=False,
-                        message=str(exc),
-                    )
-            return CredentialStatus(
-                provider=provider,
-                configured=legacy is not None,
-                source=(
-                    CredentialSource.LEGACY_PLAINTEXT
-                    if legacy is not None
-                    else CredentialSource.UNAVAILABLE
-                ),
-                storage_available=False,
-                migration_required=legacy is not None,
-                message=str(exc),
-            )
+            storage_error = str(exc)
 
         if self._native_value(provider):
-            return CredentialStatus(provider, True, CredentialSource.PROVIDER_NATIVE)
-        if self.config_repository.get_legacy_credential(provider):
-            return CredentialStatus(
-                provider,
-                True,
-                CredentialSource.LEGACY_PLAINTEXT,
-                migration_required=True,
-                message=self._migration_error(provider, migration),
-            )
-        return CredentialStatus(provider, False, CredentialSource.NONE)
+            source = CredentialSource.PROVIDER_NATIVE
+        elif self.config_repository.get_legacy_credential(provider):
+            source = CredentialSource.LEGACY_PLAINTEXT
+        else:
+            source = CredentialSource.UNAVAILABLE if storage_error else CredentialSource.NONE
+        return CredentialStatus(
+            provider=provider,
+            configured=source in (CredentialSource.PROVIDER_NATIVE, CredentialSource.LEGACY_PLAINTEXT),
+            source=source,
+            storage_available=storage_error is None,
+            migration_required=provider in migration.retained,
+            message=storage_error or self._migration_error(provider, migration),
+        )
 
-    def migrate_legacy_credentials(self) -> CredentialMigrationResult:
-        legacy = self.config_repository.get_legacy_credentials()
+    def migrate_legacy_credentials(
+        self, provider: CredentialProvider | None = None,
+    ) -> CredentialMigrationResult:
+        """Migrate the requested provider, or all providers for an explicit migration."""
+        legacy = {
+            key: value for key, value in self.config_repository.get_legacy_credentials().items()
+            if provider is None or key == provider
+        }
         if not legacy:
             return CredentialMigrationResult()
 

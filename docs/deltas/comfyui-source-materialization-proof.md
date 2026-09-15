@@ -1,7 +1,8 @@
 # ComfyUI Source Materialization Proof
 
 Date: 2026-08-30  
-Host: `akatzfeyserver`  
+Host: private Linux GPU worker (hostname omitted)
+
 Scope: private scratch validation; no workflow or public environment repository published
 
 ## Contract under test
@@ -70,9 +71,8 @@ accepted AV latent through H3 Ultimate 2x enhancement:
 - Ultimate output: 832x512, 24 fps, 39 frames / 1.625 seconds, H.264 + AAC
 - queue result: success, no node validation errors
 
-Evidence remains under the dedicated scratch root:
-
-`/scratch/akatz-labs/COMFYGIT-H3-VSA-MATERIALIZE-TEST`
+Evidence remains under a dedicated private scratch root. Its host-specific
+path is omitted from this public document.
 
 The GPU container and temporary HTTP Git source were stopped after the proof.
 The downloaded model directory, materialized environment, inventory, prompt

@@ -1,5 +1,13 @@
 # Environment Manifest Model
 
+### CGSPEC-MAN-PARSE-01 [LIVE]: Empty optional workflow definitions do not block analysis
+Validation: TEST
+
+Workflow parsing accepts absent/null/empty `definitions`, and absent/null/empty
+`definitions.subgraphs`, as no subgraphs. Malformed nonempty structures produce
+field-specific validation errors. Existing graph nodes, links and valid
+subgraphs retain their meaning through parsing and serialization.
+
 This spec describes the tracked environment data shape that core, manager, CLI,
 deploy, and serve/runtime adapters should agree on.
 

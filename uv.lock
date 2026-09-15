@@ -500,7 +500,7 @@ version = "0.7.0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "argcomplete" },
-    { name = "comfygit-core" },
+    { name = "comfygit-core", extra = ["keyring"] },
     { name = "comfygit-studio" },
     { name = "requests" },
 ]
@@ -508,7 +508,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "argcomplete", specifier = ">=3.5.0" },
-    { name = "comfygit-core", editable = "packages/core" },
+    { name = "comfygit-core", extras = ["keyring"], editable = "packages/core" },
     { name = "comfygit-studio", editable = "packages/studio-runtime" },
     { name = "requests", specifier = ">=2.32.4" },
 ]
@@ -520,13 +520,18 @@ source = { editable = "packages/core" }
 dependencies = [
     { name = "blake3" },
     { name = "huggingface-hub" },
-    { name = "keyring" },
     { name = "packaging" },
     { name = "requests" },
     { name = "requirements-parser" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "tomlkit" },
     { name = "uv" },
     { name = "xxhash" },
+]
+
+[package.optional-dependencies]
+keyring = [
+    { name = "keyring" },
 ]
 
 [package.dev-dependencies]
@@ -538,14 +543,16 @@ dev = [
 requires-dist = [
     { name = "blake3", specifier = ">=0.3.3" },
     { name = "huggingface-hub", specifier = ">=0.15.1" },
-    { name = "keyring", specifier = ">=25.7.0" },
+    { name = "keyring", marker = "extra == 'keyring'", specifier = ">=25.7.0" },
     { name = "packaging", specifier = ">=16.2" },
     { name = "requests", specifier = ">=2.32.4" },
     { name = "requirements-parser", specifier = ">=0.11.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
     { name = "tomlkit", specifier = ">=0.11.0" },
     { name = "uv", specifier = ">=0.11.15" },
     { name = "xxhash", specifier = ">=2.0.0" },
 ]
+provides-extras = ["keyring"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.3" }]

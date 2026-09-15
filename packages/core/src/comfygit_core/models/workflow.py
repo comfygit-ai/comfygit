@@ -248,9 +248,22 @@ class Workflow:
         Stores metadata needed to reconstruct original structure in to_json().
         """
         # Build set of subgraph IDs for filtering UUID references
+        definitions = data.get('definitions')
+        if definitions is None:
+            definitions = {}
+        if not isinstance(definitions, dict):
+            raise ValueError("Workflow field 'definitions' must be an object or null")
+        subgraphs = definitions.get('subgraphs')
+        if subgraphs is None:
+            subgraphs = []
+        if not isinstance(subgraphs, list):
+            raise ValueError("Workflow field 'definitions.subgraphs' must be an array or null")
+        for subgraph in subgraphs:
+            if not isinstance(subgraph, dict) or not isinstance(subgraph.get('id'), str):
+                raise ValueError("Each workflow subgraph must be an object with a string 'id'")
         subgraph_ids = set()
-        if 'definitions' in data and 'subgraphs' in data['definitions']:
-            subgraph_ids = {sg['id'] for sg in data['definitions']['subgraphs']}
+        if subgraphs:
+            subgraph_ids = {sg['id'] for sg in subgraphs}
 
         nodes = {}
         subgraph_metadata = {}
@@ -274,8 +287,8 @@ class Workflow:
                     nodes[k] = WorkflowNode.from_dict(v)
 
         # Parse subgraph nodes (flatten all subgraphs) + capture ALL metadata for lossless round-trip
-        if 'definitions' in data and 'subgraphs' in data['definitions']:
-            for subgraph in data['definitions']['subgraphs']:
+        if subgraphs:
+            for subgraph in subgraphs:
                 subgraph_id = subgraph['id']
 
                 # Capture complete subgraph structure for round-trip preservation

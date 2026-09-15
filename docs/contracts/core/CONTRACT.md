@@ -175,6 +175,24 @@ returning or partially displaying the secret. Hugging Face resolution should
 honor the active provider-native `huggingface_hub` login when no explicit,
 environment, or workspace-secure credential overrides it.
 
+Core installs must not require the optional `keyring` package. The
+`comfygit-core[keyring]` extra enables the default secure-store adapter and the
+normal CLI installation includes this extra. Importing/creating/opening a
+workspace must work without the package; storage attempts report a structured
+setup error and never introduce plaintext persistence.
+
+Workspace callers may supply process-local `credential_overrides`, a mapping
+from provider to token or `None` (explicitly anonymous). An override bypasses
+environment, store, native login and legacy migration during resolution for that
+provider. Explicit migration requests still migrate all legacy providers.
+Otherwise precedence is environment, workspace secure store, provider-native
+login, then retained legacy plaintext. Missing/unavailable storage must not
+block the remaining resolution sources. Status distinguishes explicit tokens
+and explicitly anonymous access without returning their values. Hugging Face
+SDK calls must pass `False` for anonymous overrides, preventing SDK rediscovery.
+This controls ComfyGit provider credentials, not external git credential helpers,
+SSH agents, or authentication embedded in caller-supplied URLs.
+
 Legacy plaintext credentials may be migrated only after the destination store
 successfully writes and reads back the same value. Partial migration must retain
 every unverified legacy value so an unavailable or locked credential backend

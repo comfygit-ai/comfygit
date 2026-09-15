@@ -206,4 +206,4 @@ Implementation PRs should include:
 - tests proving containerized dev commands avoid root-owned repository `.venv`
   creation
 - a manual smoke note for at least one Docker-backed GPU runtime on
-  `akatzfeyserver` when GPU execution behavior changes
+  a configured Linux GPU worker when GPU execution behavior changes

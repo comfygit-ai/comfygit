@@ -101,5 +101,5 @@ Run the truth-layer validator when changing public API behavior or lifecycle
 guarantees:
 
 ```bash
-python3 /home/akatzfey/dev/ai-tools/akatz-skills/plugins/spec-workflows/skills/spec-driven-development/scripts/validate_contract_docs.py docs
+python3 <path-to-spec-workflows-skill>/scripts/validate_contract_docs.py docs
 ```

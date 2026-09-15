@@ -118,22 +118,11 @@ Sync/run may recreate the managed virtualenv. Manual package installs into that
 venv are disposable unless captured with `cg -e <env> py add ...` or local uv
 source configuration.
 
-Useful environment commands:
-
-```bash
-cg create <name>
-cg use <name>
-cg -e <name> sync
-cg -e <name> run
-cg -e <name> status
-cg -e <name> manifest
-cg -e <name> node add <id>
-cg -e <name> py add <package>
-cg -e <name> commit -m "message"
-cg -e <name> push
-cg -e <name> env-config local-sources add <pkg> --path <path> --editable
-cg -e <name> env-config torch-backend detect
-```
+For operating ComfyUI environments and workflows, read the bundled
+[ComfyGit skill](skills/comfygit/SKILL.md). It routes to installation, shared
+models/version comparisons, and custom-node/workflow development guidance.
+Use shared model storage and uv caches while preserving isolated mutable
+runtimes; do not assume all node checkouts or virtualenv files are deduplicated.
 
 ## Development Commands
 

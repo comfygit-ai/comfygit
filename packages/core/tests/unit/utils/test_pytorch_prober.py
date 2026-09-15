@@ -91,7 +91,7 @@ class TestGetExactPythonVersion:
 
         mock_result = MagicMock()
         mock_result.returncode = 0
-        mock_result.stdout = r"C:\Users\Alex\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\python.exe"
+        mock_result.stdout = r"C:\Users\User\AppData\Roaming\uv\python\cpython-3.11-windows-x86_64-none\python.exe"
 
         with patch("comfygit_core.utils.pytorch_prober.run_command", return_value=mock_result):
             version = get_exact_python_version("3.11")

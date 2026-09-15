@@ -1,13 +1,14 @@
 """Factory for creating and discovering workspaces."""
 
 import os
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 from ..core.workspace import Workspace, WorkspacePaths
 from ..logging.logging_config import get_logger
-from ..models.credentials import CredentialStore
+from ..models.credentials import CredentialProvider, CredentialStore
 from ..models.exceptions import (
     CDWorkspaceError,
     CDWorkspaceExistsError,
@@ -39,6 +40,7 @@ class WorkspaceFactory:
         path: Path | None = None,
         *,
         credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
     ) -> Workspace:
         """Find an existing workspace.
 
@@ -57,13 +59,17 @@ class WorkspaceFactory:
             raise CDWorkspaceNotFoundError(f"No workspace found at {workspace_paths.root}")
 
         harden_private_file(workspace_paths.workspace_file)
-        return Workspace(workspace_paths, credential_store=credential_store)
+        return Workspace(
+            workspace_paths,
+            credential_store=credential_store, credential_overrides=credential_overrides,
+        )
 
     @staticmethod
     def create(
         path: Path | None = None,
         *,
         credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
     ) -> Workspace:
         """Create a new ComfyGit workspace.
 
@@ -111,7 +117,10 @@ class WorkspaceFactory:
                 default_models_path=workspace_paths.models,
             ).save(metadata)
 
-            workspace = Workspace(workspace_paths, credential_store=credential_store)
+            workspace = Workspace(
+                workspace_paths,
+                credential_store=credential_store, credential_overrides=credential_overrides,
+            )
 
             # Write schema version to mark as modern workspace
             workspace._write_schema_version()

@@ -2,6 +2,7 @@
 """Check version compatibility across release artifacts (lockstep versioning)."""
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -31,10 +32,10 @@ def get_pyproject(pyproject_path):
 def dependency_version(pyproject_path, package_name):
     """Return the exact version pin for a project dependency."""
     data = get_pyproject(pyproject_path)
-    prefix = f"{package_name}=="
+    pattern = re.compile(rf"{re.escape(package_name)}(?:\[[^]]+\])?==([^; ]+)")
     for dependency in data.get("project", {}).get("dependencies", []):
-        if dependency.startswith(prefix):
-            return dependency.removeprefix(prefix)
+        if match := pattern.fullmatch(dependency):
+            return match.group(1)
     return None
 
 

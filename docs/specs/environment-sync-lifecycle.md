@@ -449,6 +449,37 @@ startup/validation states and only publish `complete` after the target ComfyUI
 HTTP endpoint responds, mapping wildcard listen addresses to a local readiness
 probe host.
 
+### CGSYNC-RUN-03 [LIVE]: Local runtime control verifies identity and restart completion
+Validation: TEST
+
+`cg run` advertises its runtime by environment as well as the existing shared
+switch observer. Environment-scoped CLI status/restart uses that advertisement
+and checks supervisor instance identity. Restart checks the current Manager
+workspace/environment and capability, requires a known idle queue, and routes
+through Manager's existing restart endpoint. It does not signal guessed PIDs.
+If Manager reports an active workspace-wide legacy orchestrator, the request
+is refused because the proxy could restart a different child.
+Mutation is restricted to local non-browser clients. `--wait` succeeds only
+after a newer child launch generation and ComfyUI HTTP readiness; acceptance
+alone is not completion. Uncertain requests must not be automatically repeated.
+
+The queue check is a preflight, not an atomic drain against concurrent external
+submitters. Old running supervisors without these advertisements need a normal
+owner-controlled relaunch; they are not silently adopted. Raw ComfyUI without
+Manager may be observed for HTTP readiness but cannot use this restart path.
+
+### CGSYNC-WF-AGENT-01 [LIVE]: Explicit mappings and strict resolution are public CLI operations
+Validation: TEST
+
+`workflow node map/unmap/list` adapts the public Environment mapping facade.
+Mapping requires a saved workflow and tracked package. `workflow resolve --json`
+requires automatic resolution and an explicit install/no-install choice, emits
+one result on stdout, and sends progress to stderr. With `--strict`, unresolved,
+ambiguous, missing, wrong-category or pending-download dependencies cause a
+nonzero exit. Completion is assessed again after mutations; it does not prove
+live imports, portable model recovery sources, or a successful generation.
+Without strict mode, partial interactive resolution remains supported.
+
 ## Readiness And Handoff
 
 ### CGSYNC-READY-01 [PARTIAL]: Core exposes UI-agnostic readiness results

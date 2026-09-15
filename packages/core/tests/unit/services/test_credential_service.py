@@ -201,3 +201,75 @@ def test_provider_native_token_still_works_when_keyring_is_unavailable(tmp_path)
     assert status.configured
     assert status.source == CredentialSource.PROVIDER_NATIVE
     assert not status.storage_available
+
+
+@pytest.mark.parametrize("value", ["explicit-token", None])
+def test_override_bypasses_every_ambient_source(monkeypatch, tmp_path, value):
+    from unittest.mock import Mock
+
+    config_file = tmp_path / "workspace.json"
+    _write_config(config_file, credentials={"huggingface_token": "legacy-token"})
+    before = config_file.read_bytes()
+    monkeypatch.setenv("HF_TOKEN", "environment-token")
+    store = Mock()
+    native = Mock(return_value="native-token")
+    repo = WorkspaceConfigRepository(
+        config_file, credential_store=store,
+        credential_overrides={CredentialProvider.HUGGINGFACE: value},
+    )
+    repo.credential_service.native_resolvers[CredentialProvider.HUGGINGFACE] = native
+
+    assert repo.get_huggingface_token() == value
+    status = repo.get_credential_status(CredentialProvider.HUGGINGFACE)
+    assert status.source == (CredentialSource.EXPLICIT if value else CredentialSource.ANONYMOUS)
+    assert status.configured is (value is not None)
+    assert repo.get_huggingface_download_token() == (value if value else False)
+    assert not store.mock_calls
+    native.assert_not_called()
+    assert config_file.read_bytes() == before
+
+
+def test_native_precedes_retained_legacy_when_storage_unavailable(tmp_path):
+    config_file = tmp_path / "workspace.json"
+    _write_config(config_file, credentials={"huggingface_token": "legacy-token"})
+    repo = WorkspaceConfigRepository(config_file, credential_store=UnavailableCredentialStore())
+    repo.credential_service.native_resolvers[CredentialProvider.HUGGINGFACE] = lambda: "native-token"
+    assert repo.get_huggingface_token() == "native-token"
+    status = repo.get_credential_status(CredentialProvider.HUGGINGFACE)
+    assert status.source == CredentialSource.PROVIDER_NATIVE
+    assert status.migration_required
+    assert "legacy-token" in config_file.read_text()
+
+
+def test_missing_keyring_package_keeps_fallbacks_working(monkeypatch, tmp_path):
+    def unavailable(_name):
+        raise ModuleNotFoundError("No module named 'keyring'")
+
+    monkeypatch.setattr("comfygit_core.repositories.credential_store.import_module", unavailable)
+    config_file = tmp_path / "workspace.json"
+    _write_config(config_file)
+    repo = WorkspaceConfigRepository(config_file)
+    assert repo.get_civitai_token() is None
+    assert not repo.get_credential_status(CredentialProvider.CIVITAI).storage_available
+    monkeypatch.setenv("CIVITAI_API_TOKEN", "environment-token")
+    assert repo.get_civitai_token() == "environment-token"
+    repo.credential_service.native_resolvers[CredentialProvider.HUGGINGFACE] = lambda: "native-token"
+    assert repo.get_huggingface_token() == "native-token"
+    with pytest.raises(CDCredentialStoreError, match=r"comfygit-core\[keyring\]"):
+        repo.set_civitai_token("must-not-persist")
+    assert "must-not-persist" not in config_file.read_text()
+
+
+def test_explicit_migration_remains_available_with_anonymous_override(tmp_path):
+    config_file = tmp_path / "workspace.json"
+    _write_config(config_file, credentials={"huggingface_token": "legacy-token"}, workspace_id="test")
+    store = MemoryCredentialStore()
+    repo = WorkspaceConfigRepository(
+        config_file, credential_store=store,
+        credential_overrides={CredentialProvider.HUGGINGFACE: None},
+    )
+    assert repo.get_huggingface_token() is None
+    assert repo.migrate_credentials().migrated == (CredentialProvider.HUGGINGFACE,)
+    assert store.get("test", CredentialProvider.HUGGINGFACE) == "legacy-token"
+    assert "legacy-token" not in config_file.read_text()
+    assert repo.get_huggingface_token() is None

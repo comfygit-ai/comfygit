@@ -243,7 +243,7 @@ class TestUpdateManager:
             source="registry",
             registry_id="comfygit-manager",
             repository="https://github.com/comfygit-ai/comfygit-manager",
-            download_url="https://cdn.comfy.org/akatz/comfygit-manager/0.1.1/node.zip",
+            download_url="https://cdn.comfy.org/example/comfygit-manager/0.1.1/node.zip",
         )
         group_name = test_env.pyproject.nodes.generate_group_name(current, "comfygit-manager")
 
@@ -288,7 +288,7 @@ class TestUpdateManager:
             deprecated=False,
             id="manager-v0.1.2",
             version="0.1.2",
-            download_url="https://cdn.comfy.org/akatz/comfygit-manager/0.1.2/node.zip",
+            download_url="https://cdn.comfy.org/example/comfygit-manager/0.1.2/node.zip",
         )
 
         def assert_manifest_still_present(_node_info):

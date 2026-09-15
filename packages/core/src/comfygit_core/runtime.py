@@ -11,6 +11,15 @@ from .lifecycle.comfyui_readiness import (
     resolve_comfyui_endpoint,
     wait_for_comfyui_ready,
 )
+from .lifecycle.runtime_control import (
+    RUNTIME_RESTART_ROUTE,
+    RUNTIME_STATUS_ROUTE,
+    ManagedRuntimeController,
+    ManagedRuntimeStatus,
+    RuntimeControlError,
+    RuntimeRestartReceipt,
+    read_runtime_advertisement,
+)
 from .lifecycle.switch_observer import (
     SUPERVISOR_HEALTH_ROUTE,
     SUPERVISOR_INFO_FILE,
@@ -57,6 +66,13 @@ def create_uv_venv(
 
 
 __all__ = [
+    "RUNTIME_RESTART_ROUTE",
+    "RUNTIME_STATUS_ROUTE",
+    "ManagedRuntimeController",
+    "ManagedRuntimeStatus",
+    "RuntimeControlError",
+    "RuntimeRestartReceipt",
+    "read_runtime_advertisement",
     "ACTIVE_TORCH_BACKEND_OVERRIDE_ENV",
     "ComfyUIEndpoint",
     "SUPERVISOR_HEALTH_ROUTE",

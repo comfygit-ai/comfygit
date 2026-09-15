@@ -1700,6 +1700,8 @@ class GlobalCommands:
     }
 
     _AUTH_SOURCE_LABELS = {
+        CredentialSource.EXPLICIT: "application supplied",
+        CredentialSource.ANONYMOUS: "explicitly anonymous",
         CredentialSource.ENVIRONMENT: "environment",
         CredentialSource.SECURE_STORE: "secure store",
         CredentialSource.PROVIDER_NATIVE: "provider login",
@@ -1836,6 +1838,14 @@ class GlobalCommands:
 
     def orch_status(self, args: argparse.Namespace) -> None:
         """Show orchestrator status."""
+        from comfygit_core.runtime import read_runtime_advertisement
+        target = getattr(args, "target_env", None)
+        if not target:
+            active = self.workspace.get_active_environment()
+            target = active.name if active else None
+        if target and read_runtime_advertisement(self.workspace.path, target):
+            self.runtime_control(args, restart=False)
+            return
         from .utils.orchestrator import (
             format_uptime,
             get_orchestrator_uptime,
@@ -1854,6 +1864,10 @@ class GlobalCommands:
             status_data = {
                 "running": is_running,
                 "pid": pid,
+                "scope": "legacy_orchestrator",
+                "environment": target,
+                "runtime_status": "unknown",
+                "guidance": "No environment runtime advertisement; older cg run processes may still be running.",
             }
 
             if is_running and pid is not None:
@@ -1879,7 +1893,8 @@ class GlobalCommands:
             else:
                 print("Running:        No")
             print("\nOrchestrator is not running.")
-            print("Start ComfyUI to launch the orchestrator automatically.")
+            print("No legacy orchestrator is registered. Older cg run supervisors may still be running;")
+            print("relaunch with this CLI to enable environment-scoped runtime status/control.")
             print("━" * 70)
             return
 
@@ -1926,42 +1941,35 @@ class GlobalCommands:
 
     def orch_restart(self, args: argparse.Namespace) -> None:
         """Request orchestrator to restart ComfyUI."""
-        import time
+        # Restart always targets an environment and uses its current supervisor.
+        self.runtime_control(args, restart=True)
 
-        from .utils.orchestrator import is_orchestrator_running, safe_write_command
+    def runtime_control(self, args: argparse.Namespace, *, restart: bool) -> None:
+        import json
 
-        metadata_dir = self.workspace.path / ".metadata"
+        from .utils.runtime_client import RuntimeClient
 
-        # Check if orchestrator is running
-        is_running, pid = is_orchestrator_running(metadata_dir)
-
-        if not is_running:
-            print("✗ Orchestrator is not running")
-            print("  Start ComfyUI to launch the orchestrator")
-            sys.exit(1)
-
-        # Send restart command
-        print(f"✓ Sending restart command to orchestrator (PID {pid})")
-        safe_write_command(metadata_dir, {
-            "command": "restart",
-            "timestamp": time.time()
-        })
-
-        print("  ComfyUI will restart within 500ms...")
-
-        if args.wait:
-            print("\n  Waiting for restart to complete...")
-            time.sleep(2)  # Give orchestrator time to process
-
-            # Wait for restart (check if PID changes or process restarts)
-            for _ in range(30):  # 15 second timeout
-                time.sleep(0.5)
-                is_running, new_pid = is_orchestrator_running(metadata_dir)
-                if is_running:
-                    print(f"✓ Orchestrator restarted (PID {new_pid})")
-                    return
-
-            print("⚠️  Restart may still be in progress")
+        name = getattr(args, "target_env", None)
+        if not name:
+            active = self.workspace.get_active_environment()
+            name = active.name if active else None
+        if not name:
+            raise ValueError("Choose an environment with cg -e NAME orch ...")
+        try:
+            client = RuntimeClient(self.workspace.path, name)
+            result = client.restart(wait=args.wait, timeout=args.timeout) if restart else client.status()
+        except Exception as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"environment": name, "status": "unverified", "error": str(exc)}))
+            raise
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2))
+        elif restart:
+            print(f"{name}: {result['status']}")
+        else:
+            print(f"{name}: {result['phase']} — HTTP ready: {result['ready']}")
+            print(f"  Queue: {result['queue_running']} running, {result['queue_pending']} pending")
+            print(f"  ComfyUI: {result['comfyui_url']} (generation {result['generation']})")
 
     def orch_kill(self, args: argparse.Namespace) -> None:
         """Shutdown orchestrator."""

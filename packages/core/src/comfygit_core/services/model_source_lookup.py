@@ -54,7 +54,7 @@ class ModelSourceLookupService:
         if hf_api is not None:
             self.hf_api = hf_api
         else:
-            hf_token = workspace_config.get_huggingface_token() if workspace_config else None
+            hf_token = workspace_config.get_huggingface_download_token() if workspace_config else None
             self.hf_api = HfApi(token=hf_token)
 
     def lookup_sources(

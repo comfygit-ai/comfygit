@@ -293,8 +293,8 @@ class ModelDownloader:
                 error="Invalid HuggingFace file URL."
             )
 
-        # Get HF token from workspace config (handles env var > config priority)
-        token = self.workspace_config.get_huggingface_token() if self.workspace_config else None
+        # Resolve caller overrides and ambient credentials, preserving anonymous opt-out.
+        token = self.workspace_config.get_huggingface_download_token() if self.workspace_config else None
 
         # Custom tqdm class for progress callback
         # HF hub's tqdm_class must handle: (1) 'name' kwarg that vanilla tqdm rejects,
@@ -346,7 +346,7 @@ class ModelDownloader:
                         repo_id=parsed.repo_id,
                         filename=parsed.path_in_repo,
                         revision=parsed.revision or "main",
-                        token=token if token else None,
+                        token=token,
                         local_dir=str(local_dir),
                         tqdm_class=tqdm_class,
                     )
@@ -355,7 +355,7 @@ class ModelDownloader:
                         repo_id=parsed.repo_id,
                         filename=parsed.path_in_repo,
                         revision=parsed.revision or "main",
-                        token=token if token else None,
+                        token=token,
                         local_dir=str(local_dir),
                     )
             except TypeError:
@@ -364,7 +364,7 @@ class ModelDownloader:
                     repo_id=parsed.repo_id,
                     filename=parsed.path_in_repo,
                     revision=parsed.revision or "main",
-                    token=token if token else None,
+                    token=token,
                     local_dir=str(local_dir),
                 )
 

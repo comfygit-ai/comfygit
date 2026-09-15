@@ -1,0 +1,4 @@
+interface:
+  display_name: "ComfyGit"
+  short_description: "Manage ComfyUI environments and workflow dependencies"
+  default_prompt: "Use $comfygit to prepare and validate a managed ComfyUI environment with shared models."

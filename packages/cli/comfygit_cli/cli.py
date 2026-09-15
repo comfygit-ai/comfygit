@@ -485,22 +485,24 @@ def _add_global_commands(subparsers: argparse._SubParsersAction) -> None:
     orch_parser.set_defaults(func=_make_help_func(orch_parser))
 
     # orch status
-    orch_status_parser = orch_subparsers.add_parser("status", help="Show orchestrator status")
+    orch_status_parser = orch_subparsers.add_parser("status", help="Show environment runtime status (legacy orchestrator fallback)")
     orch_status_parser.add_argument("--json", action="store_true", help="Output as JSON")
     orch_status_parser.set_defaults(func=global_cmds.orch_status)
 
     # orch restart
-    orch_restart_parser = orch_subparsers.add_parser("restart", help="Restart ComfyUI")
+    orch_restart_parser = orch_subparsers.add_parser("restart", help="Restart idle ComfyUI through its cg run supervisor")
     orch_restart_parser.add_argument("--wait", action="store_true", help="Wait for restart to complete")
+    orch_restart_parser.add_argument("--timeout", type=float, default=180, help="Maximum readiness wait in seconds")
+    orch_restart_parser.add_argument("--json", action="store_true", help="Output acknowledgement or verified readiness as JSON")
     orch_restart_parser.set_defaults(func=global_cmds.orch_restart)
 
     # orch kill
-    orch_kill_parser = orch_subparsers.add_parser("kill", help="Shutdown orchestrator")
+    orch_kill_parser = orch_subparsers.add_parser("kill", help="Shutdown the legacy orchestrator (not cg run)")
     orch_kill_parser.add_argument("--force", action="store_true", help="Force kill (bypass command queue)")
     orch_kill_parser.set_defaults(func=global_cmds.orch_kill)
 
     # orch clean
-    orch_clean_parser = orch_subparsers.add_parser("clean", help="Clean orchestrator state")
+    orch_clean_parser = orch_subparsers.add_parser("clean", help="Clean legacy orchestrator state")
     orch_clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted")
     orch_clean_parser.add_argument("--force", action="store_true", help="Skip confirmation")
     orch_clean_parser.add_argument("--kill", action="store_true", help="Also kill orchestrator process")
@@ -1120,9 +1122,23 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     workflow_resolve_parser = workflow_subparsers.add_parser("resolve", help="Resolve workflow dependencies (nodes & models)")
     workflow_resolve_parser.add_argument("name", help="Workflow name to resolve").completer = workflow_completer  # type: ignore[attr-defined]
     workflow_resolve_parser.add_argument("--auto", action="store_true", help="Auto-resolve without interaction")
+    workflow_resolve_parser.add_argument("--json", action="store_true", help="JSON result on stdout; requires --auto and --install/--no-install")
+    workflow_resolve_parser.add_argument("--strict", action="store_true", help="Exit 1 when dependencies remain unresolved or uninstalled")
     workflow_resolve_parser.add_argument("--install", action="store_true", help="Auto-install missing nodes without prompting")
     workflow_resolve_parser.add_argument("--no-install", action="store_true", help="Skip node installation prompt")
     workflow_resolve_parser.set_defaults(func=env_cmds.workflow_resolve)
+
+    workflow_node_parser = workflow_subparsers.add_parser("node", help="Manage explicit node ownership mappings")
+    mapping_parsers = workflow_node_parser.add_subparsers(dest="mapping_command", required=True)
+    for operation in ("map", "unmap", "list"):
+        mapping_parser = mapping_parsers.add_parser(operation)
+        mapping_parser.add_argument("name", help="Workflow name")
+        if operation != "list":
+            mapping_parser.add_argument("node_type", help="ComfyUI registered node class name")
+        if operation == "map":
+            mapping_parser.add_argument("package", help="Tracked node package identifier")
+        mapping_parser.add_argument("--json", action="store_true")
+        mapping_parser.set_defaults(func=env_cmds.workflow_node_mapping)
 
     # workflow model importance
     workflow_importance_parser = workflow_subparsers.add_parser(

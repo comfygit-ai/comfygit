@@ -20,8 +20,8 @@ from comfygit_core.models import (
 )
 from comfygit_core.runtime import (
     ACTIVE_TORCH_BACKEND_OVERRIDE_ENV,
+    ManagedRuntimeController,
     SwitchObserverServer,
-    cleanup_supervisor_advertisement,
     cleanup_switch_status,
     read_switch_status,
     resolve_comfyui_endpoint,
@@ -596,6 +596,9 @@ class EnvironmentCommands:
         extras = getattr(args, 'extra', None) or []
         all_extras = getattr(args, 'all_extras', False)
         overlay_names = getattr(args, 'overlay', None) or []
+        self._managed_runtime = ManagedRuntimeController(
+            env.name, resolve_comfyui_endpoint(base_comfyui_args), self.workspace.path,
+        )
         supervisor_control = self._start_supervisor_control(base_comfyui_args)
         if supervisor_control:
             atexit.register(supervisor_control.stop)
@@ -612,6 +615,9 @@ class EnvironmentCommands:
             # replacing `env`, so derive backend-specific launch args per target.
             torch_backend, was_probed = self._get_or_probe_backend(env, torch_backend_override)
             comfyui_args = self._comfyui_args_for_backend(base_comfyui_args, torch_backend)
+            self._managed_runtime.configure(env.name, resolve_comfyui_endpoint(comfyui_args))
+            if supervisor_control:
+                supervisor_control.advertise_runtime()
 
             if torch_backend_override:
                 print(f"🔧 Using PyTorch backend override: {torch_backend}")
@@ -654,6 +660,7 @@ class EnvironmentCommands:
             if comfyui_args:
                 print(f"   Arguments: {' '.join(comfyui_args)}")
 
+            self._managed_runtime.launching()
             if switch_source_env:
                 result = self._run_switched_comfyui(
                     env,
@@ -669,6 +676,7 @@ class EnvironmentCommands:
                     backend_override=torch_backend_override,
                 )
 
+            self._managed_runtime.exited()
             if result.returncode == RESTART_EXIT_CODE:
                 print("\n🔄 Restart requested, syncing dependencies...\n")
                 no_sync = False  # Ensure sync runs on restart
@@ -697,7 +705,6 @@ class EnvironmentCommands:
         explicit_port = port_text is not None
 
         if port_text and port_text.lower() in {"0", "off", "false", "disabled"}:
-            cleanup_supervisor_advertisement(self.workspace.path)
             return None
 
         if port_text:
@@ -705,7 +712,6 @@ class EnvironmentCommands:
                 candidate_ports = [int(port_text)]
             except ValueError:
                 print(f"⚠️  Invalid COMFYGIT_SUPERVISOR_CONTROL_PORT={port_text!r}; supervisor control disabled")
-                cleanup_supervisor_advertisement(self.workspace.path)
                 return None
         else:
             start_port = min(max(endpoint.port + 1, 1), 65535)
@@ -721,6 +727,7 @@ class EnvironmentCommands:
                 host,
                 port,
                 public_origin=public_origin,
+                runtime_controller=getattr(self, "_managed_runtime", None),
             )
             try:
                 control.start()
@@ -739,7 +746,6 @@ class EnvironmentCommands:
                 "⚠️  Could not start supervisor control server on "
                 f"{host}:{candidate_ports[0]}-{candidate_ports[-1]}: {last_error}"
             )
-        cleanup_supervisor_advertisement(self.workspace.path)
         return None
 
     def _append_switch_log(
@@ -3733,8 +3739,64 @@ class EnvironmentCommands:
         print(f"✗ Invalid selection: {choice}")
         return None
 
-    @with_env_logging("workflow resolve", get_env_name=lambda self, args: self._get_env(args).name)
     def workflow_resolve(self, args: argparse.Namespace, logger=None) -> None:
+        """Resolve with optional machine-readable, strict completion reporting."""
+        import contextlib
+        import json
+
+        json_output = getattr(args, "json", False)
+        strict = getattr(args, "strict", False)
+        if json_output and not args.auto:
+            print("--json requires --auto (use explicit mappings for unknown nodes)", file=sys.stderr)
+            raise SystemExit(2)
+        if json_output and not (args.install or args.no_install):
+            print("--json requires --install or --no-install", file=sys.stderr)
+            raise SystemExit(2)
+
+        try:
+            with contextlib.redirect_stdout(sys.stderr) if json_output else contextlib.nullcontext():
+                self._workflow_resolve(args)
+                if not (json_output or strict):
+                    return
+                # Re-analyze AFTER downloads/installs, rather than reporting the stale plan.
+                env = self._get_env(args)
+                _, result = env.analyze_workflow_dependencies(args.name)
+                missing = env.get_uninstalled_nodes(workflow_name=args.name)
+                failed = env.get_workflow_failed_downloads(args.name)
+                from .utils.workflow_result import resolution_report
+                report = resolution_report(result, missing, failed)
+        except (Exception, SystemExit) as exc:
+            if json_output:
+                print(json.dumps({"schema_version": 1, "workflow": args.name,
+                                  "complete": False, "error": "resolution_failed"}))
+            raise exc
+        if json_output:
+            print(json.dumps(report, indent=2))
+        if strict and not report["complete"]:
+            raise SystemExit(1)
+
+    def workflow_node_mapping(self, args: argparse.Namespace) -> None:
+        """Explicit ownership edits through the public Environment facade."""
+        import json
+
+        env = self._get_env(args)
+        if not env.get_workflow_path(args.name).is_file():
+            raise ValueError(f"Workflow not found: {args.name}")
+        if args.mapping_command == "map":
+            if env.get_manifest_node(args.package) is None:
+                raise ValueError(f"Package is not tracked: {args.package}. Add or dev-link it first.")
+            env.set_workflow_custom_node_mapping(args.name, args.node_type, args.package)
+        elif args.mapping_command == "unmap":
+            env.remove_workflow_custom_node_mapping(args.name, args.node_type)
+        mappings = dict(env.get_workflow_custom_node_map(args.name))
+        if args.json:
+            print(json.dumps({"workflow": args.name, "custom_node_map": mappings}, indent=2))
+        else:
+            for node_type, package in sorted(mappings.items()):
+                print(f"{node_type}: {package}")
+
+    @with_env_logging("workflow resolve", get_env_name=lambda self, args: self._get_env(args).name)
+    def _workflow_resolve(self, args: argparse.Namespace, logger=None) -> None:
         """Resolve workflow dependencies interactively."""
         env = self._get_env(args)
 

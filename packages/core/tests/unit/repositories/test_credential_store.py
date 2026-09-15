@@ -6,13 +6,16 @@ from comfygit_core.repositories.credential_store import (
     KEYRING_SERVICE,
     KeyringCredentialStore,
 )
-from keyring.errors import NoKeyringError, PasswordDeleteError
+
+keyring = pytest.importorskip("keyring")
+NoKeyringError = keyring.errors.NoKeyringError
+PasswordDeleteError = keyring.errors.PasswordDeleteError
 
 
 def test_keyring_store_scopes_credentials_by_workspace_and_provider(monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        "comfygit_core.repositories.credential_store.keyring.set_password",
+        "keyring.set_password",
         lambda service, account, value: captured.update(
             service=service,
             account=account,
@@ -34,7 +37,7 @@ def test_keyring_backend_failure_is_structured(monkeypatch):
         raise NoKeyringError("no backend")
 
     monkeypatch.setattr(
-        "comfygit_core.repositories.credential_store.keyring.get_password",
+        "keyring.get_password",
         fail,
     )
 
@@ -47,7 +50,7 @@ def test_clearing_an_absent_keyring_entry_is_idempotent(monkeypatch):
         raise PasswordDeleteError("missing")
 
     monkeypatch.setattr(
-        "comfygit_core.repositories.credential_store.keyring.delete_password",
+        "keyring.delete_password",
         missing,
     )
 

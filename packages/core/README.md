@@ -466,3 +466,34 @@ dependencies = [
     "comfygit-core>=0.3.14,<0.4.0"  # Pin to minor version
 ]
 ```
+
+## Credentials in headless applications
+
+The base `comfygit-core` installation does not require `keyring`. Install
+`comfygit-core[keyring]` when OS-backed credential persistence is wanted; the
+normal `comfygit` CLI includes this extra. An unavailable package or OS backend
+produces a structured error when saving credentials, never plaintext fallback.
+
+`Workspace.open`, `create`, `from_path`, and `open_or_create` accept an optional
+`credential_overrides` mapping keyed by `CredentialProvider`. A nonempty token
+is process-local and takes priority over environment variables, workspace secure
+storage and provider-native login. An explicit `None` requests anonymous
+provider access; omitted providers follow the normal resolution chain. For
+Hugging Face downloads and lookup, anonymous access disables the SDK's saved
+login discovery too. External git helpers/SSH and URL-embedded authentication
+remain the embedding application's responsibility.
+
+```python
+from comfygit_core import Workspace
+from comfygit_core.models import CredentialProvider
+
+workspace = Workspace.open(
+    workspace_path,
+    credential_overrides={CredentialProvider.HUGGINGFACE: None},
+)
+```
+
+No login is required for local operations or public resources that allow
+anonymous access. For authenticated access without keyring, set the appropriate
+provider environment variable or use an existing Hugging Face login. Tokens
+are never exported in environment manifests.

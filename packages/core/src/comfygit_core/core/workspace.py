@@ -208,7 +208,10 @@ class Workspace:
     # Current workspace schema version (v2 = per-environment manager)
     CURRENT_SCHEMA_VERSION = 2
 
-    def __init__(self, paths: WorkspacePaths, credential_store: CredentialStore | None = None):
+    def __init__(
+        self, paths: WorkspacePaths, credential_store: CredentialStore | None = None,
+        *, credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
+    ):
         """Initialize workspace with validated paths.
 
         Args:
@@ -216,6 +219,7 @@ class Workspace:
         """
         self.paths = paths
         self._credential_store = credential_store
+        self._credential_overrides = dict(credential_overrides or {})
 
     @classmethod
     def open(
@@ -223,16 +227,23 @@ class Workspace:
         path: Path | None = None,
         *,
         credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
     ) -> "Workspace":
         """Open an existing workspace.
 
         This is the public discovery entry point for callers. It delegates to
         the current factory implementation while keeping factory internals out
-        of adapter code.
+        of adapter code. ``credential_overrides`` is process-local: a token wins
+        over ambient credentials; None explicitly disables provider discovery.
+        Omitted providers retain normal resolution. The same options are
+        accepted by create, from_path and open_or_create.
         """
         from ..factories.workspace_factory import WorkspaceFactory
 
-        return WorkspaceFactory.find(path, credential_store=credential_store)
+        return WorkspaceFactory.find(
+            path,
+            credential_store=credential_store, credential_overrides=credential_overrides,
+        )
 
     @classmethod
     def create(
@@ -240,11 +251,15 @@ class Workspace:
         path: Path | None = None,
         *,
         credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
     ) -> "Workspace":
         """Create a new workspace on disk and return it."""
         from ..factories.workspace_factory import WorkspaceFactory
 
-        return WorkspaceFactory.create(path, credential_store=credential_store)
+        return WorkspaceFactory.create(
+            path,
+            credential_store=credential_store, credential_overrides=credential_overrides,
+        )
 
     @classmethod
     def from_path(
@@ -252,6 +267,7 @@ class Workspace:
         path: Path,
         *,
         credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
     ) -> "Workspace":
         """Construct a workspace object when the caller already has a root path.
 
@@ -260,7 +276,10 @@ class Workspace:
         contexts that infer the workspace root from runtime state and need to
         wrap that resolved root without exposing ``WorkspacePaths``.
         """
-        return cls(WorkspacePaths(path), credential_store=credential_store)
+        return cls(
+            WorkspacePaths(path),
+            credential_store=credential_store, credential_overrides=credential_overrides,
+        )
 
     @classmethod
     def open_or_create(
@@ -268,15 +287,22 @@ class Workspace:
         path: Path | None = None,
         *,
         credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
     ) -> "Workspace":
         """Open an existing workspace, or create it if it does not exist."""
         from ..factories.workspace_factory import WorkspaceFactory
         from ..models.exceptions import CDWorkspaceNotFoundError
 
         try:
-            return WorkspaceFactory.find(path, credential_store=credential_store)
+            return WorkspaceFactory.find(
+                path,
+                credential_store=credential_store, credential_overrides=credential_overrides,
+            )
         except CDWorkspaceNotFoundError:
-            return WorkspaceFactory.create(path, credential_store=credential_store)
+            return WorkspaceFactory.create(
+                path,
+                credential_store=credential_store, credential_overrides=credential_overrides,
+            )
 
     @classmethod
     def default_root(cls, path: Path | None = None) -> Path:
@@ -416,6 +442,7 @@ class Workspace:
             self.paths.workspace_file,
             default_models_path=self.paths.models,
             credential_store=self._credential_store,
+            credential_overrides=self._credential_overrides,
         )
 
     def get_civitai_token(self) -> str | None:

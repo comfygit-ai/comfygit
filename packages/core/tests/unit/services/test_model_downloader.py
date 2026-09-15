@@ -650,7 +650,7 @@ class TestModelDownloaderHuggingFaceFallback:
 
         workspace_config = Mock()
         workspace_config.get_models_directory.return_value = tmp_path
-        workspace_config.get_huggingface_token.return_value = None
+        workspace_config.get_huggingface_download_token.return_value = None
 
         downloader = ModelDownloader(repo, workspace_config)
         target_path = tmp_path / "checkpoints" / "model.safetensors"
@@ -701,7 +701,7 @@ class TestModelDownloaderHuggingFaceFallback:
 
         workspace_config = Mock()
         workspace_config.get_models_directory.return_value = mount_models
-        workspace_config.get_huggingface_token.return_value = None
+        workspace_config.get_huggingface_download_token.return_value = None
 
         downloader = ModelDownloader(repo, workspace_config)
         target_path = mount_models / "checkpoints" / "model.safetensors"
@@ -748,7 +748,7 @@ class TestModelDownloaderHuggingFaceFallback:
 
         workspace_config = Mock()
         workspace_config.get_models_directory.return_value = tmp_path
-        workspace_config.get_huggingface_token.return_value = None
+        workspace_config.get_huggingface_download_token.return_value = None
 
         downloader = ModelDownloader(repo, workspace_config)
         target_path = tmp_path / "clip" / "model.safetensors"
@@ -791,7 +791,7 @@ class TestModelDownloaderHuggingFaceFallback:
 
         workspace_config = Mock()
         workspace_config.get_models_directory.return_value = tmp_path
-        workspace_config.get_huggingface_token.return_value = None
+        workspace_config.get_huggingface_download_token.return_value = None
 
         downloader = ModelDownloader(repo, workspace_config)
         target_path = tmp_path / "checkpoints" / "model.safetensors"

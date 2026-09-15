@@ -231,7 +231,7 @@ class WorkflowHandler(BaseHandler):
 
         Args:
             name: Workflow name
-            node_pack_ids: List of node pack identifiers (e.g., ["comfyui-akatz-nodes"]) | None which clears node packs
+            node_pack_ids: List of node pack identifiers (e.g., ["example-node-pack"]) | None which clears node packs
             config: Optional in-memory config for batched writes. If None, loads and saves immediately.
         """
         is_batch = config is not None
