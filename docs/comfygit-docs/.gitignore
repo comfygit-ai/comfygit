@@ -12,3 +12,6 @@ __pycache__/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Parser reference for local comparison, never curated source
+generated-cli/

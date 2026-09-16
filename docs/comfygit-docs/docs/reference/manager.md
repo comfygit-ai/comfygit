@@ -38,7 +38,9 @@ cg manager status
 cg manager update
 ```
 
-Restart the environment after updating Manager.
+Manager has its own release cycle; the core/CLI/Studio 0.7.0 release does not
+imply a Manager 0.7.0 release. Check `cg manager status` and the Manager release
+notes for the installed panel's capabilities. Restart the environment after updating Manager.
 
 ## Related Pages
 

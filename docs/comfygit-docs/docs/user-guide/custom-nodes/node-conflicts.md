@@ -50,7 +50,7 @@ If the conflict is real, use constraints or overlays rather than manually
 installing packages into `.venv`.
 
 ```bash
-cg constraint add package<2
+cg constraint add "package<2"
 cg overlay create local-dev --local
 cg overlay enable local-dev
 ```

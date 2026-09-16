@@ -229,6 +229,7 @@ class SwitchObserverServer:
                 if self.runtime_controller and data.get("instance_id") == self.runtime_controller.instance_id:
                     path.unlink(missing_ok=True)
             except (OSError, ValueError):
+                # Cleanup is best effort; never remove an advertisement without ownership proof.
                 pass
 
     def append_log(self, message: str, level: str = "info") -> None:

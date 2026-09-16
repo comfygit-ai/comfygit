@@ -7,6 +7,15 @@ Environment commands operate on the active environment or the one selected with
 cg -e my-env status
 ```
 
+## Select Or Delete
+
+```bash
+cg use NAME
+cg delete NAME [--yes]
+```
+
+Deletion removes the managed environment; export or preserve needed work first.
+
 ## Run, Serve, Sync, Repair
 
 ```bash

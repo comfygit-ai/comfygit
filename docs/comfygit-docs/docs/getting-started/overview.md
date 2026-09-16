@@ -1,7 +1,7 @@
 # ComfyGit Overview
 
 ComfyGit turns a working ComfyUI setup into a reproducible environment you can
-inspect, commit, share, repair, and run again.
+inspect, commit, share, repair, and run again. These docs cover version 0.7.0.
 
 It records the pieces that make a workflow runnable: custom nodes, Python
 packages, model metadata, workflow files, runtime settings, and optional

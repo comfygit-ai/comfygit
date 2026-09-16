@@ -13,7 +13,7 @@ the ComfyUI runtime.
 Most users install published nodes through the ComfyUI registry:
 
 ```bash
-cg node add comfygit-manager
+cg node add rgthree-comfy
 ```
 
 When a node is not available through the registry, ComfyGit can track a Git

@@ -4,7 +4,7 @@
 
 ## Overview
 
-ComfyGit supports tab completion for bash, zsh, and fish shells. Tab completion helps you:
+ComfyGit automatically installs completion for Bash and Zsh. Fish uses the manual setup below. Tab completion helps you:
 
 - Autocomplete command names
 - Autocomplete environment names
@@ -93,7 +93,7 @@ cg completion uninstall
 
 - **Bash** - Requires bash-completion package
 - **Zsh** - Works with default zsh completion system
-- **Fish** - Works with fish's built-in completion
+- **Fish** - Manual argcomplete script; not managed by `cg completion install/status/uninstall`
 
 ## Manual Setup
 
@@ -109,9 +109,11 @@ eval "$(register-python-argcomplete cg)"
 
 ### Zsh
 
-Add to `~/.zshrc`:
+Add to `~/.zshrc` after initializing completion:
 
 ```bash
+autoload -Uz compinit
+compinit
 eval "$(register-python-argcomplete cg)"
 ```
 
@@ -120,6 +122,7 @@ eval "$(register-python-argcomplete cg)"
 Run:
 
 ```bash
+mkdir -p ~/.config/fish/completions
 register-python-argcomplete --shell fish cg > ~/.config/fish/completions/cg.fish
 ```
 
@@ -128,6 +131,6 @@ register-python-argcomplete --shell fish cg > ~/.config/fish/completions/cg.fish
 If tab completion isn't working:
 
 1. Restart your shell or run `source ~/.bashrc` (or equivalent)
-2. Verify argcomplete is installed: `pip show argcomplete`
+2. Make the completion helper available: `uv tool install argcomplete`
 3. Check completion status: `cg completion status`
 4. Try manual setup if automatic installation fails

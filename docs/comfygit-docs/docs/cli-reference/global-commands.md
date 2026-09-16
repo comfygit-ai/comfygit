@@ -3,10 +3,8 @@
 These commands operate at the workspace level or create new environments. Use
 `cg <command> -h` for the exact parser help in your installed version.
 
-!!! warning "Reference freshness"
-    This page is a source-checked summary for the current docs rewrite. The full
-    generated CLI reference is being rebuilt so it can stay synchronized with
-    the parser automatically.
+These curated examples target 0.7.0. Brackets denote optional arguments, not
+literal shell syntax. Global `-e NAME` selects an environment before a command.
 
 ## Workspace Setup
 
@@ -27,7 +25,7 @@ cg auth clear PROVIDER
 ## Create, Import, Export, Materialize
 
 ```bash
-cg create NAME [--template PATH] [--python VERSION] [--comfyui REF] [--torch-backend BACKEND] [--no-manager] [--use] [--yes]
+cg create NAME [--template PATH] [--python VERSION] [--comfyui REF] [--comfyui-repository URL] [--torch-backend BACKEND] [--no-manager] [--use] [--yes]
 cg import SOURCE [--name NAME] [--branch REF] [--torch-backend BACKEND] [--models all|required|skip] [--no-manager] [--use] [--yes]
 cg export [PATH] [--allow-issues]
 cg materialize SOURCE --name NAME [--workspace PATH] [--models-dir PATH] [--branch REF] [--torch-backend BACKEND] [--models all|required|skip] [--with-manager] [--use] [--replace]
@@ -55,7 +53,7 @@ cg analyze workflow.json --quiet
 cg model index status
 cg model index dir PATH
 cg model index sync
-cg model index list [--duplicates]
+cg model index list [--duplicates] [--json]
 cg model index find QUERY
 cg model index show IDENTIFIER
 cg model download URL [--path RELATIVE_PATH] [--category CATEGORY] [--yes]
@@ -76,7 +74,7 @@ cg debug [-n LINES] [--level DEBUG|INFO|WARNING|ERROR] [--full] [--workspace]
 
 ```bash
 cg orch status [--json]
-cg orch restart [--wait]
+cg orch restart [--wait] [--timeout SECONDS] [--json]
 cg orch kill [--force]
 cg orch clean [--dry-run] [--force] [--kill]
 cg orch logs [--follow] [-n LINES]
@@ -84,6 +82,20 @@ cg workspace cleanup [--force]
 ```
 
 `cg orchestrator` is an alias for `cg orch`.
+
+For a named runtime launched by current `cg run`, use `cg -e NAME orch status
+--json` and `cg -e NAME orch restart --wait --json`. Restart verifies identity
+and an idle queue; read the [runtime guide](../user-guide/environments/running-comfyui.md#inspect-and-restart-a-managed-runtime)
+for prerequisites and limitations.
+
+## Storage Inventory
+
+```bash
+cg inventory [--json] [--storage]
+```
+
+Inventory reports shared models, environments, and optionally measured storage.
+It does not automatically delete duplicate files or developer-owned checkouts.
 
 ## Shell Completion
 

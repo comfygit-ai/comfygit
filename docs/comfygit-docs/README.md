@@ -1,150 +1,66 @@
-# ComfyGit Documentation
+# ComfyGit documentation
 
-Documentation site for ComfyGit v1.0+ - the package and environment manager for ComfyUI.
+The public site documents ComfyGit 0.7.0 at <https://docs.comfygit.org/>.
+It is a separate uv project requiring Python 3.12 or newer. Its own `uv.lock`
+controls the documentation dependencies; the monorepo lock controls the CLI.
 
-## Quick Start
+## Preview and validate
 
-### Install dependencies
+From this directory:
 
 ```bash
-uv sync
+uv sync --frozen
+make serve
+make build
 ```
 
-### Generate CLI reference
+Preview at `http://127.0.0.1:8000`. The strict build writes `site/` and fails on
+warnings, including broken internal links. From the monorepo root, use
+`make docs-serve` or `make docs-build`. `make clean` removes only generated output.
+
+## Maintain the reference
+
+The pages in `docs/cli-reference/` are curated, tracked source. Builds never
+regenerate or overwrite them. After changing the parser, run:
 
 ```bash
 make generate-cli
 ```
 
-This extracts command documentation from the argparse parser and generates markdown files in `docs/cli-reference/`.
+This uses the monorepo's local CLI to write all nested command help to ignored
+`generated-cli/reference.md`. Compare that snapshot with the curated pages and
+update their examples deliberately. See [scripts/README.md](scripts/README.md).
 
-### Local development
+User guides live in `docs/user-guide/`, conceptual explanations in
+`docs/concepts/`, and troubleshooting in `docs/troubleshooting/`. Add new pages
+to `mkdocs.yml` and keep existing links working with redirects where appropriate.
+For implementation guarantees, consult `../contracts/` and `../specs/` first.
+
+## Dependency updates
+
+Update the relevant dependency constraint and lockfile together, then build:
 
 ```bash
-make serve
-```
-
-Visit `http://127.0.0.1:8000` to view the docs. CLI reference is regenerated automatically.
-
-### Build static site
-
-```bash
+uv lock --upgrade-package mkdocs-material
 make build
 ```
 
-Output will be in `site/` directory. CLI reference is regenerated automatically.
+CI builds with the frozen lock and audits the docs dependencies. Theme updates
+must reach the deployed HTML/assets to fix a vulnerability on the live site.
 
-### Deploy to GitHub Pages
+## Publish
 
-```bash
-mkdocs gh-deploy
-```
+After merging reviewed changes, run the **Publish Documentation** GitHub Actions
+workflow on `main`. It builds with this lockfile, then commits the site to
+`comfygit-ai/comfygit.github.io`, preserving its root `CNAME` and `README.md`.
+The existing `DOCS_PUBLISH_TOKEN` Actions secret needs write access to that
+Pages repository; do not embed credentials in Git URLs or checked-in files.
 
-## Documentation Structure
+Do not use `mkdocs gh-deploy`: that targets the source repository's Pages branch,
+which is not this site's deployment path. `make docs-deploy` at the repository
+root prints the supported workflow instructions instead of publishing locally.
 
-```
-docs/
-├── index.md                          # Landing page
-├── getting-started/                  # ✅ Phase 1 Complete
-│   ├── installation.md
-│   ├── quickstart.md
-│   ├── concepts.md
-│   └── migrating-from-v0.md
-├── user-guide/                       # 🚧 Phase 2 TODO
-│   ├── workspaces.md
-│   ├── environments/
-│   ├── custom-nodes/
-│   ├── models/
-│   ├── workflows/
-│   ├── python-dependencies/
-│   └── collaboration/
-├── cli-reference/                    # ✅ Auto-generated from argparse
-│   ├── global-commands.md
-│   ├── environment-commands.md
-│   ├── node-commands.md
-│   ├── workflow-commands.md
-│   └── shell-completion.md
-├── troubleshooting/                  # 🚧 Phase 4 TODO
-│   ├── common-issues.md
-│   └── ...
-└── legacy/                           # Old v0.x docs (Docker-based)
-    └── ...
-```
-
-## Status
-
-**Phase 1 (Complete)**: ✅ Getting Started section with 4 comprehensive guides
-
-See `DOCUMENTATION_STATUS.md` for detailed roadmap and progress tracking.
-
-## Writing Guidelines
-
-### Tone
-
-Follow Anthropic Claude Code documentation style:
-
-- Friendly and conversational
-- Practical, example-driven
-- Progressive disclosure (beginner → advanced)
-- Use "you" and "your"
-- Clear, actionable instructions
-
-### Structure
-
-Each guide should include:
-
-1. Title + one-line description
-2. Prerequisites (if any)
-3. Core content with examples
-4. Common variations
-5. Troubleshooting tips
-6. Next steps with links
-
-## CLI Reference
-
-The CLI reference documentation is **automatically generated** from the argparse parser.
-
-### How it works
-
-- `scripts/generate_cli_reference.py` extracts command structure from `comfygit_cli.cli`
-- Generates markdown for arguments, options, subcommands
-- Runs automatically on `make build` and `make serve`
-
-### When to regenerate
-
-- After adding/modifying CLI commands
-- After changing help text
-- Run manually: `make generate-cli`
-
-### Enhancing generated docs
-
-Generated docs provide baseline coverage. To enhance:
-
-1. **Edit generated files** - Add examples, tips (overwritten on regeneration)
-2. **Modify generator** - Edit `scripts/generate_cli_reference.py` for persistent changes
-3. **Switch to manual** - Stop using generator, maintain manually
-
-See `scripts/README.md` for details.
-
-## Contributing
-
-1. Create new .md file in appropriate section
-2. Follow tone and structure guidelines
-3. Add to `mkdocs.yml` nav
-4. Test locally with `make serve`
-5. Submit PR
-
-See `DOCUMENTATION_STATUS.md` for what needs writing.
-
-## Files of Note
-
-- `mkdocs.yml` - Site configuration and navigation
-- `docs/index.md` - Landing page
-- `docs/stylesheets/extra.css` - Custom CSS
-- `DOCUMENTATION_STATUS.md` - Detailed status and roadmap
-
-## Questions?
-
-- GitHub Issues: https://github.com/comfygit-ai/comfygit/issues
-- GitHub Discussions: https://github.com/comfygit-ai/comfygit/discussions
-
+After the workflow succeeds, verify the actual page at
+<https://docs.comfygit.org/getting-started/overview/> and its generator metadata.
+The root URL is a redirect. Check navigation, search, and a changed page; a
+successful push alone does not establish that Pages has served the new assets.

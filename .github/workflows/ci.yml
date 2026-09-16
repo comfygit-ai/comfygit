@@ -90,3 +90,28 @@ jobs:
           uv build --package comfygit-core --no-sources
           uv build --package comfygit-studio --no-sources
           uv build --package comfygit --no-sources
+
+  docs:
+    name: Documentation build and audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: docs/comfygit-docs
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.28"
+          python-version: "3.12"
+      - name: Check documentation lockfile
+        run: uv lock --check
+      - name: Build documentation with strict link validation
+        run: uv run --frozen mkdocs build --strict
+      - name: Audit locked documentation dependencies
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-annotate --no-emit-project --output-file "$RUNNER_TEMP/docs-requirements.txt"
+          uvx pip-audit==2.10.1 --disable-pip --no-deps --requirement "$RUNNER_TEMP/docs-requirements.txt"

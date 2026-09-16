@@ -21,11 +21,13 @@ curl -X POST http://127.0.0.1:8190/uploads/prepare \
   -H 'content-type: application/json' \
   -d '{
     "filename": "input.png",
-    "content_type": "image/png"
+    "mime_type": "image/png"
   }'
 ```
 
-The response includes an upload URL, token, and `file_ref`.
+The response includes `upload_url` (with its token already attached), `method`,
+optional `headers`, and a structured `file_ref`. Use the returned URL and headers;
+do not construct or guess the upload token.
 
 Upload the bytes:
 
@@ -35,7 +37,8 @@ curl -X PUT 'http://127.0.0.1:8190/uploads/<upload_id>?token=<token>' \
   --data-binary @input.png
 ```
 
-Use the `file_ref` in the contract run:
+After upload, check `GET /uploads/{upload_id}/status`. Pass the complete returned
+`file_ref` object as the media input in the contract run:
 
 ```bash
 curl -X POST \
@@ -44,7 +47,10 @@ curl -X POST \
   -d '{
     "inputs": {
       "input_image": {
-        "file_ref": "upload:<opaque-ref>"
+        "kind": "file_ref",
+        "ref": "<returned-ref>",
+        "filename": "input.png",
+        "mime_type": "image/png"
       }
     },
     "wait": true

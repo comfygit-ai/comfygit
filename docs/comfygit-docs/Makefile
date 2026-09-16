@@ -1,24 +1,18 @@
 .PHONY: help serve build generate-cli clean
 
 help:
-	@echo "ComfyGit Documentation"
-	@echo ""
-	@echo "Available targets:"
-	@echo "  serve        - Start development server"
-	@echo "  build        - Build documentation site"
-	@echo "  generate-cli - Generate CLI reference from argparse"
-	@echo "  clean        - Remove build artifacts"
+	@echo "serve / build: preview or strictly build the locked docs site"
+	@echo "generate-cli: write parser help to ignored generated-cli/ for review"
+	@echo "clean: remove generated artifacts only"
 
-serve: generate-cli
-	.venv/bin/mkdocs serve
+serve:
+	uv run --frozen mkdocs serve
 
-build: generate-cli
-	.venv/bin/mkdocs build
+build:
+	uv run --frozen mkdocs build --strict
 
 generate-cli:
-	@echo "Generating CLI reference documentation..."
-	cd ../.. && .venv/bin/python docs/comfygit-docs/scripts/generate_cli_reference.py
+	cd ../.. && uv run --frozen --package comfygit python docs/comfygit-docs/scripts/generate_cli_reference.py
 
 clean:
-	rm -rf site/
-	rm -rf docs/cli-reference/*.md
+	rm -rf site/ generated-cli/

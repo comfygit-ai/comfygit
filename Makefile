@@ -216,21 +216,20 @@ check-openapi:
 docs-serve:
 	@echo "Starting documentation server..."
 	@echo "Visit http://localhost:8000"
-	cd docs/comfygit-docs && . .venv/bin/activate && mkdocs serve
+	$(MAKE) -C docs/comfygit-docs serve
 
 docs-build:
 	@echo "Building documentation..."
-	cd docs/comfygit-docs && . .venv/bin/activate && mkdocs build
+	$(MAKE) -C docs/comfygit-docs build
 	@echo "✓ Documentation built (see docs/comfygit-docs/site/)"
 
 docs-deploy:
-	@echo "Deploying documentation to GitHub Pages..."
-	cd docs/comfygit-docs && . .venv/bin/activate && mkdocs gh-deploy
-	@echo "✓ Documentation deployed"
+	@echo "Run the Publish Documentation workflow on main after review."
+	@echo "See docs/comfygit-docs/README.md for the deployment and verification steps."
 
 docs-clean:
 	@echo "Cleaning documentation build artifacts..."
-	rm -rf docs/comfygit-docs/site/
+	$(MAKE) -C docs/comfygit-docs clean
 	@echo "✓ Documentation cleaned"
 
 # Git workflow commands

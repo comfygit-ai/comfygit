@@ -108,7 +108,21 @@ cg auth migrate
 ```
 
 Durable ComfyGit credentials are stored through the operating-system credential
-store. Environment variables remain available for headless and automated use.
+store. The CLI includes the optional keyring adapter, but a working OS backend is
+still required to save credentials. Headless machines can use provider environment
+variables or an existing Hugging Face login without configuring desktop keyring.
+ComfyGit does not silently write new credentials to plaintext files.
+
+Resolution order is: an explicit Core API override, provider environment
+variables, workspace secure storage, provider-native login, then legacy workspace
+values during migration. An explicit API value of `None` disables credential
+discovery for that provider. Environment variables include `CIVITAI_API_TOKEN`
+(or `CIVITAI_API_KEY`), `HF_TOKEN` (or `HUGGING_FACE_HUB_TOKEN`), and
+`GITHUB_TOKEN` (or `GH_TOKEN`).
+
+Core library consumers can install `comfygit-core` without keyring. Add
+`comfygit-core[keyring]` only when OS persistence is wanted, or supply your own
+`CredentialStore`. `cg auth status` identifies the source without printing tokens.
 
 An external uv cache can reduce repeated downloads across environments:
 

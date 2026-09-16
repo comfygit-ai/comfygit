@@ -29,6 +29,42 @@ Use automatic choices when you do not want prompts:
 cg workflow resolve my-workflow --auto
 ```
 
+## Scripted Resolution
+
+```bash
+cg -e my-env workflow resolve my-workflow --auto --no-install --json --strict
+```
+
+Use `--install` instead of `--no-install` to install resolved missing packages.
+JSON mode requires `--auto` and an explicit installation choice. Progress is on
+stderr; stdout contains the JSON result. `--strict` returns a nonzero exit code
+for remaining unresolved or uninstalled dependencies, so automation can stop
+before attempting inference. `--no-install` still records resolution metadata.
+
+A successful resolution does not prove that the nodes import or the workflow
+runs. Restart when needed and execute the actual workflow to check its output.
+
+## Explicit Node Mappings
+
+For an unregistered package or a class added after the registry metadata was
+published, track the package first and save the workflow in ComfyUI. Then map the
+exact node class name from the workflow to that package:
+
+```bash
+cg workflow node map my-workflow MyCustomNode my-node-package --json
+cg workflow node list my-workflow --json
+cg workflow resolve my-workflow --auto --no-install --json --strict
+```
+
+Mappings are persisted for that workflow. To remove an incorrect mapping:
+
+```bash
+cg workflow node unmap my-workflow MyCustomNode --json
+```
+
+The package must already be tracked, and the node class must occur in the saved
+workflow. Mapping ownership does not install dependencies or prove importability.
+
 ## What Resolution Can Detect
 
 ComfyGit can usually detect:

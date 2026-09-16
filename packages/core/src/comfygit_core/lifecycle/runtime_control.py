@@ -61,6 +61,7 @@ def read_runtime_advertisement(workspace: Path, environment: str) -> dict | None
         if isinstance(data, dict) and data.get("environment") == environment:
             return data
     except (OSError, ValueError):
+        # Missing or malformed advertisements cannot establish runtime ownership.
         pass
     return None
 
@@ -123,6 +124,7 @@ class ManagedRuntimeController:
                                 and isinstance(data.get("queue_pending"), list)):
                             running, pending = len(data["queue_running"]), len(data["queue_pending"])
                 except (requests.RequestException, ValueError):
+                    # Keep unavailable probes unknown; restart refuses an unverified queue.
                     pass
             return ManagedRuntimeStatus(
                 environment=self.environment, instance_id=self.instance_id,
