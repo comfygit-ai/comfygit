@@ -46,7 +46,8 @@ and other deliberately documented facade modules such as readiness, workflow,
 runtime, assets, git, and imports. Importable implementation packages such as
 managers, repositories, analyzers, resolvers, integrations, configs, caching,
 and generic utils are internal unless they are re-exported through a public
-facade.
+facade. Shared adapter-safe redaction and private-file helpers are exposed
+through `comfygit_core.security`.
 
 Model files may contain both public and internal dataclasses. A model type is
 public only when it is exported from `comfygit_core.models` or another documented
@@ -144,15 +145,67 @@ provider. String containment in the full URL is not sufficient. Query strings,
 paths, redirects, and arbitrary user-provided URLs must not cause CivitAI,
 Hugging Face, GitHub, or future provider credentials to be sent to another host.
 
-### CGCORE-AUTH-03 [PARTIAL]: Local credential files are hardened and redacted
+### CGCORE-AUTH-03 [LIVE]: Credential persistence and logs are hardened
 Validation: MIXED
 
-Workspace-local credential storage should be treated as sensitive local
-configuration: files containing provider tokens should be created with
-owner-only permissions where the platform supports POSIX permissions, and logs
-should redact token-like values, authorization headers, signed URL query
-parameters, and provider tokens. This remains partial until all credential
-persistence and logging paths route through shared hardening helpers.
+Credential-bearing local state must be treated as sensitive configuration.
+Files that may contain provider tokens and logs that may contain authentication
+context should be created with owner-only permissions where the platform
+supports POSIX permissions. Logging adapters must omit or redact secret-bearing
+argument fields, token-like values, authorization headers, signed URL query
+parameters, and provider credentials before a record reaches any handler.
+
+Workspace discovery and CLI logging proactively harden existing sensitive files,
+and CLI logging applies shared structured redaction plus a final redacting
+formatter rather than relying only on call-site string cleanup.
+
+### CGCORE-AUTH-04 [LIVE]: Durable credentials use injected secure stores
+Validation: MIXED
+
+Core should resolve durable workspace credentials through an injected credential
+store instead of serializing raw token values into `workspace.json`. Desktop
+adapters should use an operating-system-backed credential store when available;
+headless and hosted adapters may inject their own secret provider or use runtime
+environment variables. Failure to access secure storage must be explicit and
+must not silently fall back to plaintext persistence.
+
+Credential resolution should have documented precedence and expose typed status
+that reports whether a provider is configured and which source is active without
+returning or partially displaying the secret. Hugging Face resolution should
+honor the active provider-native `huggingface_hub` login when no explicit,
+environment, or workspace-secure credential overrides it.
+
+Core installs must not require the optional `keyring` package. The
+`comfygit-core[keyring]` extra enables the default secure-store adapter and the
+normal CLI installation includes this extra. Importing/creating/opening a
+workspace must work without the package; storage attempts report a structured
+setup error and never introduce plaintext persistence.
+
+Workspace callers may supply process-local `credential_overrides`, a mapping
+from provider to token or `None` (explicitly anonymous). An override bypasses
+environment, store, native login and legacy migration during resolution for that
+provider. Explicit migration requests still migrate all legacy providers.
+Otherwise precedence is environment, workspace secure store, provider-native
+login, then retained legacy plaintext. Missing/unavailable storage must not
+block the remaining resolution sources. Status distinguishes explicit tokens
+and explicitly anonymous access without returning their values. Hugging Face
+SDK calls must pass `False` for anonymous overrides, preventing SDK rediscovery.
+This controls ComfyGit provider credentials, not external git credential helpers,
+SSH agents, or authentication embedded in caller-supplied URLs.
+
+Legacy plaintext credentials may be migrated only after the destination store
+successfully writes and reads back the same value. Partial migration must retain
+every unverified legacy value so an unavailable or locked credential backend
+cannot cause credential loss.
+
+### CGCORE-AUTH-05 [LIVE]: Adapter secret input avoids argv and normal logs
+Validation: TEST
+
+CLI and other adapters should accept new provider credentials through hidden
+interactive input, standard input, provider-native login, or caller-scoped API
+requests. They must not require raw secret values in command-line arguments,
+render secrets or partial secret suffixes in status output, or include secret
+fields in normal command logging context.
 
 ## Portable Environment Contract
 
@@ -176,6 +229,20 @@ Public adapters should prefer Environment and Workspace facades, typed manifest
 snapshots, and domain edit affordances. Code that must inspect or mutate raw
 TOML should stay in pyproject storage, migration, merge/diff, import-inspection,
 or manifest implementation modules.
+
+### CGCORE-MAN-01B [LIVE]: ComfyUI source identity is portable and immutable
+Validation: TEST
+
+The environment manifest may declare the ComfyUI Git repository separately
+from its human-facing branch, tag, or version intent. Exact reconstruction must
+prefer the recorded full commit SHA when one is present, clone that commit from
+the declared repository, and verify both the materialized origin and HEAD before
+the checkout is accepted or cached. Manifests without an explicit repository
+retain the canonical ComfyUI repository as a backwards-compatible default.
+
+Repository identity and commit identity are part of the ComfyUI cache key. A
+checkout from a fork must never satisfy a cache request for the canonical
+repository merely because the branch or tag label is the same.
 
 ### CGCORE-MAN-02 [LIVE]: Machine-local configuration is not committed as manifest truth
 Validation: TEST
@@ -249,6 +316,14 @@ read/write APIs through Environment. The legacy core-side UI-workflow conversion
 path is no longer a supported contract authoring or runtime dependency; runtime
 execution should consume Manager-captured API prompt artifacts.
 
+### CGCORE-EXEC-01A [LIVE]: File outputs include native 3D artifacts
+Validation: TEST
+
+Declared `file` contract outputs MUST read ComfyUI history `files` and `3d`
+entries. Artifacts with the same filename, subfolder, and storage type across
+these keys MUST be returned once, preserving first-seen order. This permits
+native SaveGLB outputs without an application-specific export node.
+
 ### CGCORE-EXEC-02 [LIVE]: Core contract execution stays transport-agnostic
 Validation: STATIC
 
@@ -312,6 +387,59 @@ paths rather than retained as a fallback.
 
 ## Dependency Reproducibility
 
+### CGCORE-INV-01 [LIVE]: Workspace inventory is typed and adapter-safe
+Validation: TEST
+
+Core should expose typed workspace model and environment inventory through the
+public `Workspace` facade. Model inventory should report short and strong
+hashes, size, category, every indexed physical location, structured source
+records, and referencing ComfyGit environments. Environment inventory should
+report manifest identity, ComfyUI/Python revisions, model and custom-node
+dependencies, and optional storage summaries without coupling to an external
+product's project or experiment hierarchy. Workspace inventory should include
+the stable workspace id and observation timestamp.
+
+Each indexed location should carry observed state such as present, missing,
+changed, or dangling symlink. A symlink is not an independent remaining copy
+when its target is one of the selected deletion locations.
+
+Stable inventory models should provide explicit `to_dict()` serialization for
+CLI, Manager, Cloud, and other adapter boundaries. Adapters must not reconstruct
+inventory by reading repository tables or raw manifest TOML directly.
+
+### CGCORE-INV-02 [LIVE]: Hugging Face sources expose immutable provenance
+Validation: TEST
+
+Hugging Face model sources should expose repository id, repository type,
+requested revision, resolved immutable revision, path within the repository,
+original source URL, and provider metadata when known. A moving branch such as
+`main` is not itself an immutable revision. Downloads should retain the resolved
+commit returned by Hugging Face local-download metadata without persisting
+credentials.
+
+### CGCORE-DEL-01 [LIVE]: Model deletion begins with a non-destructive plan
+Validation: TEST
+
+Core should produce a typed model deletion plan before mutating files or index
+state. The plan should identify exact candidate locations, potential reclaimable
+bytes, remaining copies, referencing ComfyGit environments, available recovery
+sources, separate source-hint/strong-hash/immutable-source signals, and
+blockers. Planning is read-only and may preview all locations, but execution
+requires an explicit location selection or an explicit all-locations choice.
+
+### CGCORE-DEL-02 [LIVE]: Model deletion is location-specific and explicitly applied
+Validation: TEST
+
+Core should support deleting selected indexed model locations rather than always
+deleting every copy. Execution must consume or revalidate an explicit typed plan,
+refuse incomplete recovery proof or active environment references by default,
+and return a typed result. Callers may provide separately authorized override
+policy, but core must never infer external project or experiment authorization.
+
+CLI deletion should default to dry-run presentation. Machine-readable output
+must serialize the same core plan/result instead of implementing parallel CLI
+policy.
+
 ### CGCORE-DEP-01 [LIVE]: Python package state is resolved through uv
 Validation: TEST
 
@@ -330,6 +458,25 @@ Validation: MIXED
 Model files are tracked by metadata such as filename, category, relative path,
 hash, sources, and workflow references. The model bytes themselves stay external
 to the Python package and environment manifest.
+
+### CGCORE-DEP-02C [LIVE]: Environments may explicitly require models independently of workflows
+Validation: TEST
+
+A global model entry may declare `criticality = "required"` or `"optional"`
+to make it an explicit environment dependency. This supports applications that
+construct prompts dynamically and custom loaders whose model requirements do
+not belong to a saved workflow. Entries without this field remain the existing
+workflow-derived model catalog; absence must not invent an environment-wide
+requirement.
+
+Explicit environment dependencies participate in build/source readiness,
+missing-model reporting, materialization and sync download policy, and reference
+inventory. Workflow cleanup must retain them and model metadata updates must
+preserve their declared criticality. A required environment declaration cannot
+be downgraded by an optional workflow reference. `--models skip` acquires no model
+bytes, `required` selects required dependencies, and `all` also selects optional
+dependencies. Callers must not need a synthetic workflow to acquire or retain
+an environment dependency.
 
 ### CGCORE-DEP-02A [PARTIAL]: Workflows may declare indexed models without graph references
 Validation: TEST

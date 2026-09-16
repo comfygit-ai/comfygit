@@ -141,7 +141,7 @@ bump-version:
 	@sed -i 's/^version = "[^"]*"/version = "$(VERSION)"/' packages/studio-runtime/pyproject.toml
 	@sed -i 's/comfygit-core==[^"]*/comfygit-core==$(VERSION)/' packages/studio-runtime/pyproject.toml
 	@sed -i 's/^version = "[^"]*"/version = "$(VERSION)"/' packages/cli/pyproject.toml
-	@sed -i 's/comfygit-core==[^"]*/comfygit-core==$(VERSION)/' packages/cli/pyproject.toml
+	@sed -i 's/comfygit-core\[keyring\]==[^"]*/comfygit-core[keyring]==$(VERSION)/' packages/cli/pyproject.toml
 	@sed -i 's/comfygit-studio==[^"]*/comfygit-studio==$(VERSION)/' packages/cli/pyproject.toml
 	@npm --prefix packages/studio version "$(VERSION)" --no-git-tag-version --allow-same-version >/dev/null
 	@echo "✓ Updated all release artifacts to $(VERSION)"

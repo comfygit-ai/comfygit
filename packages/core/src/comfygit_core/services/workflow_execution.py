@@ -224,6 +224,7 @@ def _extract_output_artifacts(
 ) -> list[ContractOutputArtifact]:
     output_keys = _history_output_keys(output_type)
     artifacts: list[ContractOutputArtifact] = []
+    seen_files: set[tuple[str, str, str]] = set()
 
     for key in output_keys:
         value = node_outputs.get(key)
@@ -231,6 +232,12 @@ def _extract_output_artifacts(
             continue
         for item in value:
             if isinstance(item, Mapping):
+                if item.get("filename") is not None:
+                    identity = (str(item["filename"]), str(item.get("subfolder") or ""),
+                                str(item.get("type") or ""))
+                    if identity in seen_files:
+                        continue
+                    seen_files.add(identity)
                 artifacts.append(
                     ContractOutputArtifact(
                         filename=str(item["filename"]) if item.get("filename") is not None else None,
@@ -258,8 +265,8 @@ def _history_output_keys(output_type: str) -> tuple[str, ...]:
     if normalized_type == "audio":
         return ("audio", "audios")
     if normalized_type == "file":
-        return ("files",)
-    return ("images", "videos", "gifs", "audio", "audios", "files")
+        return ("files", "3d")
+    return ("images", "videos", "gifs", "audio", "audios", "files", "3d")
 
 
 def _contract_input_key(

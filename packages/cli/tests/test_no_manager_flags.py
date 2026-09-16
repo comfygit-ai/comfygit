@@ -16,6 +16,7 @@ def test_create_passes_no_manager_to_workspace():
     args = argparse.Namespace(
         name="headless-env",
         comfyui=None,
+        comfyui_repository=None,
         python="3.12",
         template=None,
         torch_backend="auto",
@@ -30,6 +31,7 @@ def test_create_passes_no_manager_to_workspace():
     mock_workspace.create_environment.assert_called_once_with(
         name="headless-env",
         comfyui_version=None,
+        comfyui_repository=None,
         python_version="3.12",
         template_path=None,
         torch_backend="auto",

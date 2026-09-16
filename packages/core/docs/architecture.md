@@ -41,7 +41,7 @@ ComfyGit Core is a **library-first Python package** providing environment manage
 |--------|---------|--------------|
 | **core/** | Public API | Workspace (multi-env), Environment (single env) |
 | **models/** | Public typed contracts | Exported data classes, protocols, exceptions with context |
-| **readiness.py**, **workflow.py**, **runtime.py**, **assets.py**, **git.py** | Public facades | Reusable domain helpers promoted for adapters |
+| **readiness.py**, **workflow.py**, **runtime.py**, **assets.py**, **git.py**, **security.py** | Public facades | Reusable domain helpers promoted for adapters |
 | **managers/** | Orchestration | Environment orchestrators (Git, Model), Resource managers (Node, Workflow, Model symlinks), Config managers (PyProject, UV, PyTorch backend) |
 | **manifest/** | Internal manifest abstraction | Pyproject-backed store, section handlers, edit helpers, overlay materialization, migration cleanup |
 | **analyzers/** | Analysis | Parse workflows/git/status; classify nodes |
@@ -79,6 +79,10 @@ ComfyGit Core is a **library-first Python package** providing environment manage
 - `Workspace.create()` - Create new workspace with validation
 - `Workspace.open_or_create()` - Setup-friendly load-or-create entry point
 - `Workspace.list_environments()` / `get_environment()` - List/get environments
+- `Workspace.get_resource_inventory()` / `get_model_inventory()` - Typed model,
+  environment, source, and storage inventory for adapters
+- `Workspace.plan_model_deletion()` / `apply_model_deletion_plan()` - Dry-run-first,
+  location-specific model reclaim with conservative blockers
 - `Workspace.get_schema_version()` / `is_legacy_schema()` - Check workspace version
 - `Workspace.upgrade_schema_if_needed()` - Migrate to current schema
 

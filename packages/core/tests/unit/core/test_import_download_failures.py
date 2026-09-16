@@ -37,10 +37,10 @@ nodes = {}
 """
 
 
-def test_import_raises_after_commit_when_model_downloads_fail(
+def test_import_fails_before_completion_commit_when_model_downloads_fail(
     test_workspace, tmp_path, mock_comfyui_clone, mock_github_api, mock_pytorch_probe, monkeypatch
 ):
-    """Import should commit changes, then raise CDModelDownloadError on failed downloads."""
+    """CGSYNC-LIFE-11: selected download failures must not commit a completed import."""
     tarball = _create_import_tarball(tmp_path, _minimal_pyproject())
     commit_calls: list[tuple[str, bool]] = []
 
@@ -76,7 +76,8 @@ def test_import_raises_after_commit_when_model_downloads_fail(
             no_manager=True,
         )
 
-    assert commit_calls == [("Imported environment", True)]
+    assert commit_calls == []
+    assert not (test_workspace.paths.environments / "import-download-failure").exists()
     assert exc.value.failures == [("workflow_a.json", "missing-model.safetensors")]
     assert "missing-model.safetensors" in str(exc.value)
 

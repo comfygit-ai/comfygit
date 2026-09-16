@@ -67,6 +67,7 @@ temp/
 tmp/
 
 # Local configuration
+.akatz-labs/
 local_config.json
 dev/cross-platform-test.local.toml
 

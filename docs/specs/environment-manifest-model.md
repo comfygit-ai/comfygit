@@ -1,5 +1,13 @@
 # Environment Manifest Model
 
+### CGSPEC-MAN-PARSE-01 [LIVE]: Empty optional workflow definitions do not block analysis
+Validation: TEST
+
+Workflow parsing accepts absent/null/empty `definitions`, and absent/null/empty
+`definitions.subgraphs`, as no subgraphs. Malformed nonempty structures produce
+field-specific validation errors. Existing graph nodes, links and valid
+subgraphs retain their meaning through parsing and serialization.
+
 This spec describes the tracked environment data shape that core, manager, CLI,
 deploy, and serve/runtime adapters should agree on.
 
@@ -33,6 +41,19 @@ Validation: TEST
 ComfyGit-specific environment metadata belongs under `[tool.comfygit]` tables.
 Standard Python project metadata and dependency groups should continue to use
 standard `pyproject.toml` locations where possible.
+
+### CGSPEC-MAN-02A [LIVE]: ComfyUI repository and commit provenance are explicit
+Validation: TEST
+
+`[tool.comfygit]` may store `comfyui_repository`, `comfyui_version`,
+`comfyui_version_type`, and `comfyui_commit_sha`. The repository identifies the
+Git object store, the version retains author-facing branch/tag intent, and the
+full commit SHA is the immutable materialization authority. Missing repository
+metadata defaults to the canonical ComfyUI repository for older manifests.
+
+Import and materialization must not silently fall back to another repository or
+to a moving branch when a pinned commit is declared. Repository URLs and commit
+SHAs are portable non-secret provenance; credentials remain host-scoped.
 
 ### CGSPEC-MAN-03 [LIVE]: Workflows are named manifest entries
 Validation: TEST
@@ -297,6 +318,22 @@ should mean "not known to the active environment" rather than "not in a stale
 ComfyGit table." This remains partial while all model index presentation and
 query paths are not yet consistently environment-aware.
 
+### CGSPEC-MODEL-03B [LIVE]: Explicit environment model requirements survive workflow reconciliation
+Validation: TEST
+
+`[tool.comfygit.models.<hash>]` may include an explicit `criticality` of
+`required` or `optional`. These entries retain the ordinary indexed content
+identity, size, category, relative path and source fields, but are dependencies
+of the environment itself even when no saved workflow refers to them. Omission
+keeps catalog-only semantics. Invalid explicit values are manifest errors.
+
+Orphan cleanup preserves these declarations, and enrichment from the local
+index or a workflow does not silently erase their criticality. Source/readiness
+and missing-model checks include them. Import/materialization and sync honor
+the selected model strategy, verify expected model identity, reuse an available
+copy at the required path, and fail requested acquisition when it cannot be
+completed. Their sources are portable manifest proof, not private index hints.
+
 ### CGSPEC-MODEL-04 [LIVE]: Workflow model dependencies may be manually declared
 Validation: TEST
 
@@ -421,20 +458,25 @@ must not be written into the portable environment manifest. Manifest entries
 should store repository URLs and refs; each machine, browser user, or deployment
 provider supplies its own credentials.
 
-### CGSPEC-LOCAL-02B [LIVE]: Provider API credentials are workspace-local and permission-hardened
+### CGSPEC-LOCAL-02B [LIVE]: Provider API credentials are workspace-local and securely resolved
 Validation: TEST
 
 CivitAI, Hugging Face, and future model/download provider API credentials may be
 workspace-local acquisition configuration when backend model search or download
-work needs durable machine-local access. They may be stored in the workspace
-configuration file or supplied by environment variables, but they must not be
-written into environment manifests, export bundles, model source metadata, or
-workflow artifacts. Workspace credential files should be created with
-owner-only permissions where the platform supports them, and UI surfaces should
-describe that storage honestly instead of claiming server-side credentials are
-never persisted. Git remote personal access tokens are governed by
-`CGSPEC-LOCAL-02A` because they represent the calling user's git identity rather
-than shared model-provider acquisition configuration.
+work needs durable machine-local access. Raw credentials should be resolved from
+caller-scoped input, environment variables, an injected secure credential store,
+or provider-native authentication rather than serialized into the nonsecret
+workspace metadata. They must not be written into environment manifests, export
+bundles, model source metadata, workflow artifacts, command arguments, or logs.
+
+Existing plaintext workspace credentials require a loss-safe migration: secure
+storage must be written and verified before the corresponding plaintext value is
+removed. If secure storage is unavailable, the legacy value remains intact and
+the adapter reports that migration is incomplete. UI surfaces should report only
+whether a credential is configured and its active source. Git remote personal
+access tokens are governed by `CGSPEC-LOCAL-02A` because they represent the
+calling user's git identity rather than shared model-provider acquisition
+configuration.
 
 ### CGSPEC-LOCAL-03 [LIVE]: ComfyGit-managed resolver floors are tracked policy
 Validation: TEST

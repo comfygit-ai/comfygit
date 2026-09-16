@@ -16,6 +16,12 @@ from comfygit_core.repositories.workspace_config_repository import WorkspaceConf
 from ..analyzers.model_scanner import ModelScanner
 from ..factories.environment_factory import EnvironmentFactory
 from ..logging.logging_config import get_logger
+from ..models.credentials import (
+    CredentialMigrationResult,
+    CredentialProvider,
+    CredentialStatus,
+    CredentialStore,
+)
 from ..models.exceptions import (
     CDEnvironmentExistsError,
     CDEnvironmentNotFoundError,
@@ -27,6 +33,13 @@ from ..models.materialization import (
     MaterializeResult,
     MaterializeSourceType,
     ModelMaterializationStrategy,
+)
+from ..models.resource_inventory import (
+    EnvironmentInventory,
+    ModelDeletionApplyResult,
+    ModelDeletionPlan,
+    ModelInventoryEntry,
+    WorkspaceInventory,
 )
 from ..models.shared import (
     ModelDeleteResult,
@@ -195,35 +208,67 @@ class Workspace:
     # Current workspace schema version (v2 = per-environment manager)
     CURRENT_SCHEMA_VERSION = 2
 
-    def __init__(self, paths: WorkspacePaths):
+    def __init__(
+        self, paths: WorkspacePaths, credential_store: CredentialStore | None = None,
+        *, credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
+    ):
         """Initialize workspace with validated paths.
 
         Args:
             paths: Validated WorkspacePaths instance
         """
         self.paths = paths
+        self._credential_store = credential_store
+        self._credential_overrides = dict(credential_overrides or {})
 
     @classmethod
-    def open(cls, path: Path | None = None) -> "Workspace":
+    def open(
+        cls,
+        path: Path | None = None,
+        *,
+        credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
+    ) -> "Workspace":
         """Open an existing workspace.
 
         This is the public discovery entry point for callers. It delegates to
         the current factory implementation while keeping factory internals out
-        of adapter code.
+        of adapter code. ``credential_overrides`` is process-local: a token wins
+        over ambient credentials; None explicitly disables provider discovery.
+        Omitted providers retain normal resolution. The same options are
+        accepted by create, from_path and open_or_create.
         """
         from ..factories.workspace_factory import WorkspaceFactory
 
-        return WorkspaceFactory.find(path)
+        return WorkspaceFactory.find(
+            path,
+            credential_store=credential_store, credential_overrides=credential_overrides,
+        )
 
     @classmethod
-    def create(cls, path: Path | None = None) -> "Workspace":
+    def create(
+        cls,
+        path: Path | None = None,
+        *,
+        credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
+    ) -> "Workspace":
         """Create a new workspace on disk and return it."""
         from ..factories.workspace_factory import WorkspaceFactory
 
-        return WorkspaceFactory.create(path)
+        return WorkspaceFactory.create(
+            path,
+            credential_store=credential_store, credential_overrides=credential_overrides,
+        )
 
     @classmethod
-    def from_path(cls, path: Path) -> "Workspace":
+    def from_path(
+        cls,
+        path: Path,
+        *,
+        credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
+    ) -> "Workspace":
         """Construct a workspace object when the caller already has a root path.
 
         Normal callers should prefer ``Workspace.open(path)`` or
@@ -231,18 +276,33 @@ class Workspace:
         contexts that infer the workspace root from runtime state and need to
         wrap that resolved root without exposing ``WorkspacePaths``.
         """
-        return cls(WorkspacePaths(path))
+        return cls(
+            WorkspacePaths(path),
+            credential_store=credential_store, credential_overrides=credential_overrides,
+        )
 
     @classmethod
-    def open_or_create(cls, path: Path | None = None) -> "Workspace":
+    def open_or_create(
+        cls,
+        path: Path | None = None,
+        *,
+        credential_store: CredentialStore | None = None,
+        credential_overrides: Mapping[CredentialProvider, str | None] | None = None,
+    ) -> "Workspace":
         """Open an existing workspace, or create it if it does not exist."""
         from ..factories.workspace_factory import WorkspaceFactory
         from ..models.exceptions import CDWorkspaceNotFoundError
 
         try:
-            return WorkspaceFactory.find(path)
+            return WorkspaceFactory.find(
+                path,
+                credential_store=credential_store, credential_overrides=credential_overrides,
+            )
         except CDWorkspaceNotFoundError:
-            return WorkspaceFactory.create(path)
+            return WorkspaceFactory.create(
+                path,
+                credential_store=credential_store, credential_overrides=credential_overrides,
+            )
 
     @classmethod
     def default_root(cls, path: Path | None = None) -> Path:
@@ -380,15 +440,21 @@ class Workspace:
     def workspace_config_manager(self) -> WorkspaceConfigRepository:
         return WorkspaceConfigRepository(
             self.paths.workspace_file,
-            default_models_path=self.paths.models
+            default_models_path=self.paths.models,
+            credential_store=self._credential_store,
+            credential_overrides=self._credential_overrides,
         )
 
     def get_civitai_token(self) -> str | None:
         """Return the configured Civitai token, honoring environment overrides."""
         return self.workspace_config_manager.get_civitai_token()
 
+    def get_workspace_id(self) -> str | None:
+        """Return the stable workspace id without creating or mutating one."""
+        return self.workspace_config_manager.load().workspace_id
+
     def set_civitai_token(self, token: str | None) -> None:
-        """Set or clear the persisted Civitai token."""
+        """Set or clear the workspace CivitAI credential in secure storage."""
         self.workspace_config_manager.set_civitai_token(token)
 
     def get_huggingface_token(self) -> str | None:
@@ -396,7 +462,7 @@ class Workspace:
         return self.workspace_config_manager.get_huggingface_token()
 
     def set_huggingface_token(self, token: str | None) -> None:
-        """Set or clear the persisted Hugging Face token."""
+        """Set or clear the workspace Hugging Face credential in secure storage."""
         self.workspace_config_manager.set_huggingface_token(token)
 
     def get_github_token(self) -> str | None:
@@ -404,8 +470,16 @@ class Workspace:
         return self.workspace_config_manager.get_github_token()
 
     def set_github_token(self, token: str | None) -> None:
-        """Set or clear the persisted GitHub token."""
+        """Set or clear the workspace GitHub credential in secure storage."""
         self.workspace_config_manager.set_github_token(token)
+
+    def get_credential_status(self, provider: CredentialProvider) -> CredentialStatus:
+        """Return secret-free provider authentication status."""
+        return self.workspace_config_manager.get_credential_status(provider)
+
+    def migrate_credentials(self) -> CredentialMigrationResult:
+        """Migrate verified legacy plaintext credentials into secure storage."""
+        return self.workspace_config_manager.migrate_credentials()
 
     def get_external_uv_cache(self) -> Path | None:
         """Return the configured external UV cache path, if one is set."""
@@ -584,6 +658,7 @@ class Workspace:
         name: str,
         python_version: str = "3.12",
         comfyui_version: str | None = None,
+        comfyui_repository: str | None = None,
         template_path: Path | None = None,
         torch_backend: str = "auto",
         no_manager: bool = False,
@@ -595,6 +670,7 @@ class Workspace:
             name: Environment name
             python_version: Python version (e.g., "3.12")
             comfyui_version: ComfyUI version
+            comfyui_repository: ComfyUI Git repository (canonical by default)
             template_path: Optional template to copy from
             torch_backend: PyTorch backend (auto, cpu, cu118, cu121, etc.)
             no_manager: Skip comfygit-manager install (headless mode)
@@ -638,6 +714,7 @@ class Workspace:
                 workspace=self,
                 python_version=python_version,
                 comfyui_version=comfyui_version,
+                comfyui_repository=comfyui_repository,
                 torch_backend=torch_backend,
                 no_manager=no_manager,
                 progress=progress,
@@ -1066,9 +1143,8 @@ class Workspace:
             OSError: If workspace metadata cannot be read
         """
         try:
-            with open(self.paths.workspace_file, encoding='utf-8') as f:
-                metadata = json.load(f)
-                active_name = metadata.get("active_environment")
+            metadata = self.workspace_config_manager.load()
+            active_name = metadata.active_environment
 
             if active_name:
                 try:
@@ -1109,18 +1185,9 @@ class Workspace:
                 ) from None
 
         try:
-            # Read existing metadata
-            metadata = {}
-            if self.paths.workspace_file.exists():
-                with open(self.paths.workspace_file, encoding='utf-8') as f:
-                    metadata = json.load(f)
-
-            # Update active environment
-            metadata["active_environment"] = name
-
-            # Write back
-            with open(self.paths.workspace_file, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, indent=2)
+            metadata = self.workspace_config_manager.load()
+            metadata.active_environment = name or ""
+            self.workspace_config_manager.save(metadata)
 
         except PermissionError as e:
             raise PermissionError("Cannot set active environment: insufficient permissions") from e
@@ -1268,6 +1335,114 @@ class Workspace:
     def remove_indexed_model_source(self, model_hash: str, source_url: str) -> bool:
         """Remove one source URL from a model in the workspace index."""
         return self.model_repository.remove_source(model_hash, source_url)
+
+    def get_resource_inventory(self, *, include_storage: bool = False) -> WorkspaceInventory:
+        """Return typed model/environment/storage inventory for adapters."""
+        from ..services.resource_inventory import WorkspaceResourceInventoryService
+
+        return WorkspaceResourceInventoryService(self).get_inventory(
+            include_storage=include_storage
+        )
+
+    def get_model_inventory(self) -> tuple[ModelInventoryEntry, ...]:
+        """Return every indexed model grouped across physical locations."""
+        from ..services.resource_inventory import WorkspaceResourceInventoryService
+
+        return WorkspaceResourceInventoryService(self).get_model_inventory()
+
+    def get_environment_inventory(
+        self,
+        name: str,
+        *,
+        include_storage: bool = False,
+    ) -> EnvironmentInventory:
+        """Return manifest and storage inventory for one environment."""
+        from ..services.resource_inventory import WorkspaceResourceInventoryService
+
+        return WorkspaceResourceInventoryService(self).get_environment_inventory(
+            self.get_environment(name, auto_sync=False),
+            include_storage=include_storage,
+        )
+
+    def plan_model_deletion(
+        self,
+        identifier: str,
+        *,
+        location_id: int | None = None,
+        all_locations: bool = False,
+    ) -> ModelDeletionPlan:
+        """Build a non-destructive, location-aware model deletion plan."""
+        from ..services.resource_inventory import WorkspaceResourceInventoryService
+
+        return WorkspaceResourceInventoryService(self).plan_model_deletion(
+            identifier,
+            location_id=location_id,
+            all_locations=all_locations,
+        )
+
+    def apply_model_deletion_plan(
+        self,
+        plan: ModelDeletionPlan,
+        *,
+        allow_referenced: bool = False,
+        allow_incomplete_recovery: bool = False,
+    ) -> ModelDeletionApplyResult:
+        """Revalidate and apply only the explicit locations in ``plan``."""
+        if not plan.selection_explicit:
+            raise ValueError("Model deletion requires an explicit location selection")
+        location_id = None
+        if not plan.delete_all_locations:
+            if len(plan.target_locations) != 1 or plan.target_locations[0].id is None:
+                raise ValueError("Location-specific deletion requires exactly one indexed location id")
+            location_id = int(plan.target_locations[0].id)
+
+        current = self.plan_model_deletion(
+            plan.model.short_hash,
+            location_id=location_id,
+            all_locations=plan.delete_all_locations,
+        )
+        planned_signature = [
+            (location.id, location.base_directory, location.relative_path, location.mtime)
+            for location in plan.target_locations
+        ]
+        current_signature = [
+            (location.id, location.base_directory, location.relative_path, location.mtime)
+            for location in current.target_locations
+        ]
+        if planned_signature != current_signature:
+            raise ValueError("Model locations changed after the deletion plan was created")
+
+        ignored_blockers = set()
+        if allow_referenced:
+            ignored_blockers.add("referenced_by_environments")
+        if allow_incomplete_recovery:
+            ignored_blockers.add("final_copy_lacks_recovery_proof")
+        blockers = [blocker for blocker in current.blockers if blocker not in ignored_blockers]
+        if blockers:
+            raise ValueError(f"Model deletion plan is blocked: {', '.join(blockers)}")
+
+        legacy_result = ModelDeleteResult(
+            model_hash=current.model.short_hash,
+            filename=current.model.locations[0].filename if current.model.locations else current.model.short_hash,
+        )
+        for location in current.target_locations:
+            self._delete_indexed_model_location(location, legacy_result)
+
+        self.model_repository.clear_orphaned_models()
+        self.model_repository.clear_orphaned_model_sources()
+        remaining_locations = len(self.model_repository.get_locations(current.model.short_hash))
+        return ModelDeletionApplyResult(
+            model_hash=current.model.short_hash,
+            deleted_paths=tuple(legacy_result.deleted_paths),
+            missing_paths=tuple(legacy_result.missing_paths),
+            errors=tuple(legacy_result.errors),
+            remaining_locations=remaining_locations,
+            reference_override=allow_referenced and "referenced_by_environments" in current.blockers,
+            recovery_override=(
+                allow_incomplete_recovery
+                and "final_copy_lacks_recovery_proof" in current.blockers
+            ),
+        )
 
     def ensure_model_hashes(self, identifier: str) -> "ModelDetails":
         """Compute and store missing full hashes for an indexed local model.

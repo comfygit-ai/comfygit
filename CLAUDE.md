@@ -18,7 +18,7 @@ work.
 | `docs/contracts/` | Active truth-layer contracts. Highest-precedence behavioral guarantees. |
 | `docs/specs/` | Active truth-layer lifecycle, manifest, and dependency semantics. |
 | `docs/comfygit-docs/` | Public user documentation site. Do not treat as active architecture truth. |
-| `docker/`, `tests/` | Runtime images and cross-package tests. |
+| `tests/` | Cross-package and end-to-end tests. |
 
 ## Truth Layer
 
@@ -118,22 +118,11 @@ Sync/run may recreate the managed virtualenv. Manual package installs into that
 venv are disposable unless captured with `cg -e <env> py add ...` or local uv
 source configuration.
 
-Useful environment commands:
-
-```bash
-cg create <name>
-cg use <name>
-cg -e <name> sync
-cg -e <name> run
-cg -e <name> status
-cg -e <name> manifest
-cg -e <name> node add <id>
-cg -e <name> py add <package>
-cg -e <name> commit -m "message"
-cg -e <name> push
-cg -e <name> env-config local-sources add <pkg> --path <path> --editable
-cg -e <name> env-config torch-backend detect
-```
+For operating ComfyUI environments and workflows, read the bundled
+[ComfyGit skill](skills/comfygit/SKILL.md). It routes to installation, shared
+models/version comparisons, and custom-node/workflow development guidance.
+Use shared model storage and uv caches while preserving isolated mutable
+runtimes; do not assume all node checkouts or virtualenv files are deduplicated.
 
 ## Development Commands
 
@@ -190,6 +179,11 @@ CLI package. This ordering matters because `comfygit-studio` pins
 back to workspace members, lockstep versioning, tests, build targets, or publish
 workflows. Hosted deployment belongs to ComfyGit Cloud; local/manual serving
 belongs to `cg serve`.
+
+The legacy `docker/base` image and migration startup scripts are also retired.
+Container consumers should own their Dockerfiles and hydrate environments with
+`cg materialize`; do not restore the old migration-JSON runtime without a new
+truth-layer contract and an active product requirement.
 
 Manager release ordering is separate and dependent on this repo. After
 `comfygit-core==<version>` and `comfygit-studio==<version>` are published on

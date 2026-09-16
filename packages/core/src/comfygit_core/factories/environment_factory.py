@@ -12,7 +12,6 @@ from ..managers.git_manager import GitManager
 from ..models.exceptions import (
     CDEnvironmentExistsError,
 )
-from ..utils.comfyui_ops import clone_comfyui
 from ..utils.environment_cleanup import mark_environment_complete
 from ..utils.filesystem import rmtree
 from ..utils.requirements import read_comfyui_requirements_with_supplements
@@ -58,6 +57,7 @@ class EnvironmentFactory:
         workspace: Workspace,
         python_version: str = "3.12",
         comfyui_version: str | None = None,
+        comfyui_repository: str | None = None,
         torch_backend: str = "auto",
         no_manager: bool = False,
         progress: EnvironmentCreateProgress | None = None,
@@ -70,6 +70,7 @@ class EnvironmentFactory:
             workspace: Parent workspace
             python_version: Python version (e.g., "3.12")
             comfyui_version: ComfyUI version (None for latest)
+            comfyui_repository: ComfyUI Git repository (canonical by default)
             torch_backend: PyTorch backend (auto, cpu, cu118, cu121, etc.)
             no_manager: Skip comfygit-manager installation (headless mode)
             progress: Optional progress callback for tracking creation phases
@@ -139,16 +140,22 @@ class EnvironmentFactory:
 
         from ..caching.comfyui_cache import ComfyUICacheManager, ComfyUISpec
         from ..clients.github_client import GitHubClient
-        from ..utils.comfyui_ops import resolve_comfyui_version
-        from ..utils.git import git_rev_parse
+        from ..utils.comfyui_ops import (
+            clone_comfyui,
+            normalize_comfyui_repository,
+            resolve_comfyui_version,
+            verify_comfyui_checkout,
+        )
 
         github_client = GitHubClient(
             token_provider=workspace.workspace_config_manager.get_github_token,
         )
 
+        comfyui_repository = normalize_comfyui_repository(comfyui_repository)
         version_to_clone, version_type, _ = resolve_comfyui_version(
             comfyui_version,
-            github_client
+            github_client,
+            comfyui_repository,
         )
 
         _complete("resolve_version")
@@ -158,7 +165,8 @@ class EnvironmentFactory:
         spec = ComfyUISpec(
             version=version_to_clone,
             version_type=version_type,
-            commit_sha=None  # Will be set after cloning
+            commit_sha=None,  # Will be set after cloning
+            repository=comfyui_repository,
         )
 
         cached_path = comfyui_cache.get_cached_comfyui(spec)
@@ -168,7 +176,11 @@ class EnvironmentFactory:
             _progress("restore_comfyui", f"Restoring ComfyUI {version_to_clone} from cache", 15)
             logger.info(f"Restoring ComfyUI {version_type} {version_to_clone} from cache...")
             shutil.copytree(cached_path, env.comfyui_path)
-            commit_sha = git_rev_parse(env.comfyui_path, "HEAD")
+            commit_sha = verify_comfyui_checkout(
+                env.comfyui_path,
+                repository=comfyui_repository,
+                commit_sha=spec.commit_sha,
+            )
             sha_display = f" ({commit_sha[:7]})" if commit_sha else ""
             logger.info(f"Restored ComfyUI from cache{sha_display}")
             _complete("restore_comfyui")
@@ -177,7 +189,11 @@ class EnvironmentFactory:
             _progress("clone_comfyui", f"Cloning ComfyUI {version_to_clone}", 15)
             logger.info(f"Cloning ComfyUI {version_type} {version_to_clone}...")
             try:
-                comfyui_version_output = clone_comfyui(env.comfyui_path, version_to_clone)
+                comfyui_version_output = clone_comfyui(
+                    env.comfyui_path,
+                    version_to_clone,
+                    repository=comfyui_repository,
+                )
                 if comfyui_version_output:
                     logger.info(f"Successfully cloned ComfyUI version: {comfyui_version_output}")
                 else:
@@ -189,7 +205,15 @@ class EnvironmentFactory:
                 raise e
 
             # Get actual commit SHA and cache it
-            commit_sha = git_rev_parse(env.comfyui_path, "HEAD")
+            commit_sha = verify_comfyui_checkout(
+                env.comfyui_path,
+                repository=comfyui_repository,
+                commit_sha=(
+                    version_to_clone
+                    if version_type == "commit" and len(version_to_clone) == 40
+                    else None
+                ),
+            )
             if commit_sha:
                 spec.commit_sha = commit_sha
                 comfyui_cache.cache_comfyui(spec, env.comfyui_path)
@@ -274,6 +298,7 @@ class EnvironmentFactory:
             version_to_clone,
             version_type,
             commit_sha,
+            comfyui_repository,
         )
         env.pyproject.save(config)
 
@@ -589,6 +614,7 @@ class EnvironmentFactory:
         comfyui_version: str,
         comfyui_version_type: str = "branch",
         comfyui_commit_sha: str | None = None,
+        comfyui_repository: str | None = None,
     ) -> dict:
         """Create the initial pyproject.toml.
 
@@ -599,7 +625,7 @@ class EnvironmentFactory:
         Note: exclude-dependencies is synced from package_config.toml after creation,
         not hardcoded here.
         """
-        from ..constants import PYPROJECT_SCHEMA_VERSION
+        from ..constants import DEFAULT_COMFYUI_REPOSITORY, PYPROJECT_SCHEMA_VERSION
 
         # Pin to minor version band (e.g., "3.12" → "==3.12.*")
         # This prevents UV from resolving for other minor versions (e.g., 3.13)
@@ -619,6 +645,10 @@ class EnvironmentFactory:
                     "comfyui_version": comfyui_version,
                     "comfyui_version_type": comfyui_version_type,
                     "comfyui_commit_sha": comfyui_commit_sha,
+                    "comfyui_repository": (
+                        comfyui_repository
+                        or DEFAULT_COMFYUI_REPOSITORY
+                    ),
                     "python_version": python_version,
                     "nodes": {}
                 },

@@ -6,6 +6,24 @@ from pathlib import Path
 import pytest
 from comfygit_core.core.environment import Environment
 
+
+@pytest.fixture(autouse=True)
+def isolate_machine_provider_credentials(monkeypatch):
+    """Prevent tests from reading developer-machine provider credentials."""
+    for name in (
+        "CIVITAI_API_TOKEN",
+        "CIVITAI_API_KEY",
+        "HF_TOKEN",
+        "HUGGING_FACE_HUB_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        "comfygit_core.repositories.workspace_config_repository.get_huggingface_native_token",
+        lambda: None,
+    )
+
 # ============================================================================
 # Path Fixtures
 # ============================================================================
@@ -273,7 +291,13 @@ def mock_comfyui_clone(monkeypatch):
     # Save original subprocess.run
     original_subprocess_run = subprocess.run
 
-    def fake_clone_comfyui(target_path: Path, version: str | None = None) -> str:
+    def fake_clone_comfyui(
+        target_path: Path,
+        version: str | None = None,
+        *,
+        repository: str | None = None,
+        token: str | None = None,
+    ) -> str:
         """Fake clone that creates ComfyUI structure without network."""
         _create_fake_comfyui_structure(target_path)
         return "v0.0.1-test-fake"
@@ -281,6 +305,19 @@ def mock_comfyui_clone(monkeypatch):
     monkeypatch.setattr(
         "comfygit_core.utils.comfyui_ops.clone_comfyui",
         fake_clone_comfyui
+    )
+
+    def fake_verify_comfyui_checkout(
+        checkout_path: Path,
+        *,
+        repository: str,
+        commit_sha: str | None = None,
+    ) -> str:
+        return commit_sha or "abc123def456789012345678901234567890abcd"
+
+    monkeypatch.setattr(
+        "comfygit_core.utils.comfyui_ops.verify_comfyui_checkout",
+        fake_verify_comfyui_checkout,
     )
 
     # Mock git_rev_parse to return fake SHA only for ComfyUI paths

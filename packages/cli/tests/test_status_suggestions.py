@@ -71,20 +71,20 @@ def test_missing_models_with_workflow_nodes_only(env_commands, mock_env, capsys)
     Expected: Suggest 'workflow resolve' (handles both models and nodes).
     """
     # Setup: 2 missing nodes, both referenced by workflow
-    mock_env.get_uninstalled_nodes.return_value = ['rgthree-comfy', 'comfyui-akatz-nodes']
+    mock_env.get_uninstalled_nodes.return_value = ['rgthree-comfy', 'example-node-pack']
 
     # Mock status with missing models and missing nodes
     status = MagicMock()
     status.missing_models = [
         MagicMock(workflow_names=['default'], model=MagicMock(filename='model.safetensors'))
     ]
-    status.comparison.missing_nodes = ['rgthree-comfy', 'comfyui-akatz-nodes']
+    status.comparison.missing_nodes = ['rgthree-comfy', 'example-node-pack']
     status.comparison.extra_nodes = []
     status.comparison.is_synced = False
 
     # Mock workflow with uninstalled_nodes matching missing_nodes
     mock_wf = MagicMock(name='default')
-    mock_wf.uninstalled_nodes = ['rgthree-comfy', 'comfyui-akatz-nodes']
+    mock_wf.uninstalled_nodes = ['rgthree-comfy', 'example-node-pack']
     status.workflow.analyzed_workflows = [mock_wf]
     status.workflow.workflows_with_issues = []
 

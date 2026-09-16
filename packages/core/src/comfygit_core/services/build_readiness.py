@@ -61,6 +61,8 @@ def build_readiness_from_pyproject_toml(
             environment_name="",
             python_version=None,
             comfyui_version=None,
+            comfyui_repository=None,
+            comfyui_commit_sha=None,
             blockers=(f"pyproject.toml is not valid TOML: {exc}",),
         )
 
@@ -95,6 +97,8 @@ def build_readiness_from_manifest_dict(
             environment_name=_raw_environment_name(plain_manifest),
             python_version=_raw_manifest_python_version(plain_manifest),
             comfyui_version=_raw_comfyui_version(plain_manifest),
+            comfyui_repository=None,
+            comfyui_commit_sha=None,
             blockers=(f"pyproject.toml manifest could not be interpreted: {exc}",),
         )
     if has_comfygit_manifest:
@@ -106,6 +110,8 @@ def build_readiness_from_manifest_dict(
         environment_name=readiness.environment_name,
         python_version=readiness.python_version,
         comfyui_version=readiness.comfyui_version,
+        comfyui_repository=readiness.comfyui_repository,
+        comfyui_commit_sha=readiness.comfyui_commit_sha,
         workflows=readiness.workflows,
         custom_nodes=readiness.custom_nodes,
         python_dependencies=readiness.python_dependencies,
@@ -136,6 +142,15 @@ def build_readiness_from_manifest_snapshot(
         _workflow_summary(workflow, model_catalog=snapshot.models)
         for workflow in snapshot.workflows.values()
     )
+    environment_models = tuple(
+        BuildModelSummary(
+            filename=model.filename, category=model.category,
+            criticality=model.criticality, content_hash=model.hash,
+            relative_path=model.relative_path, size_bytes=model.size,
+            sources=tuple(model.sources),
+        )
+        for model in snapshot.models.values() if model.criticality is not None
+    )
     custom_nodes = tuple(
         _custom_node_summary(identifier, node)
         for identifier, node in snapshot.nodes.items()
@@ -158,8 +173,8 @@ def build_readiness_from_manifest_snapshot(
         dependency_proof.append(proof)
         _collect_issue(proof, warnings=warnings, blockers=blockers)
 
-    for workflow in workflows:
-        for model in workflow.models:
+    for models in (environment_models, *(workflow.models for workflow in workflows)):
+        for model in models:
             proof = _classify_model_dependency(
                 model,
                 model_catalog=snapshot.models,
@@ -175,13 +190,20 @@ def build_readiness_from_manifest_snapshot(
         warnings.append("No Python version is declared; build policy must choose a default.")
     if not snapshot.comfyui_version:
         warnings.append("No ComfyUI version is declared; build policy must choose a default.")
+    if not snapshot.comfyui_commit_sha:
+        warnings.append(
+            "No immutable ComfyUI commit is declared; materialization may resolve moving version intent."
+        )
 
     return BuildReadiness(
         status="blocked" if blockers else "ready",
         environment_name=_environment_name(snapshot),
         python_version=_manifest_python_version(snapshot),
         comfyui_version=snapshot.comfyui_version,
+        comfyui_repository=snapshot.comfyui_repository,
+        comfyui_commit_sha=snapshot.comfyui_commit_sha,
         workflows=workflows,
+        environment_models=environment_models,
         custom_nodes=custom_nodes,
         python_dependencies=tuple(python_dependencies),
         dependency_proof=tuple(dependency_proof),
@@ -483,7 +505,7 @@ def _model_summary(
     return BuildModelSummary(
         filename=filename,
         category=category,
-        criticality=model.criticality,
+        criticality=("required" if catalog_entry and catalog_entry.criticality == "required" else model.criticality),
         status=model.status,
         content_hash=model.hash,
         relative_path=relative_path,

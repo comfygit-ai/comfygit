@@ -1,5 +1,29 @@
 """Unit tests for Workflow dataclass subgraph support."""
+import pytest
 from comfygit_core.models.workflow import Workflow
+
+
+@pytest.mark.parametrize("fields", [
+    {}, {"definitions": None}, {"definitions": {}},
+    {"definitions": {"subgraphs": None}}, {"definitions": {"subgraphs": []}},
+])
+def test_empty_definitions_preserve_graph(fields):
+    data = {"nodes": [{"id": 1, "type": "SaveAudio", "widgets_values": ["music"]}],
+            "links": [], **fields}
+    graph = Workflow.from_json(data)
+    assert graph.nodes["1"].type == "SaveAudio"
+    restored = Workflow.from_json(graph.to_json())
+    assert restored.nodes["1"].widgets_values == ["music"]
+
+
+@pytest.mark.parametrize("definitions, field", [
+    ([], "definitions"), ("bad", "definitions"),
+    ({"subgraphs": {}}, "definitions.subgraphs"),
+    ({"subgraphs": [None]}, "subgraph"),
+])
+def test_malformed_definitions_have_actionable_error(definitions, field):
+    with pytest.raises(ValueError, match=field):
+        Workflow.from_json({"nodes": [], "definitions": definitions})
 
 
 class TestWorkflowSubgraphParsing:

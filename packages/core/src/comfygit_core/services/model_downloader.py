@@ -37,6 +37,7 @@ class DownloadRequest:
     url: str
     target_path: Path  # Full path in global models directory
     workflow_name: str | None = None
+    reuse_by_source: bool = True
 
 
 @dataclass
@@ -292,8 +293,8 @@ class ModelDownloader:
                 error="Invalid HuggingFace file URL."
             )
 
-        # Get HF token from workspace config (handles env var > config priority)
-        token = self.workspace_config.get_huggingface_token() if self.workspace_config else None
+        # Resolve caller overrides and ambient credentials, preserving anonymous opt-out.
+        token = self.workspace_config.get_huggingface_download_token() if self.workspace_config else None
 
         # Custom tqdm class for progress callback
         # HF hub's tqdm_class must handle: (1) 'name' kwarg that vanilla tqdm rejects,
@@ -345,7 +346,7 @@ class ModelDownloader:
                         repo_id=parsed.repo_id,
                         filename=parsed.path_in_repo,
                         revision=parsed.revision or "main",
-                        token=token if token else None,
+                        token=token,
                         local_dir=str(local_dir),
                         tqdm_class=tqdm_class,
                     )
@@ -354,7 +355,7 @@ class ModelDownloader:
                         repo_id=parsed.repo_id,
                         filename=parsed.path_in_repo,
                         revision=parsed.revision or "main",
-                        token=token if token else None,
+                        token=token,
                         local_dir=str(local_dir),
                     )
             except TypeError:
@@ -363,7 +364,7 @@ class ModelDownloader:
                     repo_id=parsed.repo_id,
                     filename=parsed.path_in_repo,
                     revision=parsed.revision or "main",
-                    token=token if token else None,
+                    token=token,
                     local_dir=str(local_dir),
                 )
 
@@ -411,7 +412,11 @@ class ModelDownloader:
             self.repository.add_source(
                 model_hash=short_hash,
                 source_type="huggingface",
-                source_url=request.url
+                source_url=request.url,
+                metadata=self._huggingface_source_metadata(
+                    local_dir=Path(local_dir),
+                    parsed=parsed,
+                ),
             )
 
             model = ModelWithLocation(
@@ -441,6 +446,29 @@ class ModelDownloader:
                 error_context=error_context
             )
 
+    @staticmethod
+    def _huggingface_source_metadata(local_dir: Path, parsed) -> dict[str, str]:
+        """Return nonsecret structured provenance from a successful local-dir download."""
+        metadata = {
+            "repo_id": parsed.repo_id,
+            "repo_type": "model",
+            "revision": parsed.revision or "main",
+            "path_in_repo": parsed.path_in_repo,
+        }
+        try:
+            from huggingface_hub._local_folder import read_download_metadata
+
+            download_metadata = read_download_metadata(local_dir, parsed.path_in_repo)
+            if download_metadata is not None:
+                metadata["resolved_revision"] = download_metadata.commit_hash
+                metadata["etag"] = download_metadata.etag
+        except (ImportError, OSError, ValueError, TypeError):
+            logger.debug(
+                "Hugging Face local download metadata unavailable for %s",
+                parsed.path_in_repo,
+            )
+        return {key: value for key, value in metadata.items() if value}
+
     def download(
         self,
         request: DownloadRequest,
@@ -468,7 +496,7 @@ class ModelDownloader:
         temp_path: Path | None = None
         try:
             # Step 1: Check if already downloaded
-            existing = self.repository.find_by_source_url(request.url)
+            existing = self.repository.find_by_source_url(request.url) if request.reuse_by_source else None
             if existing:
                 logger.info(f"Model already downloaded from URL: {existing.relative_path}")
                 return DownloadResult(success=True, model=existing)

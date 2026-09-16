@@ -181,6 +181,11 @@ user-data deletion semantics.
 
 ## Import
 
+An import's internal sync must defer its completion marker until the remaining
+model acquisition phase succeeds. Failure to acquire a model selected by the
+requested strategy must raise before the completion marker or final import
+commit; `skip` explicitly omits acquisition from this completion check.
+
 ### CGSYNC-IMPORT-01 [LIVE]: Import is an authoring setup flow
 Validation: MIXED
 
@@ -193,6 +198,14 @@ the runtime hydration flow with stricter defaults described in
 `docs/specs/environment-materialization-lifecycle.md`.
 
 ## Custom Node Lifecycle
+
+### CGSYNC-NODE-00 [LIVE]: Git acquisition includes pinned submodules
+Validation: TEST
+
+Git clone hydration must initialize recursive submodules after checking out the
+requested parent revision, using each recorded gitlink commit rather than a
+moving branch. Git-node cache reuse must reject missing or mismatched submodule
+checkouts. Submodule acquisition failure must fail the parent acquisition.
 
 ### CGSYNC-NODE-01 [LIVE]: Node install and update mutate manifest, filesystem, and uv as one lifecycle
 Validation: TEST
@@ -435,6 +448,37 @@ During supervisor-managed environment switching, the observer must not report
 startup/validation states and only publish `complete` after the target ComfyUI
 HTTP endpoint responds, mapping wildcard listen addresses to a local readiness
 probe host.
+
+### CGSYNC-RUN-03 [LIVE]: Local runtime control verifies identity and restart completion
+Validation: TEST
+
+`cg run` advertises its runtime by environment as well as the existing shared
+switch observer. Environment-scoped CLI status/restart uses that advertisement
+and checks supervisor instance identity. Restart checks the current Manager
+workspace/environment and capability, requires a known idle queue, and routes
+through Manager's existing restart endpoint. It does not signal guessed PIDs.
+If Manager reports an active workspace-wide legacy orchestrator, the request
+is refused because the proxy could restart a different child.
+Mutation is restricted to local non-browser clients. `--wait` succeeds only
+after a newer child launch generation and ComfyUI HTTP readiness; acceptance
+alone is not completion. Uncertain requests must not be automatically repeated.
+
+The queue check is a preflight, not an atomic drain against concurrent external
+submitters. Old running supervisors without these advertisements need a normal
+owner-controlled relaunch; they are not silently adopted. Raw ComfyUI without
+Manager may be observed for HTTP readiness but cannot use this restart path.
+
+### CGSYNC-WF-AGENT-01 [LIVE]: Explicit mappings and strict resolution are public CLI operations
+Validation: TEST
+
+`workflow node map/unmap/list` adapts the public Environment mapping facade.
+Mapping requires a saved workflow and tracked package. `workflow resolve --json`
+requires automatic resolution and an explicit install/no-install choice, emits
+one result on stdout, and sends progress to stderr. With `--strict`, unresolved,
+ambiguous, missing, wrong-category or pending-download dependencies cause a
+nonzero exit. Completion is assessed again after mutations; it does not prove
+live imports, portable model recovery sources, or a successful generation.
+Without strict mode, partial interactive resolution remains supported.
 
 ## Readiness And Handoff
 

@@ -218,3 +218,13 @@ class TestGitListRemoteRefs:
             },
         ]
         assert refs["tags"] == []
+
+
+def test_clone_hydrates_submodules_after_parent_checkout(tmp_path):
+    target = tmp_path / "clone"
+    target.mkdir()
+    (target / ".gitmodules").write_text('[submodule "dependency"]\npath = dependency\nurl = https://example.test/dependency.git\n')
+    with patch("comfygit_core.utils.git._git") as git:
+        git_clone("https://example.test/parent.git", target, ref="a" * 40)
+    assert [call.args[0][0] for call in git.call_args_list] == ["clone", "checkout", "submodule"]
+    assert git.call_args_list[-1].args[0] == ["submodule", "update", "--init", "--recursive"]

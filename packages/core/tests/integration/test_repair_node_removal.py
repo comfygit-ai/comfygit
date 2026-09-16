@@ -79,7 +79,7 @@ class TestRepairNodeRemoval:
         # - pyproject.toml doesn't have them (after git reset)
 
         extra_nodes = [
-            "ComfyUI-AKatz-Nodes",
+            "ComfyUI-Example-Nodes",
             "rgthree-comfy",
             "ComfyUI-VideoHelperSuite",
             "ComfyUI-Basic-Math",

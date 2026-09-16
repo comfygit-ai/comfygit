@@ -1,7 +1,9 @@
 from pathlib import Path
 
 from comfygit_core.factories.environment_factory import EnvironmentFactory
+from comfygit_core.models.environment import EnvironmentComparison
 from comfygit_core.models.materialization import MaterializeResult
+from comfygit_core.models.shared import NodeInfo
 from comfygit_core.utils.environment_cleanup import mark_environment_complete
 
 
@@ -139,3 +141,35 @@ def test_materialize_sets_models_dir_before_environment_construction(test_worksp
     test_workspace.materialize_environment(source, "runtime-env", models_dir=models_dir)
 
     assert events == ["set_models_directory", "construct_environment"]
+
+
+def test_materialization_detects_missing_required_nodes(test_env, monkeypatch) -> None:
+    test_env.pyproject.nodes.add(
+        NodeInfo(
+            name="required-node",
+            repository="https://github.com/example/required-node.git",
+            version="a" * 40,
+            source="git",
+            criticality="required",
+        ),
+        "required-node",
+    )
+    test_env.pyproject.nodes.add(
+        NodeInfo(
+            name="optional-node",
+            repository="https://github.com/example/optional-node.git",
+            version="b" * 40,
+            source="git",
+            criticality="optional",
+        ),
+        "optional-node",
+    )
+
+    monkeypatch.setattr(
+        "comfygit_core.core.environment.StatusScanner.get_full_comparison",
+        lambda *_args, **_kwargs: EnvironmentComparison(
+            missing_nodes=["required-node", "optional-node"]
+        ),
+    )
+
+    assert test_env._missing_required_materialized_nodes() == ["required-node"]

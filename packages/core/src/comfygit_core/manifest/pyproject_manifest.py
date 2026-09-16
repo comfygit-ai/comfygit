@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import tomlkit
 
+from ..constants import DEFAULT_COMFYUI_REPOSITORY
 from ..models.manifest import EnvironmentManifestSnapshot
 from ..models.shared import NodeInfo
 from .store import PyprojectDocument
@@ -18,10 +19,12 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ComfyUIManifestVersion:
-    """ComfyUI version metadata declared in the manifest."""
+    """Portable ComfyUI source and revision metadata."""
 
     version: str | None = None
     version_type: str | None = None
+    repository: str = DEFAULT_COMFYUI_REPOSITORY
+    commit_sha: str | None = None
 
 
 def _dependency_list(value: Any) -> list[str]:
@@ -336,4 +339,13 @@ class PyprojectManifest:
         return ComfyUIManifestVersion(
             version=str(version) if version is not None else None,
             version_type=str(version_type) if version_type is not None else None,
+            repository=str(
+                comfygit.get("comfyui_repository")
+                or DEFAULT_COMFYUI_REPOSITORY
+            ),
+            commit_sha=(
+                str(comfygit["comfyui_commit_sha"])
+                if comfygit.get("comfyui_commit_sha") is not None
+                else None
+            ),
         )

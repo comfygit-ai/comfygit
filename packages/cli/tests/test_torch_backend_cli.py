@@ -298,6 +298,11 @@ class TestSyncBehavior:
 class TestRunBehavior:
     """Test that run reads from file like sync does."""
 
+    @pytest.fixture(autouse=True)
+    def isolate_runtime_listener(self, monkeypatch, request):
+        if 'supervisor_control' not in request.node.name:
+            monkeypatch.setenv('COMFYGIT_SUPERVISOR_CONTROL_PORT', 'off')
+
     @patch('comfygit_cli.env_commands.get_workspace_or_exit')
     def test_run_supervisor_control_starts_by_default(self, mock_get_workspace, tmp_path, monkeypatch):
         """Native cg run should expose restart-stable switch status/logs by default."""
@@ -307,7 +312,7 @@ class TestRunBehavior:
         starts = []
 
         class FakeSwitchObserverServer:
-            def __init__(self, workspace_path, host, port, *, public_origin=None):
+            def __init__(self, workspace_path, host, port, *, public_origin=None, runtime_controller=None):
                 self.workspace_path = workspace_path
                 self.host = host
                 self.port = port
@@ -346,7 +351,7 @@ class TestRunBehavior:
         starts = []
 
         class FakeSwitchObserverServer:
-            def __init__(self, workspace_path, host, port, *, public_origin=None):
+            def __init__(self, workspace_path, host, port, *, public_origin=None, runtime_controller=None):
                 self.workspace_path = workspace_path
                 self.host = host
                 self.port = port

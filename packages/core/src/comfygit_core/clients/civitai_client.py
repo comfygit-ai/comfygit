@@ -82,12 +82,13 @@ class CivitAIClient:
         self.cache_manager = cache_manager
         self.workspace_config = workspace_config
 
-        # Resolve API key: direct > environment > config
-        self._api_key = api_key
-        if not self._api_key:
-            self._api_key = os.environ.get("CIVITAI_API_TOKEN")
-        if not self._api_key and workspace_config:
+        # Workspace resolution owns overrides, environment and secure-store order.
+        if api_key is not None:
+            self._api_key = api_key
+        elif workspace_config is not None:
             self._api_key = workspace_config.get_civitai_token()
+        else:
+            self._api_key = os.environ.get("CIVITAI_API_TOKEN") or os.environ.get("CIVITAI_API_KEY")
 
         self.rate_limiter = RateLimitManager(min_interval=0.1)
         self.retry_config = RetryConfig(

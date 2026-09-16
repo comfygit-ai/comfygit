@@ -41,6 +41,34 @@ pip install comfygit
 
 Need UV? See [UV installation](https://docs.astral.sh/uv/getting-started/installation/).
 
+### Install from a source checkout
+
+The monorepo root is a uv workspace. Install its matched packages with
+`uv sync --frozen --all-packages`, then run `uv run --frozen --package comfygit cg ...`.
+To expose the checkout as your user-installed CLI, run from the root:
+
+```bash
+uv tool install --force --editable ./packages/cli \
+  --with-editable ./packages/core \
+  --with-editable ./packages/studio-runtime
+```
+
+Rerun this command after dependency changes: editable source updates do not
+refresh installed dependencies automatically. See the bundled skill's
+[installation troubleshooting](skills/comfygit/references/installation.md) for
+keyring and headless-host distinctions. Release-wheel dependency checks run
+with `uv run python dev/scripts/check-package-install.py --python 3.10`.
+
+### Agent skill
+
+The reusable [ComfyGit skill](skills/comfygit/SKILL.md) covers environment/version
+comparisons, shared models, node development and workflow validation with
+progressively loaded references. Copy `skills/comfygit` into your agent's skill
+directory (for Codex, `~/.codex/skills/comfygit`), or symlink it to this checkout
+to follow local updates. Review an existing installed skill before replacing it.
+Other agents can read `SKILL.md` directly. The skill is generic; configure local
+workspace/model paths in your own agent instructions.
+
 ## Quick Start
 
 ```console

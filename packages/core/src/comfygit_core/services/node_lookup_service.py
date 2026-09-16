@@ -314,7 +314,7 @@ class NodeLookupService:
         from ..utils.git import git_clone
 
         # Check if already cached
-        if cache_path := self.custom_node_cache.get_cached_path(node_info):
+        if cache_path := self.custom_node_cache.get_cached_node_path(node_info):
             logger.debug(f"Node '{node_info.name}' already in cache")
             return cache_path
 

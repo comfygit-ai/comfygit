@@ -127,9 +127,20 @@ class CustomNodeCacheManager(ContentCacheBase):
         cache_dir = self.store_dir / cache_key
         content_dir = cache_dir / "content"
 
+        if node_info.source == "git" and (content_dir / ".gitmodules").is_file():
+            from ..utils.git import _git
+
+            if not (content_dir / ".git").exists():
+                return False
+            try:
+                status = _git(["submodule", "status", "--recursive"], content_dir)
+                if any(line.startswith(("-", "+", "U")) for line in status.stdout.splitlines()):
+                    return False
+            except (OSError, ValueError):
+                return False
         return content_dir.exists() and any(content_dir.iterdir())
 
-    def get_cached_path(self, node_info: NodeInfo) -> Path | None:
+    def get_cached_node_path(self, node_info: NodeInfo) -> Path | None:
         """Get the path to cached node content if it exists.
 
         Returns:
@@ -225,7 +236,7 @@ class CustomNodeCacheManager(ContentCacheBase):
         Returns:
             True if successfully copied, False otherwise
         """
-        cached_path = self.get_cached_path(node_info)
+        cached_path = self.get_cached_node_path(node_info)
         if not cached_path:
             return False
 

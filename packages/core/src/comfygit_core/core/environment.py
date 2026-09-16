@@ -636,6 +636,31 @@ class Environment:
             missing_models=missing_models
         )
 
+    def _missing_required_materialized_nodes(self) -> list[str]:
+        """Return required manifest nodes absent from the ComfyUI checkout."""
+        scanner = StatusScanner(
+            comfyui_path=self.comfyui_path,
+            venv_path=self.venv_path,
+            uv=self.uv_manager,
+            pyproject=self.pyproject,
+            pytorch_manager=self.pytorch_manager,
+        )
+        comparison = scanner.get_full_comparison(check_package_sync=False)
+        missing = {
+            str(name).casefold()
+            for name in (
+                *comparison.missing_nodes,
+                *comparison.dev_nodes_missing,
+            )
+        }
+        required = []
+        for node in self.pyproject.nodes.get_existing().values():
+            if node.criticality == "optional":
+                continue
+            if node.name.casefold() in missing:
+                required.append(node.name)
+        return sorted(required, key=str.casefold)
+
     def get_lifecycle_status(
         self,
         *,
@@ -992,6 +1017,7 @@ class Environment:
         overlay_names: list[str] | None = None,
         extras: list[str] | None = None,
         all_extras: bool = False,
+        mark_complete: bool = True,
     ) -> SyncResult:
         """Apply changes: sync packages, nodes, workflows, and models with environment.
 
@@ -1009,6 +1035,7 @@ class Environment:
             overlay_names: One-time overlay names for this sync call.
             extras: Optional list of extras to install
             all_extras: Install all optional extras
+            mark_complete: False when import still has acquisition steps to finish.
 
         Returns:
             SyncResult with details of what was synced
@@ -1035,6 +1062,7 @@ class Environment:
             overlay_names=overlay_names,
             extras=extras,
             all_extras=all_extras,
+            mark_complete=mark_complete,
         )
 
     # =====================================================
@@ -2992,8 +3020,12 @@ class Environment:
             ValueError: If ComfyUI already exists or .cec not properly initialized
         """
         from ..caching.comfyui_cache import ComfyUICacheManager, ComfyUISpec
-        from ..utils.comfyui_ops import clone_comfyui
-        from ..utils.git import git_rev_parse
+        from ..utils.comfyui_ops import (
+            clone_comfyui,
+            normalize_comfyui_commit_sha,
+            normalize_comfyui_repository,
+            verify_comfyui_checkout,
+        )
 
         logger.info(f"Finalizing import for environment: {self.name}")
 
@@ -3016,10 +3048,18 @@ class Environment:
             comfyui_manifest_version = self.pyproject.manifest.get_comfyui_version()
             comfyui_version = comfyui_manifest_version.version
             comfyui_version_type = comfyui_manifest_version.version_type
+            comfyui_repository = normalize_comfyui_repository(
+                comfyui_manifest_version.repository
+            )
+            comfyui_commit_sha = normalize_comfyui_commit_sha(
+                comfyui_manifest_version.commit_sha
+            )
         except Exception as e:
             logger.warning(f"Could not read comfyui_version from pyproject.toml: {e}")
             comfyui_version = None
             comfyui_version_type = None
+            comfyui_repository = normalize_comfyui_repository(None)
+            comfyui_commit_sha = None
 
         if comfyui_version:
             version_desc = f"{comfyui_version_type} {comfyui_version}" if comfyui_version_type else comfyui_version
@@ -3039,8 +3079,10 @@ class Environment:
         spec = ComfyUISpec(
             version=comfyui_version or "main",
             version_type=comfyui_version_type or "branch",
-            commit_sha=None
+            commit_sha=comfyui_commit_sha,
+            repository=comfyui_repository,
         )
+        clone_ref = comfyui_commit_sha or comfyui_version
 
         # Check cache first
         cached_path = comfyui_cache.get_cached_comfyui(spec)
@@ -3050,14 +3092,35 @@ class Environment:
                 callbacks.on_phase("restore_comfyui", f"Restoring ComfyUI {spec.version} from cache...")
             logger.info(f"Restoring ComfyUI {spec.version} from cache")
             shutil.copytree(cached_path, self.comfyui_path)
+            actual_commit = verify_comfyui_checkout(
+                self.comfyui_path,
+                repository=comfyui_repository,
+                commit_sha=comfyui_commit_sha,
+            )
+            logger.info(
+                "Verified cached ComfyUI origin and commit %s",
+                actual_commit[:12],
+            )
         else:
             if callbacks:
                 callbacks.on_phase("clone_comfyui", f"Cloning ComfyUI {spec.version}...")
-            logger.info(f"Cloning ComfyUI {spec.version}")
-            clone_comfyui(self.comfyui_path, comfyui_version)
+            logger.info(
+                "Cloning ComfyUI %s from %s",
+                clone_ref or "default branch",
+                comfyui_repository,
+            )
+            clone_comfyui(
+                self.comfyui_path,
+                clone_ref,
+                repository=comfyui_repository,
+            )
 
             # Cache the fresh clone
-            commit_sha = git_rev_parse(self.comfyui_path, "HEAD")
+            commit_sha = verify_comfyui_checkout(
+                self.comfyui_path,
+                repository=comfyui_repository,
+                commit_sha=comfyui_commit_sha,
+            )
             if commit_sha:
                 spec.commit_sha = commit_sha
                 comfyui_cache.cache_comfyui(spec, self.comfyui_path)
@@ -3238,7 +3301,7 @@ class Environment:
         try:
             # During import, don't remove ComfyUI builtins (fresh clone has example files)
             # Enable verbose to show real-time uv output during dependency installation
-            sync_result = self.sync(remove_extra_nodes=False, sync_callbacks=callbacks, verbose=True)
+            sync_result = self.sync(remove_extra_nodes=False, sync_callbacks=callbacks, verbose=True, mark_complete=False)
             if sync_result.success and sync_result.nodes_installed and callbacks:
                 for node_name in sync_result.nodes_installed:
                     callbacks.on_node_installed(node_name)
@@ -3248,6 +3311,13 @@ class Environment:
             if fail_on_sync_errors and not sync_result.success:
                 error_text = "; ".join(sync_result.errors) if sync_result.errors else "unknown sync error"
                 raise RuntimeError(f"Environment sync failed during materialization: {error_text}")
+            if fail_on_sync_errors:
+                missing_required_nodes = self._missing_required_materialized_nodes()
+                if missing_required_nodes:
+                    raise RuntimeError(
+                        "Environment materialization is missing required custom nodes: "
+                        + ", ".join(missing_required_nodes)
+                    )
         except Exception as e:
             if callbacks:
                 callbacks.on_error(f"Node sync failed: {e}")
@@ -3257,19 +3327,6 @@ class Environment:
         # Phase 5: Prepare and resolve models
         if callbacks:
             callbacks.on_phase("resolve_models", f"Resolving workflows ({model_strategy} strategy)...")
-
-        # Always prepare models to copy sources from global table, even for "skip"
-        # This ensures download intents are preserved for later resolution
-        workflows_with_intents = self.model_manager.prepare_import_with_model_strategy(model_strategy)
-
-        # Only auto-resolve if not "skip" strategy
-        workflows_to_resolve = [] if model_strategy == "skip" else workflows_with_intents
-
-        # prepare_import_with_model_strategy() may update pyproject model entries.
-        # Invalidate per-workflow cache entries so resolve_workflow() sees fresh
-        # download intents instead of stale session-cached resolutions.
-        for workflow_name in workflows_to_resolve:
-            self.workflow_cache.invalidate(self.name, workflow_name)
 
         # Resolve workflows with download intents
         from ..models.workflow import BatchDownloadCallbacks
@@ -3288,8 +3345,30 @@ class Environment:
                 on_batch_complete=callbacks.on_download_batch_complete
             )
 
+        for download in self.model_manager.download_environment_models(model_strategy, download_callbacks):
+            if not download.success:
+                download_failures.append(("environment", download.filename))
+
+        # Always prepare models to copy sources from global table, even for "skip"
+        # This ensures download intents are preserved for later resolution
+        workflows_with_intents = self.model_manager.prepare_import_with_model_strategy(model_strategy)
+
+        # Only auto-resolve if not "skip" strategy
+        workflows_to_resolve = [] if model_strategy == "skip" else workflows_with_intents
+
+        # prepare_import_with_model_strategy() may update pyproject model entries.
+        # Invalidate per-workflow cache entries so resolve_workflow() sees fresh
+        # download intents instead of stale session-cached resolutions.
+        for workflow_name in workflows_to_resolve:
+            self.workflow_cache.invalidate(self.name, workflow_name)
+
         for workflow_name in workflows_to_resolve:
             try:
+                manifest_downloads = self.workflow_manager.execute_manifest_downloads(
+                    workflow_name,
+                    self.pyproject.workflows.get_workflow_models(workflow_name),
+                    download_callbacks,
+                )
                 result = self.resolve_workflow(
                     name=workflow_name,
                     model_strategy=AutoModelStrategy(),
@@ -3298,10 +3377,11 @@ class Environment:
                 )
 
                 # Track successful vs failed downloads from actual download results
-                successful_downloads = sum(1 for dr in result.download_results if dr.success)
+                all_downloads = [*manifest_downloads, *result.download_results]
+                successful_downloads = sum(1 for dr in all_downloads if dr.success)
                 failed_downloads = [
                     (workflow_name, dr.filename)
-                    for dr in result.download_results
+                    for dr in all_downloads
                     if not dr.success
                 ]
 
@@ -3311,12 +3391,25 @@ class Environment:
                     callbacks.on_workflow_resolved(workflow_name, successful_downloads)
 
             except Exception as e:
+                download_failures.append((workflow_name, str(e)))
                 if callbacks:
                     callbacks.on_error(f"Failed to resolve {workflow_name}: {e}")
 
         # Report download failures
         if download_failures and callbacks:
             callbacks.on_download_failures(download_failures)
+
+        if download_failures and model_strategy != "skip":
+            from ..models.exceptions import CDModelDownloadError
+
+            formatted_failures = ", ".join(
+                f"{model_name} (from {workflow_name})"
+                for workflow_name, model_name in download_failures
+            )
+            raise CDModelDownloadError(
+                f"{len(download_failures)} model(s) failed to download: {formatted_failures}",
+                failures=download_failures
+            )
 
         if no_manager:
             self._set_headless_marker()
@@ -3330,18 +3423,6 @@ class Environment:
         if create_import_commit and self.git_manager.has_uncommitted_changes():
             self.git_manager.commit_with_identity("Imported environment", add_all=True)
             logger.info("Committed import changes")
-
-        if download_failures and model_strategy != "skip":
-            from ..models.exceptions import CDModelDownloadError
-
-            formatted_failures = ", ".join(
-                f"{model_name} (from {workflow_name})"
-                for workflow_name, model_name in download_failures
-            )
-            raise CDModelDownloadError(
-                f"{len(download_failures)} model(s) failed to download: {formatted_failures}",
-                failures=download_failures
-            )
 
         logger.info("Import finalization completed successfully")
 

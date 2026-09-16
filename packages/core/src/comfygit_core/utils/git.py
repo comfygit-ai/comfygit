@@ -559,6 +559,9 @@ def git_clone(
         # Handle refs/ style references
         _git(["checkout", ref], target_path, not_found_msg=f"Reference '{ref}' does not exist", timeout=timeout)
 
+    if (target_path / ".gitmodules").is_file():
+        _git(["submodule", "update", "--init", "--recursive"], target_path, timeout=timeout)
+
     logger.info(f"Successfully cloned {url} to {target_path}")
 
 def git_clone_subdirectory(

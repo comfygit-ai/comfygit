@@ -433,6 +433,7 @@ def test_import_current_environment_creates_managed_copy(tmp_path: Path) -> None
         "name": "managed-copy",
         "python_version": result_python_minor(),
         "comfyui_version": None,
+        "comfyui_repository": None,
         "torch_backend": "cpu",
     }
     assert result.environment_name == "imported"

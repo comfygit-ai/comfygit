@@ -4,9 +4,15 @@ Caches ComfyUI installations by version to avoid re-downloading and re-cloning.
 Supports releases, commits, and branches.
 """
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..constants import DEFAULT_COMFYUI_REPOSITORY
+from ..utils.comfyui_ops import (
+    comfyui_repository_identity,
+    normalize_comfyui_repository,
+)
 from .base import ContentCacheBase
 
 
@@ -16,6 +22,7 @@ class ComfyUISpec:
     version: str              # "v0.3.20", "abc123", "main"
     version_type: str         # "release", "commit", "branch"
     commit_sha: str | None = None  # Actual commit SHA (for branches)
+    repository: str = DEFAULT_COMFYUI_REPOSITORY
 
 
 class ComfyUICacheManager(ContentCacheBase):
@@ -60,12 +67,20 @@ class ComfyUICacheManager(ContentCacheBase):
             # Simple string version
             return f"version_{spec}"
 
-        # Use commit SHA for branches (they can change)
-        if spec.version_type == "branch" and spec.commit_sha:
-            return f"commit_{spec.commit_sha}"
+        repository = normalize_comfyui_repository(spec.repository)
+        repository_identity = comfyui_repository_identity(repository)
+        repository_key = hashlib.sha256(
+            repository_identity.encode("utf-8")
+        ).hexdigest()[:12]
 
-        # For releases and commits, use the version
-        return f"{spec.version_type}_{spec.version}"
+        # Any captured commit is the immutable cache authority, including
+        # snapshots originally described by a branch or release.
+        if spec.commit_sha:
+            revision_key = f"commit_{spec.commit_sha}"
+        else:
+            revision_key = f"{spec.version_type}_{spec.version}"
+
+        return f"source_{repository_key}_{revision_key}"
 
     def cache_comfyui(self, spec: ComfyUISpec, source_path: Path) -> Path:
         """Cache a ComfyUI installation.
@@ -82,7 +97,8 @@ class ComfyUICacheManager(ContentCacheBase):
         metadata = {
             "version": spec.version,
             "version_type": spec.version_type,
-            "commit_sha": spec.commit_sha
+            "commit_sha": spec.commit_sha,
+            "repository": normalize_comfyui_repository(spec.repository),
         }
 
         return self.cache_content(cache_key, source_path, metadata)
@@ -96,5 +112,11 @@ class ComfyUICacheManager(ContentCacheBase):
         Returns:
             Path to cached ComfyUI content, or None if not cached
         """
+        if (
+            isinstance(spec, ComfyUISpec)
+            and spec.version_type == "branch"
+            and not spec.commit_sha
+        ):
+            return None
         cache_key = self.generate_cache_key(spec)
         return self.get_cached_path(cache_key)

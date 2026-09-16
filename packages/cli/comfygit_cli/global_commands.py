@@ -1,12 +1,20 @@
 """Global workspace-level commands for ComfyGit CLI."""
 
 import argparse
+import getpass
+import json
 import sys
 from functools import cached_property
 from pathlib import Path
 
 from comfygit_core import Workspace
-from comfygit_core.models import CDWorkspaceNotFoundError, ImportCallbacks
+from comfygit_core.models import (
+    CDCredentialStoreError,
+    CDWorkspaceNotFoundError,
+    CredentialProvider,
+    CredentialSource,
+    ImportCallbacks,
+)
 
 from .cli_utils import get_workspace_optional, get_workspace_or_exit
 from .logging.environment_logger import WorkspaceLogger, with_workspace_logging
@@ -93,6 +101,7 @@ class GlobalCommands:
         WorkspaceLogger.set_workspace_path(workspace.path)
 
         if models_dir is not None:
+            models_dir.mkdir(parents=True, exist_ok=True)
             workspace.set_models_directory(models_dir.resolve())
 
         return workspace
@@ -447,6 +456,37 @@ class GlobalCommands:
                     f"{item['suggestion']} ({item['next_action']})"
                 )
 
+    @with_workspace_logging("inventory")
+    def inventory(self, args: argparse.Namespace) -> None:
+        """Render typed workspace resource inventory."""
+        try:
+            inventory = self.workspace.get_resource_inventory(
+                include_storage=bool(getattr(args, "storage", False))
+            )
+            if args.json_output:
+                print(json.dumps(inventory.to_dict(), indent=2, sort_keys=True))
+                return
+
+            print("📦 Workspace Resource Inventory")
+            print(f"   Workspace: {inventory.workspace_path}")
+            print(f"   Models directory: {inventory.models_directory}")
+            print(f"   Models: {len(inventory.models)}")
+            print(f"   Environments: {len(inventory.environments)}")
+            for environment in inventory.environments:
+                print(f"\n   {environment.name}")
+                print(f"     ComfyUI: {environment.comfyui_revision or 'unknown'}")
+                print(f"     Manifest: {environment.manifest_sha256[:12]}...")
+                print(f"     Models: {len(environment.model_dependencies)}")
+                print(f"     Custom nodes: {len(environment.custom_node_dependencies)}")
+                if environment.storage.measured:
+                    print(f"     Environment storage: {format_size(environment.storage.environment_bytes)}")
+                else:
+                    print("     Environment storage: not measured (use --storage)")
+        except Exception as exc:
+            logger.error("Failed to build workspace inventory: %s", exc)
+            print(f"✗ Failed to build inventory: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     def debug(self, args: argparse.Namespace) -> None:
         """Show application debug logs with smart environment detection."""
         import re
@@ -693,7 +733,7 @@ class GlobalCommands:
                 print("\nModels are saved as download intents - you can download them later with:")
                 print("   cg workflow resolve <workflow>")
                 print("\nIf you see 401 Unauthorized errors, add your Civitai API key:")
-                print("   cg config --civitai-key <your-token>")
+                print("   cg auth set civitai")
 
             def on_download_batch_start(self, count: int):
                 """Show batch download start."""
@@ -813,7 +853,7 @@ class GlobalCommands:
                     print(f"   Model download failed: {model_name} ({workflow_name})")
 
             def on_download_batch_start(self, count: int):
-                print(f"   Downloading {count} model(s)")
+                print(f"   Preparing {count} model(s)")
 
             def on_download_file_start(self, name: str, idx: int, total: int):
                 print(f"   [{idx}/{total}] {name}")
@@ -823,12 +863,12 @@ class GlobalCommands:
 
             def on_download_file_complete(self, name: str, success: bool, error: str | None):
                 if success:
-                    print(f"   Downloaded: {name}")
+                    print(f"   Available: {name}")
                 else:
                     print(f"   Download failed: {name}: {error}")
 
             def on_download_batch_complete(self, success: int, total: int):
-                print(f"   Downloaded {success}/{total} model(s)")
+                print(f"   Available {success}/{total} model(s)")
 
         try:
             workspace = self._get_or_create_workspace_at(
@@ -968,6 +1008,8 @@ class GlobalCommands:
                 print("\n✗ Export cancelled")
                 sys.exit(1)
 
+        from comfygit_core.models import CDExportError
+
         try:
             tarball_path = env.export_environment(
                 output_path,
@@ -979,30 +1021,24 @@ class GlobalCommands:
             print(f"\n✅ Export complete: {tarball_path.name} ({size_mb:.1f} MB)")
             print("\nShare this file to distribute your complete environment!")
 
+        except CDExportError as e:
+            print(f"✗ {str(e)}")
+
+            if e.context:
+                if e.context.uncommitted_workflows:
+                    print("\n📋 Uncommitted workflows:")
+                    for wf in e.context.uncommitted_workflows:
+                        print(f"  • {wf}")
+                    print("\n💡 Commit first:")
+                    print("   cg commit -m 'Pre-export checkpoint'")
+                elif e.context.uncommitted_git_changes:
+                    print("\n💡 Commit git changes first:")
+                    print("   cg commit -m 'Pre-export checkpoint'")
+                elif e.context.has_unresolved_issues:
+                    print("\n💡 Resolve workflow issues first:")
+                    print("   cg workflow resolve <workflow_name>")
+            sys.exit(1)
         except Exception as e:
-            # Handle CDExportError with rich context
-            from comfygit_core.models import CDExportError
-
-            if isinstance(e, CDExportError):
-                print(f"✗ {str(e)}")
-
-                # Show context-specific details
-                if e.context:
-                    if e.context.uncommitted_workflows:
-                        print("\n📋 Uncommitted workflows:")
-                        for wf in e.context.uncommitted_workflows:
-                            print(f"  • {wf}")
-                        print("\n💡 Commit first:")
-                        print("   cg commit -m 'Pre-export checkpoint'")
-                    elif e.context.uncommitted_git_changes:
-                        print("\n💡 Commit git changes first:")
-                        print("   cg commit -m 'Pre-export checkpoint'")
-                    elif e.context.has_unresolved_issues:
-                        print("\n💡 Resolve workflow issues first:")
-                        print("   cg workflow resolve <workflow_name>")
-                sys.exit(1)
-
-            # Generic error handling
             print(f"✗ Export failed: {e}")
             sys.exit(1)
 
@@ -1019,6 +1055,13 @@ class GlobalCommands:
         logger.info("Listing all indexed models")
 
         try:
+            if getattr(args, "json_output", False):
+                models = self.workspace.get_model_inventory()
+                if args.duplicates:
+                    models = tuple(model for model in models if len(model.locations) > 1)
+                print(json.dumps([model.to_dict() for model in models], indent=2, sort_keys=True))
+                return
+
             # Get all models from the index
             models = self.workspace.list_models()
 
@@ -1485,72 +1528,82 @@ class GlobalCommands:
 
     @with_workspace_logging("model delete")
     def model_delete(self, args: argparse.Namespace) -> None:
-        """Delete model files from disk and clean their index entries."""
+        """Plan model deletion by default and apply only explicit selections."""
         identifier = args.identifier
-        logger.info(f"Deleting model: '{identifier}'")
+        apply = bool(getattr(args, "apply", False) or getattr(args, "yes", False))
+        all_locations = bool(getattr(args, "all_locations", False) or getattr(args, "yes", False))
+        location_id = getattr(args, "location_id", None)
+        logger.info("Planning model deletion: '%s'", identifier)
 
         try:
-            details = self.workspace.get_model_details(identifier)
-        except KeyError:
-            print(f"✗ Model not found: {identifier}", file=sys.stderr)
-            sys.exit(1)
-        except ValueError as exc:
-            print(f"✗ {exc}", file=sys.stderr)
-            print("  Use a full hash or a more specific filename.", file=sys.stderr)
-            sys.exit(1)
+            plan = self.workspace.plan_model_deletion(
+                identifier,
+                location_id=location_id,
+                all_locations=all_locations,
+            )
         except Exception as exc:
-            logger.error(f"Failed to load model details for '{identifier}': {exc}")
-            print(f"✗ Failed to load model details: {exc}", file=sys.stderr)
+            logger.error("Failed to plan model deletion '%s': %s", identifier, exc)
+            print(f"✗ Failed to plan deletion: {exc}", file=sys.stderr)
             sys.exit(1)
 
-        model = details.model
-        locations = details.all_locations
-
-        print(f"Delete model: {model.filename}")
-        print(f"  Hash: {model.hash}")
-        print(f"  Size: {format_size(model.file_size)}")
-        print(f"  Locations: {len(locations)}")
-        for location in locations:
-            if location.full_path:
-                print(f"    • {location.full_path}")
+        if not apply:
+            if getattr(args, "json_output", False):
+                print(json.dumps({"mode": "dry-run", "plan": plan.to_dict()}, indent=2, sort_keys=True))
             else:
-                print(f"    • {location.relative_path or 'unknown'}")
-
-        if not args.yes:
-            choice = input("\nDelete these model file(s) and clean index entries? [y/N]: ").strip().lower()
-            if choice not in {"y", "yes"}:
-                print("Delete cancelled")
-                return
+                self._render_model_deletion_plan(plan)
+                print("\nDry run only. Use --apply with --location-id or --all-locations to delete.")
+            return
 
         try:
-            result = self.workspace.delete_model(identifier)
+            result = self.workspace.apply_model_deletion_plan(
+                plan,
+                allow_referenced=bool(getattr(args, "allow_referenced", False)),
+                allow_incomplete_recovery=bool(getattr(args, "allow_incomplete_recovery", False)),
+            )
         except Exception as exc:
-            logger.error(f"Failed to delete model '{identifier}': {exc}")
-            print(f"✗ Delete failed: {exc}", file=sys.stderr)
+            logger.error("Failed to apply model deletion '%s': %s", identifier, exc)
+            if getattr(args, "json_output", False):
+                print(json.dumps({"mode": "apply", "plan": plan.to_dict(), "error": str(exc)}, indent=2, sort_keys=True))
+            else:
+                self._render_model_deletion_plan(plan)
+                print(f"\n✗ Delete blocked: {exc}", file=sys.stderr)
             sys.exit(1)
 
-        if result.deleted_paths:
-            print(f"\n✓ Deleted {len(result.deleted_paths)} file(s):")
-            for path in result.deleted_paths:
-                print(f"  • {path}")
-        else:
-            print("\nNo files were deleted from disk.")
-
+        if getattr(args, "json_output", False):
+            print(json.dumps({"mode": "apply", "plan": plan.to_dict(), "result": result.to_dict()}, indent=2, sort_keys=True))
+            return
+        self._render_model_deletion_plan(plan)
+        print(f"\n✓ Deleted {len(result.deleted_paths)} selected location(s)")
+        for deleted_path in result.deleted_paths:
+            print(f"  • {deleted_path}")
         if result.missing_paths:
-            print(f"\nCleaned {len(result.missing_paths)} stale index location(s):")
-            for path in result.missing_paths:
-                print(f"  • {path}")
-
+            print(f"  Missing/stale locations cleaned: {len(result.missing_paths)}")
         if result.remaining_locations:
-            print(f"\nRemaining indexed locations: {result.remaining_locations}")
-
+            print(f"  Remaining indexed locations: {result.remaining_locations}")
         if result.errors:
-            print("\nDelete completed with errors:", file=sys.stderr)
             for error in result.errors:
                 print(f"  • {error.get('path', '')}: {error.get('error', 'unknown error')}", file=sys.stderr)
             sys.exit(1)
 
-        print("\n✓ Model index cleaned")
+    @staticmethod
+    def _render_model_deletion_plan(plan) -> None:
+        print(f"Model deletion plan: {plan.model.short_hash}")
+        print(f"  Category: {plan.model.category}")
+        print(f"  File size: {format_size(plan.model.file_size)}")
+        print(f"  Potential reclaim: {format_size(plan.potential_reclaim_bytes)}")
+        print(f"  Selected locations: {len(plan.target_locations)}")
+        for location in plan.target_locations:
+            print(f"    • [{location.id}] {location.full_path or location.relative_path}")
+        print(f"  Remaining copies: {len(plan.remaining_locations)}")
+        print(f"  Referencing environments: {', '.join(plan.model.referencing_environments) or 'none'}")
+        print(f"  Source hint: {'yes' if plan.source_hint_available else 'no'}")
+        print(f"  Strong hash: {'yes' if plan.strong_hash_available else 'no'}")
+        print(f"  Immutable source: {'yes' if plan.immutable_source_available else 'no'}")
+        print(f"  Recovery proof: {'complete' if plan.recovery_complete else 'incomplete'}")
+        if plan.blockers:
+            print(f"  Blockers: {', '.join(plan.blockers)}")
+        if plan.warnings:
+            print(f"  Warnings: {', '.join(plan.warnings)}")
 
     def _add_source_direct(self, env, identifier: str, url: str):
         """Direct mode: add source to specific model."""
@@ -1636,22 +1689,107 @@ class GlobalCommands:
 
     # === Config Management ===
 
-    @with_workspace_logging("config")
+    _AUTH_PROVIDERS = {
+        "civitai": (CredentialProvider.CIVITAI, "CivitAI", "set_civitai_token"),
+        "huggingface": (
+            CredentialProvider.HUGGINGFACE,
+            "Hugging Face",
+            "set_huggingface_token",
+        ),
+        "github": (CredentialProvider.GITHUB, "GitHub", "set_github_token"),
+    }
+
+    _AUTH_SOURCE_LABELS = {
+        CredentialSource.EXPLICIT: "application supplied",
+        CredentialSource.ANONYMOUS: "explicitly anonymous",
+        CredentialSource.ENVIRONMENT: "environment",
+        CredentialSource.SECURE_STORE: "secure store",
+        CredentialSource.PROVIDER_NATIVE: "provider login",
+        CredentialSource.LEGACY_PLAINTEXT: "legacy plaintext; migration required",
+        CredentialSource.UNAVAILABLE: "secure storage unavailable",
+        CredentialSource.NONE: "not configured",
+    }
+
+    @with_workspace_logging("auth status", log_args=False)
+    def auth_status(self, args: argparse.Namespace) -> None:
+        """Show provider credential status without reading partial suffixes."""
+        print("Provider Authentication:\n")
+        for provider, label, _setter_name in self._AUTH_PROVIDERS.values():
+            status = self.workspace.get_credential_status(provider)
+            source = self._AUTH_SOURCE_LABELS[status.source]
+            state = "Configured" if status.configured else "Not configured"
+            print(f"  {label:<14} {state} ({source})")
+            if status.message and not status.storage_available:
+                print(f"  {'':<14} {status.message}")
+
+    @with_workspace_logging("auth set", log_args=False)
+    def auth_set(self, args: argparse.Namespace) -> None:
+        """Read and save a provider credential without placing it in argv."""
+        _provider, label, setter_name = self._AUTH_PROVIDERS[args.provider]
+        if args.token_stdin:
+            token = sys.stdin.readline().rstrip("\r\n")
+        else:
+            token = getpass.getpass(f"Enter {label} credential: ").strip()
+
+        if not token:
+            print("✗ Credential was empty; nothing was saved", file=sys.stderr)
+            raise SystemExit(1)
+
+        try:
+            getattr(self.workspace, setter_name)(token)
+        except CDCredentialStoreError as exc:
+            print(f"✗ {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        print(f"✓ {label} credential saved")
+
+    @with_workspace_logging("auth clear", log_args=False)
+    def auth_clear(self, args: argparse.Namespace) -> None:
+        """Clear a saved provider credential."""
+        _provider, label, setter_name = self._AUTH_PROVIDERS[args.provider]
+        try:
+            getattr(self.workspace, setter_name)(None)
+        except CDCredentialStoreError as exc:
+            print(f"✗ {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        print(f"✓ {label} credential cleared")
+
+    @with_workspace_logging("auth login", log_args=False)
+    def auth_login(self, args: argparse.Namespace) -> None:
+        """Run a provider-native authentication flow."""
+        if args.provider != "huggingface":
+            print(f"✗ Provider-native login is not supported for {args.provider}", file=sys.stderr)
+            raise SystemExit(1)
+
+        from huggingface_hub import login
+
+        login(skip_if_logged_in=not args.force)
+        status = self.workspace.get_credential_status(CredentialProvider.HUGGINGFACE)
+        if status.configured:
+            print("✓ Hugging Face login configured")
+        else:
+            print("✗ Hugging Face login did not produce an active credential", file=sys.stderr)
+            raise SystemExit(1)
+
+    @with_workspace_logging("auth migrate", log_args=False)
+    def auth_migrate(self, args: argparse.Namespace) -> None:
+        """Migrate verified legacy credentials without exposing their values."""
+        result = self.workspace.migrate_credentials()
+        if result.migrated:
+            migrated = ", ".join(provider.value for provider in result.migrated)
+            print(f"✓ Migrated to secure storage: {migrated}")
+        if result.retained:
+            retained = ", ".join(provider.value for provider in result.retained)
+            print(f"⚠ Retained legacy credentials: {retained}", file=sys.stderr)
+        for error in result.errors:
+            print(f"  {error}", file=sys.stderr)
+        if result.retained or result.errors:
+            raise SystemExit(1)
+        if result.complete and not result.migrated:
+            print("✓ No legacy plaintext credentials require migration")
+
+    @with_workspace_logging("config", log_args=False)
     def config(self, args: argparse.Namespace) -> None:
         """Manage ComfyGit configuration settings."""
-        # Flag mode - direct operations
-        if hasattr(args, 'civitai_key') and args.civitai_key is not None:
-            self._set_civitai_key(args.civitai_key)
-            return
-
-        if hasattr(args, 'huggingface_token') and args.huggingface_token is not None:
-            self._set_huggingface_token(args.huggingface_token)
-            return
-
-        if hasattr(args, 'github_token') and args.github_token is not None:
-            self._set_github_token(args.github_token)
-            return
-
         if hasattr(args, 'uv_cache') and args.uv_cache is not None:
             self._set_uv_cache(args.uv_cache)
             return
@@ -1660,35 +1798,7 @@ class GlobalCommands:
             self._show_config()
             return
 
-        # Interactive mode - no flags provided
-        self._interactive_config()
-
-    def _set_civitai_key(self, key: str):
-        """Set Civitai API key."""
-        if key == "":
-            self.workspace.set_civitai_token(None)
-            print("✓ Civitai API key cleared")
-        else:
-            self.workspace.set_civitai_token(key)
-            print("✓ Civitai API key saved")
-
-    def _set_huggingface_token(self, token: str):
-        """Set Hugging Face token."""
-        if token == "":
-            self.workspace.set_huggingface_token(None)
-            print("✓ Hugging Face token cleared")
-        else:
-            self.workspace.set_huggingface_token(token)
-            print("✓ Hugging Face token saved")
-
-    def _set_github_token(self, token: str):
-        """Set GitHub token."""
-        if token == "":
-            self.workspace.set_github_token(None)
-            print("✓ GitHub token cleared")
-        else:
-            self.workspace.set_github_token(token)
-            print("✓ GitHub token saved")
+        self._show_config()
 
     def _set_uv_cache(self, path_str: str):
         """Set external UV cache path."""
@@ -1715,30 +1825,7 @@ class GlobalCommands:
         # Workspace path
         print(f"  Workspace Path:  {self.workspace.paths.root}")
 
-        # Civitai API Key
-        token = self.workspace.get_civitai_token()
-        if token:
-            # Mask key showing last 4 chars
-            masked = f"••••••••{token[-4:]}" if len(token) > 4 else "••••"
-            print(f"  Civitai API Key: {masked}")
-        else:
-            print("  Civitai API Key: Not set")
-
-        # Hugging Face token
-        huggingface_token = self.workspace.get_huggingface_token()
-        if huggingface_token:
-            masked = f"••••••••{huggingface_token[-4:]}" if len(huggingface_token) > 4 else "••••"
-            print(f"  Hugging Face:    {masked}")
-        else:
-            print("  Hugging Face:    Not set")
-
-        # GitHub token
-        github_token = self.workspace.get_github_token()
-        if github_token:
-            masked = f"••••••••{github_token[-4:]}" if len(github_token) > 4 else "••••"
-            print(f"  GitHub Token:    {masked}")
-        else:
-            print("  GitHub Token:    Not set")
+        print("  Provider Auth:   Run 'cg auth status'")
 
         # External UV cache
         uv_cache = self.workspace.get_external_uv_cache()
@@ -1747,68 +1834,18 @@ class GlobalCommands:
         else:
             print("  UV Cache:        Workspace-local (default)")
 
-    def _interactive_config(self):
-        """Interactive configuration menu."""
-        while True:
-            # Get current config
-            civitai_token = self.workspace.get_civitai_token()
-
-            # Display menu
-            print("\nComfyGit Configuration\n")
-
-            # Civitai key status
-            if civitai_token:
-                masked = f"••••••••{civitai_token[-4:]}" if len(civitai_token) > 4 else "••••"
-                print(f"  1. Civitai API Key: {masked}")
-            else:
-                print("  1. Civitai API Key: Not set")
-
-            # Options
-            print("\n  [1] Change setting  [c] Clear a setting  [q] Quit")
-            choice = input("Choice: ").strip().lower()
-
-            if choice == 'q':
-                break
-            elif choice == '1':
-                self._interactive_set_civitai_key()
-            elif choice == 'c':
-                self._interactive_clear_setting()
-            else:
-                print("  Invalid choice")
-
-    def _interactive_set_civitai_key(self):
-        """Interactive Civitai API key setup."""
-        print("\n🔑 Civitai API Key Setup")
-        print("   Get your key from: https://civitai.com/user/account")
-
-        key = input("\nEnter API key (or blank to cancel): ").strip()
-        if not key:
-            print("  Cancelled")
-            return
-
-        self.workspace.set_civitai_token(key)
-        print("✓ API key saved")
-
-    def _interactive_clear_setting(self):
-        """Clear a configuration setting."""
-        print("\nClear which setting?")
-        print("  1. Civitai API Key")
-        print("\n  [1] Clear setting  [c] Cancel")
-
-        choice = input("Choice: ").strip().lower()
-
-        if choice == "1":
-            self.workspace.set_civitai_token(None)
-            print("✓ Civitai API key cleared")
-        elif choice == "c" or choice == "":
-            print("  Cancelled")
-        else:
-            print("  Invalid choice")
-
     # === Orchestrator Management ===
 
     def orch_status(self, args: argparse.Namespace) -> None:
         """Show orchestrator status."""
+        from comfygit_core.runtime import read_runtime_advertisement
+        target = getattr(args, "target_env", None)
+        if not target:
+            active = self.workspace.get_active_environment()
+            target = active.name if active else None
+        if target and read_runtime_advertisement(self.workspace.path, target):
+            self.runtime_control(args, restart=False)
+            return
         from .utils.orchestrator import (
             format_uptime,
             get_orchestrator_uptime,
@@ -1827,9 +1864,13 @@ class GlobalCommands:
             status_data = {
                 "running": is_running,
                 "pid": pid,
+                "scope": "legacy_orchestrator",
+                "environment": target,
+                "runtime_status": "unknown",
+                "guidance": "No environment runtime advertisement; older cg run processes may still be running.",
             }
 
-            if is_running:
+            if is_running and pid is not None:
                 uptime = get_orchestrator_uptime(metadata_dir, pid)
                 if uptime:
                     status_data["uptime_seconds"] = int(uptime)
@@ -1852,8 +1893,13 @@ class GlobalCommands:
             else:
                 print("Running:        No")
             print("\nOrchestrator is not running.")
-            print("Start ComfyUI to launch the orchestrator automatically.")
+            print("No legacy orchestrator is registered. Older cg run supervisors may still be running;")
+            print("relaunch with this CLI to enable environment-scoped runtime status/control.")
             print("━" * 70)
+            return
+
+        if pid is None:
+            print("Orchestrator status is inconsistent: running without a PID.")
             return
 
         print(f"Running:        Yes (PID {pid})")
@@ -1895,42 +1941,35 @@ class GlobalCommands:
 
     def orch_restart(self, args: argparse.Namespace) -> None:
         """Request orchestrator to restart ComfyUI."""
-        import time
+        # Restart always targets an environment and uses its current supervisor.
+        self.runtime_control(args, restart=True)
 
-        from .utils.orchestrator import is_orchestrator_running, safe_write_command
+    def runtime_control(self, args: argparse.Namespace, *, restart: bool) -> None:
+        import json
 
-        metadata_dir = self.workspace.path / ".metadata"
+        from .utils.runtime_client import RuntimeClient
 
-        # Check if orchestrator is running
-        is_running, pid = is_orchestrator_running(metadata_dir)
-
-        if not is_running:
-            print("✗ Orchestrator is not running")
-            print("  Start ComfyUI to launch the orchestrator")
-            sys.exit(1)
-
-        # Send restart command
-        print(f"✓ Sending restart command to orchestrator (PID {pid})")
-        safe_write_command(metadata_dir, {
-            "command": "restart",
-            "timestamp": time.time()
-        })
-
-        print("  ComfyUI will restart within 500ms...")
-
-        if args.wait:
-            print("\n  Waiting for restart to complete...")
-            time.sleep(2)  # Give orchestrator time to process
-
-            # Wait for restart (check if PID changes or process restarts)
-            for _ in range(30):  # 15 second timeout
-                time.sleep(0.5)
-                is_running, new_pid = is_orchestrator_running(metadata_dir)
-                if is_running:
-                    print(f"✓ Orchestrator restarted (PID {new_pid})")
-                    return
-
-            print("⚠️  Restart may still be in progress")
+        name = getattr(args, "target_env", None)
+        if not name:
+            active = self.workspace.get_active_environment()
+            name = active.name if active else None
+        if not name:
+            raise ValueError("Choose an environment with cg -e NAME orch ...")
+        try:
+            client = RuntimeClient(self.workspace.path, name)
+            result = client.restart(wait=args.wait, timeout=args.timeout) if restart else client.status()
+        except Exception as exc:
+            if getattr(args, "json", False):
+                print(json.dumps({"environment": name, "status": "unverified", "error": str(exc)}))
+            raise
+        if getattr(args, "json", False):
+            print(json.dumps(result, indent=2))
+        elif restart:
+            print(f"{name}: {result['status']}")
+        else:
+            print(f"{name}: {result['phase']} — HTTP ready: {result['ready']}")
+            print(f"  Queue: {result['queue_running']} running, {result['queue_pending']} pending")
+            print(f"  ComfyUI: {result['comfyui_url']} (generation {result['generation']})")
 
     def orch_kill(self, args: argparse.Namespace) -> None:
         """Shutdown orchestrator."""
@@ -1952,6 +1991,10 @@ class GlobalCommands:
             print("✗ Orchestrator is not running")
             if pid:
                 print(f"  (stale PID file exists: {pid})")
+            return
+
+        if pid is None:
+            print("✗ Orchestrator status is inconsistent: running without a PID")
             return
 
         # Check if mid-switch (warn user)
@@ -2045,7 +2088,7 @@ class GlobalCommands:
                 return
 
         # Kill orchestrator if requested
-        if is_running and args.kill:
+        if is_running and args.kill and pid is not None:
             print(f"\n✓ Terminating orchestrator process {pid}")
             print("  (giving it a chance to shut down ComfyUI gracefully...)")
             # Use force=False to send SIGTERM first, allowing cleanup handlers to run

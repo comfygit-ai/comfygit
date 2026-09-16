@@ -37,6 +37,7 @@ class EnvironmentSyncCoordinator:
         overlay_names: list[str] | None = None,
         extras: list[str] | None = None,
         all_extras: bool = False,
+        mark_complete: bool = True,
     ) -> SyncResult:
         """Apply manifest and local configuration state to the runtime."""
         env = self.environment
@@ -112,10 +113,13 @@ class EnvironmentSyncCoordinator:
             model_strategy=model_strategy,
             model_callbacks=model_callbacks,
         )
+        if result.models_failed:
+            result.success = False
         self._configure_model_symlink(result)
         self._migrate_user_content_if_needed(result)
         self._configure_user_content_symlinks(result)
-        self._mark_complete_if_success(result, dry_run=dry_run)
+        if mark_complete:
+            self._mark_complete_if_success(result, dry_run=dry_run)
 
         if result.success:
             logger.info("Successfully synced environment")
@@ -217,6 +221,12 @@ class EnvironmentSyncCoordinator:
 
         env = self.environment
         try:
+            for download in env.model_manager.download_environment_models(model_strategy, model_callbacks):
+                if download.success:
+                    if not download.reused:
+                        result.models_downloaded.append(download.filename)
+                else:
+                    result.models_failed.append((download.filename, download.error or "Download failed"))
             workflows_with_intents = env.model_manager.prepare_import_with_model_strategy(
                 strategy=model_strategy
             )
@@ -314,7 +324,7 @@ class EnvironmentSyncCoordinator:
             result.errors.append(f"User content symlink configuration failed: {e}")
 
     def _mark_complete_if_success(self, result: SyncResult, *, dry_run: bool) -> None:
-        if not result.success or dry_run:
+        if not result.success or result.models_failed or result.errors or dry_run:
             return
 
         from ..utils.environment_cleanup import mark_environment_complete

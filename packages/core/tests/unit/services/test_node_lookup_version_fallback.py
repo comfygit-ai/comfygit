@@ -31,9 +31,9 @@ class TestDownloadToCacheGitBehavior:
         """Registry installs without artifacts should fail instead of cloning git."""
         # ARRANGE
         node_info = NodeInfo(
-            name="ComfyUI-AKatz-Nodes",
-            registry_id="comfyui-akatz-nodes",
-            repository="https://github.com/akatz-ai/comfyui-akatz-nodes",
+            name="ComfyUI-Example-Nodes",
+            registry_id="comfyui-example-nodes",
+            repository="https://github.com/example/comfyui-example-nodes",
             version="1.11.1",  # Semver, not a git tag
             download_url=None,
             source="registry"
@@ -53,11 +53,11 @@ class TestDownloadToCacheGitBehavior:
     def test_registry_artifact_download_failure_falls_back_to_repository(self, cache_dir):
         """CGSYNC-NODE-05: CDN failures can fall back to repository acquisition."""
         node_info = NodeInfo(
-            name="ComfyUI-AKatz-Nodes",
-            registry_id="comfyui-akatz-nodes",
-            repository="https://github.com/akatz-ai/comfyui-akatz-nodes",
+            name="ComfyUI-Example-Nodes",
+            registry_id="comfyui-example-nodes",
+            repository="https://github.com/example/comfyui-example-nodes",
             version="1.11.1",
-            download_url="https://cdn.comfy.org/akatz/comfyui-akatz-nodes/1.11.1/node.zip",
+            download_url="https://cdn.comfy.org/example/comfyui-example-nodes/1.11.1/node.zip",
             source="registry",
         )
 

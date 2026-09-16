@@ -2,13 +2,15 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from comfygit_core.models.shared import ModelWithLocation, NodeInfo
 from comfygit_core.models.workflow import WorkflowNodeWidgetRef
 from comfygit_core.models.workflow_contract import (
     WorkflowExecutionContract,
 )
+
+from ..constants import DEFAULT_COMFYUI_REPOSITORY
 
 
 def _as_str_tuple(value: Any) -> tuple[str, ...]:
@@ -132,6 +134,11 @@ class ManifestModel:
     relative_path: str
     category: str
     sources: list[str] = field(default_factory=list)
+    criticality: Literal["required", "optional"] | None = None
+
+    def __post_init__(self) -> None:
+        if self.criticality not in (None, "required", "optional"):
+            raise ValueError(f"Invalid environment model criticality: {self.criticality}")
 
     def to_toml_dict(self) -> dict[str, Any]:
         """Serialize to TOML-compatible dict."""
@@ -143,6 +150,8 @@ class ManifestModel:
         }
         if self.sources:
             result["sources"] = self.sources
+        if self.criticality is not None:
+            result["criticality"] = self.criticality
         return result
 
     @classmethod
@@ -154,7 +163,8 @@ class ManifestModel:
             size=data["size"],
             relative_path=data["relative_path"],
             category=data.get("category", "unknown"),
-            sources=data.get("sources", [])
+            sources=data.get("sources", []),
+            criticality=data.get("criticality"),
         )
 
     @classmethod
@@ -284,6 +294,8 @@ class EnvironmentManifestSnapshot:
     project: ManifestProjectSnapshot
     schema_version: int
     comfyui_version: str | None
+    comfyui_repository: str
+    comfyui_commit_sha: str | None
     python_version: str | None
     manifest_state: str
     sync_extras: tuple[str, ...]
@@ -355,6 +367,15 @@ class EnvironmentManifestSnapshot:
             comfyui_version=(
                 str(comfygit["comfyui_version"])
                 if comfygit.get("comfyui_version") is not None
+                else None
+            ),
+            comfyui_repository=str(
+                comfygit.get("comfyui_repository")
+                or DEFAULT_COMFYUI_REPOSITORY
+            ),
+            comfyui_commit_sha=(
+                str(comfygit["comfyui_commit_sha"])
+                if comfygit.get("comfyui_commit_sha") is not None
                 else None
             ),
             python_version=(

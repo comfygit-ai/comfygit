@@ -456,6 +456,9 @@ class TestWorkflowExecutionContractLoading:
         assert isinstance(snapshot, EnvironmentManifestSnapshot)
         assert snapshot.project.name == "test-project"
         assert snapshot.comfyui_version == "v0.3.60"
+        assert snapshot.comfyui_repository == (
+            "https://github.com/Comfy-Org/ComfyUI.git"
+        )
         assert snapshot.python_version == "3.11"
         assert snapshot.uv.exclude_dependencies == ("opencv-python",)
         assert snapshot.uv.constraints == ("numpy<3",)
@@ -1255,13 +1258,17 @@ class TestInitialPyprojectConfig:
             python_version="3.11",
             comfyui_version="v0.3.60",
             comfyui_version_type="tag",
-            comfyui_commit_sha="abc123"
+            comfyui_commit_sha="abc123",
+            comfyui_repository="https://github.com/kijai/ComfyUI.git",
         )
 
         # Verify uv section exists with only system-tool policy.
         assert "tool" in config
         assert "uv" in config["tool"]
         assert config["tool"]["uv"] == {"override-dependencies": ["uv>=0.11.8"]}
+        assert config["tool"]["comfygit"]["comfyui_repository"] == (
+            "https://github.com/kijai/ComfyUI.git"
+        )
 
 
 class TestExcludeDependencies:

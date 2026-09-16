@@ -83,6 +83,20 @@ The materialization path should not copy:
 Git sources preserve repository identity through the Git import path. Plain
 directory sources are treated as source snapshots, not as Git history.
 
+### CGMAT-SRC-02A [LIVE]: ComfyUI checkout hydration honors source provenance
+Validation: TEST
+
+Materialization reads the ComfyUI repository and revision contract from the
+portable manifest. When a full `comfyui_commit_sha` is present, it clones that
+commit from `comfyui_repository` even when `comfyui_version` names a branch or
+tag. Restored caches are keyed by repository plus immutable revision, and both
+origin and HEAD are verified before later materialization phases run.
+
+Legacy manifests without `comfyui_repository` continue to use the canonical
+ComfyUI repository. Credentials are never written into the manifest or clone
+URL; authenticated private ComfyUI sources require a separate host-scoped
+credential flow.
+
 ### CGMAT-SRC-03 [LIVE]: Model directory is configured before environment construction
 Validation: TEST
 

@@ -392,3 +392,14 @@ def test_extract_video_contract_outputs_from_comfyui_images_history_key() -> Non
     assert outputs[0].type == "video"
     assert outputs[0].artifacts[0].filename == "LTX_2.3_ia2v_00005_.mp4"
     assert outputs[0].artifacts[0].subfolder == "video"
+
+
+def test_native_3d_file_outputs_deduplicate_legacy_export_alias():
+    contract = NamedWorkflowContract(outputs=[
+        WorkflowContractOutput(name="model", type="file", node_id="500", selector="all")
+    ])
+    artifact = {"filename": "asset.glb", "subfolder": "assets", "type": "output"}
+    native = extract_contract_outputs(contract.outputs, {"outputs": {"500": {"3d": [artifact]}}})
+    assert native[0].artifacts[0].filename == "asset.glb"
+    aliases = extract_contract_outputs(contract.outputs, {"outputs": {"500": {"files": [artifact], "3d": [artifact]}}})
+    assert len(aliases[0].artifacts) == 1
