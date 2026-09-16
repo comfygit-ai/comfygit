@@ -27,7 +27,7 @@ The workspace owns machine-local coordination state:
 - cached ComfyUI registry data
 - cached model index data
 - workspace and environment logs
-- optional credentials such as Civitai and GitHub tokens
+- a workspace identity used to scope optional OS credential-store entries
 
 Credentials and caches should stay local. Environment manifests should hold the
 portable recipe.

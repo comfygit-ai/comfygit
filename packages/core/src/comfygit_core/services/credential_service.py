@@ -70,6 +70,7 @@ class CredentialService:
             if value := self.credential_store.get(workspace_id, provider):
                 return value
         except CDCredentialStoreError:
+            # An unavailable desktop store must not block native/headless credentials.
             pass
 
         if value := self._native_value(provider):

@@ -28,7 +28,7 @@ pass a backend explicitly when needed.
     Restart your terminal, or run:
 
     ```bash
-    source "$HOME/.cargo/env"
+    source "$HOME/.local/bin/env"
     ```
 
 === "Windows PowerShell"
@@ -135,12 +135,23 @@ Use the source install path when you are developing ComfyGit itself.
 ```bash
 git clone https://github.com/comfygit-ai/comfygit.git
 cd comfygit
-make install
-uv run cg --version
+uv sync --frozen --all-packages
+uv run --frozen --package comfygit cg --version
 ```
 
 For normal usage, prefer `uv tool install comfygit --upgrade`. For development,
-use the repo commands so the workspace packages resolve consistently.
+use the repo commands so the workspace packages resolve consistently. To expose
+the editable checkout as your user CLI:
+
+```bash
+uv tool install --force --editable ./packages/cli \
+  --with-editable ./packages/core \
+  --with-editable ./packages/studio-runtime
+```
+
+Rerun that install when dependency declarations change. Source edits are picked
+up immediately; editable installs do not automatically refresh dependencies.
+The repository also bundles an agent skill at `skills/comfygit/SKILL.md`.
 
 ## Platform Notes
 
@@ -195,17 +206,15 @@ native code, install your distribution's development toolchain.
 Restart your terminal. On macOS or Linux, you can also source uv's environment:
 
 ```bash
-source "$HOME/.cargo/env"
+source "$HOME/.local/bin/env"
 ```
 
 ### Permission errors during install
 
-Do not use `sudo` with `uv tool install`. Fix ownership of the uv install
-location instead:
-
-```bash
-chown -R "$USER:$USER" "$HOME/.cargo"
-```
+Do not use `sudo` with `uv tool install`. Check the exact path in the error and
+reinstall uv as your own user if necessary. Avoid recursive ownership changes to
+unrelated directories. For custom installer paths, follow the shell setup printed
+by the [uv installer](https://docs.astral.sh/uv/getting-started/installation/).
 
 ### Python is too old
 

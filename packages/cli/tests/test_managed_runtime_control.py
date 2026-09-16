@@ -216,6 +216,7 @@ command.run(Namespace(target_env='test-env', no_sync=True, args=['--port', '{por
                 if client.status()['ready']:
                     break
             except (ValueError, requests.RequestException):
+                # The disposable child may not advertise readiness until the next poll.
                 pass
             time.sleep(.1)
         assert client is not None and client.status()['ready']
@@ -233,6 +234,7 @@ command.run(Namespace(target_env='test-env', no_sync=True, args=['--port', '{por
         try:
             requests.post(f'http://127.0.0.1:{port}/test/stop', timeout=1)
         except requests.RequestException:
+            # The test normally stopped the child already; cleanup must still reap its owner.
             pass
         if process.poll() is None:
             process.terminate()

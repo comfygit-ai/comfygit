@@ -84,6 +84,26 @@ If you bind to `0.0.0.0`, make sure the port is reachable from the browser or
 machine that needs it.
 
 
+## Inspect And Restart A Managed Runtime
+
+For a named environment launched by the current `cg run` supervisor:
+
+```bash
+cg -e my-env orch status --json
+cg -e my-env orch restart --wait --timeout 180 --json
+```
+
+Restart requires a matching runtime identity, reachable Manager restart support,
+and a verified empty ComfyUI queue. It refuses unknown or busy state.
+`--wait` verifies a new runtime generation and HTTP readiness; an accepted restart
+request alone is not completion. If acknowledgement is uncertain, inspect status
+before retrying.
+
+A process started before upgrading the CLI must be stopped and relaunched through
+the updated `cg run` to advertise this control endpoint. An arbitrary ComfyUI
+process or port is not adopted. Existing legacy orchestrators retain their own
+control path; do not use a named runtime request to restart a different child.
+
 ## Run Vs Serve
 
 `cg run` launches the full ComfyUI editor and backend.

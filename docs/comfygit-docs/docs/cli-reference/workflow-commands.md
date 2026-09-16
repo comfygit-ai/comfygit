@@ -7,11 +7,34 @@ manage workflow-level model declarations.
 
 ```bash
 cg workflow list
-cg workflow resolve WORKFLOW [--auto] [--install] [--no-install]
+cg workflow resolve WORKFLOW [--auto] [--install|--no-install] [--json] [--strict]
 ```
 
 `resolve` analyzes workflow JSON, maps custom nodes to packages, matches model
 references to the model index, and records dependency metadata in the manifest.
+
+For automation, choose installation behavior explicitly:
+
+```bash
+cg -e my-env workflow resolve my-workflow --auto --no-install --json --strict
+```
+
+`--json` requires `--auto` and either `--install` or `--no-install`. Results go to
+stdout, progress goes to stderr. `--strict` exits nonzero if dependencies remain
+unresolved or uninstalled. Resolution updates metadata even with `--no-install`;
+it is not a read-only inspection or an inference test.
+
+## Explicit Node Ownership
+
+```bash
+cg workflow node map WORKFLOW NODE_TYPE PACKAGE [--json]
+cg workflow node unmap WORKFLOW NODE_TYPE [--json]
+cg workflow node list WORKFLOW [--json]
+```
+
+Map a registered ComfyUI class name to an already tracked package. The class must
+exist in the saved workflow. This supports unregistered or newly added node types
+without editing cached registry data. See [workflow resolution](../user-guide/workflows/workflow-resolution.md).
 
 ## Workflow Models
 

@@ -1,7 +1,11 @@
 # Agent workflow and installation hardening
 
 Implemented on branch `codex/comfygit-agent-workflows`, based on `b6e36eb`, on
-2026-09-15. This describes local source changes, not a published release.
+2026-09-15. These changes subsequently shipped in
+[v0.7.0](https://github.com/comfygit-ai/comfygit/releases/tag/v0.7.0).
+The validation counts and local-only limits below describe the original
+implementation checkpoints; see the [release record](releases/0.7.0-preparation.md)
+for final publication and platform CI results.
 
 ## Changes
 

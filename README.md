@@ -15,7 +15,7 @@ Git for your ComfyUI environments — version control, package management, and r
 - 🔄 **Isolated environments** — test new nodes without breaking production
 - 📦 **Git-based versioning** — commit changes, rollback when things break
 - 🚀 **One-command sharing** — export/import complete working environments
-- 💾 **Smart model management** — content-addressable index, no duplicate storage
+- 💾 **Smart model management** — shared model directory and content-oriented index
 - 🔧 **Standard tooling** — built on UV and pyproject.toml, works with Python ecosystem
 - 🖥️ **Cross-platform** — Windows, Linux, macOS
 
@@ -98,7 +98,9 @@ ComfyGit creates **new, isolated** ComfyUI environments inside your ComfyGit wor
 
 Models are stored once and **symlinked into environments**, so you can share the same model library across projects without duplicating storage.
 
-For your first environment, expect roughly **~2GB** of downloads for ComfyUI and base dependencies.
+Initial download size depends on the selected PyTorch backend and custom nodes;
+GPU packages alone can require several gigabytes. uv caches can reuse package
+artifacts, while each environment keeps its own mutable runtime.
 
 See the [documentation](https://docs.comfygit.org/getting-started/installation/) for more examples including version control workflows, sharing environments, and team collaboration.
 
@@ -106,7 +108,7 @@ See the [documentation](https://docs.comfygit.org/getting-started/installation/)
 
 Full documentation at **[docs.comfygit.org](https://docs.comfygit.org/)** including:
 
-- [How It Works](https://docs.comfygit.org/getting-started/concepts/) — architecture and design
+- [How It Works](https://docs.comfygit.org/concepts/what-comfygit-manages/) — architecture and design
 - [Model Management](https://docs.comfygit.org/user-guide/models/model-index/) — content-addressable indexing
 - [Sharing Environments](https://docs.comfygit.org/user-guide/collaboration/export-import/) — export/import and git remotes
 

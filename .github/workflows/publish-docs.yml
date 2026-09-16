@@ -6,93 +6,79 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: publish-documentation
+  cancel-in-progress: false
+
 jobs:
   deploy:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     steps:
-    - name: Checkout monorepo
-      uses: actions/checkout@v4
-      with:
-        persist-credentials: false
-        fetch-depth: 0
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.x"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.28"
+          python-version: "3.12"
 
-    - name: Install MkDocs dependencies
-      run: |
-        pip install mkdocs mkdocs-material mkdocs-redirects mkdocs-git-revision-date-localized-plugin
+      - name: Build locked documentation
+        working-directory: docs/comfygit-docs
+        run: uv run --frozen mkdocs build --strict --site-dir ../../build-output
 
-    - name: Build documentation
-      working-directory: docs/comfygit-docs
-      run: |
-        mkdocs build --site-dir ../../build-output
-        echo "✓ Documentation built successfully"
+      - name: Publish to the Pages repository
+        env:
+          DOCS_PUBLISH_TOKEN: ${{ secrets.DOCS_PUBLISH_TOKEN }}
+          SOURCE_SHA: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${DOCS_PUBLISH_TOKEN:?DOCS_PUBLISH_TOKEN is required}"
+          # The helper contains no credential value. Git reads it from this step's
+          # environment, never from a saved remote URL or a command argument.
+          export GIT_ASKPASS="$RUNNER_TEMP/docs-git-askpass"
+          trap 'rm -f "$GIT_ASKPASS"' EXIT
+          cat > "$GIT_ASKPASS" <<'ASKPASS'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$DOCS_PUBLISH_TOKEN" ;;
+            *) exit 1 ;;
+          esac
+          ASKPASS
+          chmod 700 "$GIT_ASKPASS"
+          git -c credential.helper= clone --depth 1 \
+            https://github.com/comfygit-ai/comfygit.github.io.git pages-repo
+          rsync -a --delete --exclude='/.git/' --exclude='/CNAME' --exclude='/README.md' \
+            build-output/ pages-repo/
+          cd pages-repo
+          if [ ! -f CNAME ]; then
+            printf '%s\n' 'docs.comfygit.org' > CNAME
+          fi
+          touch .nojekyll
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .
+          if git diff --staged --quiet; then
+            echo 'No documentation changes to publish.'
+          else
+            git commit -m "Deploy ComfyGit docs from $SOURCE_SHA"
+            git -c credential.helper= push
+          fi
 
-    - name: Clone Pages repository
-      run: |
-        git clone https://${{ secrets.DOCS_PUBLISH_TOKEN }}@github.com/comfygit-ai/comfygit.github.io.git pages-repo
-        echo "✓ Pages repository cloned"
-
-    - name: Deploy to root
-      run: |
-        # Configure git for the Pages repo
-        cd pages-repo
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-
-        # Preserve CNAME and README.md, remove everything else
-        mv CNAME ../CNAME.bak 2>/dev/null || true
-        mv README.md ../README.bak 2>/dev/null || true
-        rm -rf *
-        rm -rf .nojekyll 2>/dev/null || true
-        mv ../CNAME.bak CNAME 2>/dev/null || true
-        mv ../README.bak README.md 2>/dev/null || true
-        echo "✓ Cleaned old content"
-
-        # Copy new docs to root
-        cp -r ../build-output/* .
-        echo "✓ Copied documentation to root"
-
-        # Ensure CNAME exists (for custom domain)
-        if [ ! -f CNAME ]; then
-          echo "docs.comfygit.org" > CNAME
-          echo "✓ Created CNAME file"
-        fi
-
-    - name: Commit and push changes
-      working-directory: pages-repo
-      run: |
-        git add .
-
-        if git diff --staged --quiet; then
-          echo "ℹ No changes to commit"
-        else
-          git commit -m "Deploy ComfyGit docs from ${{ github.sha }}
-
-          Source: comfygit-ai/comfygit
-          Branch: ${{ github.ref_name }}
-          Commit: ${{ github.sha }}
-
-          🤖 Auto-deployed by GitHub Actions"
-
-          git push
-          echo "✓ Changes pushed successfully"
-        fi
-
-    - name: Deployment summary
-      run: |
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "✅ ComfyGit Documentation Deployed"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "📍 Live URL: https://docs.comfygit.org/"
-        echo "📦 Source: docs/comfygit-docs/"
-        echo "🎯 Target: comfygit-ai.github.io"
-        echo "📝 Commit: ${{ github.sha }}"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo ""
-        echo "Allow 1-2 minutes for GitHub Pages to rebuild."
-        echo "Visit https://docs.comfygit.org/ to view."
+      - name: Deployment summary
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          {
+            echo 'Documentation committed to comfygit-ai/comfygit.github.io.'
+            echo "Source commit: $SOURCE_SHA"
+            echo 'After Pages finishes, verify https://docs.comfygit.org/getting-started/overview/.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -61,3 +61,9 @@ For non-interactive environments, use `CIVITAI_API_TOKEN`, `HF_TOKEN`, or anothe
 documented provider environment variable. Private Hugging Face or direct-download
 access still depends on the URL and account permissions. Use sources that the
 runtime can fetch non-interactively before relying on them for handoff.
+
+A headless host does not need desktop keyring for downloads. Existing native
+Hugging Face credentials can be discovered when `huggingface_hub` is available to
+the ComfyGit process. `cg auth set` needs a working secure store and reports a
+failure rather than writing a new plaintext fallback. See
+[workspace authentication](../workspaces.md#inspect-configuration).
