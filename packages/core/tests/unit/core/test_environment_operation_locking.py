@@ -1,5 +1,7 @@
 """Tests for environment operation lock decorators."""
 
+import os
+
 from comfygit_core.core.environment import Environment
 from comfygit_core.utils.environment_lock import EnvironmentOperationLock
 
@@ -53,6 +55,8 @@ def test_environment_operation_lock_clears_owner_file_on_release(tmp_path):
     lock_path = tmp_path / ".comfygit.lock"
 
     with EnvironmentOperationLock(lock_path):
-        assert lock_path.read_text(encoding="utf-8").strip()
+        # Windows reserves byte zero for the mandatory OS lock. Read owner
+        # diagnostics through the same portable path used by contending callers.
+        assert EnvironmentOperationLock(lock_path)._busy_error().owner.pid == os.getpid()
 
     assert lock_path.read_text(encoding="utf-8") == ""
