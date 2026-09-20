@@ -1,12 +1,12 @@
 [project]
 name = "comfygit"
-version = "0.7.0"
+version = "0.7.1"
 description = "ComfyGit - Git-based environment management for ComfyUI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "comfygit-core[keyring]==0.7.0",
-    "comfygit-studio==0.7.0",
+    "comfygit-core[keyring]==0.7.1",
+    "comfygit-studio==0.7.1",
     "argcomplete>=3.5.0",
     "requests>=2.32.4",
 ]
