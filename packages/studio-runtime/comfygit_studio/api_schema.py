@@ -82,7 +82,7 @@ def _paths() -> dict[str, Any]:
             "get": {
                 "summary": "List available workflow contracts",
                 "operationId": "listContracts",
-                "responses": _json_response("Contracts response", "ContractsResponse"),
+                "responses": {**_json_response("Contracts response", "ContractsResponse"), "503": _busy_response()},
             }
         },
         "/contracts/{workflow}/{contract}": {
@@ -93,7 +93,7 @@ def _paths() -> dict[str, Any]:
                     {"$ref": "#/components/parameters/workflow"},
                     {"$ref": "#/components/parameters/contract"},
                 ],
-                "responses": _json_response("Contract response", "ContractSummary"),
+                "responses": {**_json_response("Contract response", "ContractSummary"), "503": _busy_response()},
             }
         },
         "/uploads/prepare": {
@@ -152,6 +152,7 @@ def _paths() -> dict[str, Any]:
                     "400": _json_content("Invalid request", "RunResponse"),
                     "413": _json_content("Request too large", "ErrorResponse"),
                     "502": _json_content("Executor unavailable", "RunResponse"),
+                    "503": _busy_response(),
                     "504": _json_content("Run timed out", "RunResponse"),
                 },
             }
@@ -289,6 +290,7 @@ def _schemas() -> dict[str, Any]:
             "type": "object",
             "required": ["workflow", "contract", "inputs", "outputs"],
             "properties": {
+                "manifest_revision": {"type": "string"},
                 "workflow": {"type": "string"},
                 "contract": {"type": "string"},
                 "display_name": {"type": "string"},
@@ -303,6 +305,7 @@ def _schemas() -> dict[str, Any]:
             "required": ["environment", "contracts"],
             "properties": {
                 "environment": {"type": "string"},
+                "manifest_revision": {"type": "string"},
                 "contracts": {"type": "array", "items": {"$ref": "#/components/schemas/ContractSummary"}},
             },
         },
@@ -464,6 +467,9 @@ def _schemas() -> dict[str, Any]:
                 "status": {"type": "string"},
                 "run_id": {"type": "string"},
                 "prompt_id": {"type": "string"},
+                "manifest_revision": {"type": "string"},
+                "prompt_digest": {"type": "string"},
+                "request_id": {"type": ["string", "null"]},
                 "issues": {"type": "array", "items": {"$ref": "#/components/schemas/RunIssue"}},
                 "outputs": {"type": "array", "items": {"$ref": "#/components/schemas/RunOutput"}},
                 "output_slots": {"type": "array", "items": {"$ref": "#/components/schemas/RunOutputSlot"}},
@@ -535,6 +541,24 @@ def _parameters() -> dict[str, Any]:
         "filename": {"name": "filename", "in": "query", "schema": {"type": "string"}},
         "subfolder": {"name": "subfolder", "in": "query", "schema": {"type": "string"}},
         "outputType": {"name": "type", "in": "query", "schema": {"type": "string"}},
+    }
+
+
+def _busy_response() -> dict[str, Any]:
+    return {
+        "description": "Environment mutation in progress; no run submitted. Retry GET after Retry-After. Do not replay uncertain POSTs.",
+        "headers": {"Retry-After": {"schema": {"type": "string"}}, "X-Request-ID": {"schema": {"type": "string"}}},
+        "content": {"application/json": {"schema": {
+            "type": "object", "required": ["error", "retryable", "request_id", "owner"],
+            "properties": {
+                "error": {"const": "environment_busy"}, "retryable": {"const": True},
+                "request_id": {"type": "string"}, "message": {"type": "string"},
+                "owner": {"type": "object", "properties": {
+                    "pid": {"type": ["integer", "null"]}, "operation": {"type": ["string", "null"]},
+                    "acquired_at": {"type": ["string", "null"]},
+                }},
+            },
+        }}},
     }
 
 

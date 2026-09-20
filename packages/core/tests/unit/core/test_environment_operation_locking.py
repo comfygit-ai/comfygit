@@ -13,6 +13,9 @@ class _FakeLock:
         self.entered = True
         return self
 
+    def named(self, operation):
+        return self
+
     def __exit__(self, exc_type, exc, tb) -> bool:
         self.exited = True
         return False

@@ -157,6 +157,17 @@ The lock should cover sync, manager update, model/node/workflow mutations, git
 handoff operations, import finalization where practical, and destructive
 operations that reconcile runtime state.
 
+### CGSYNC-LIFE-10B [LIVE]: Snapshot readers share locks and contention is typed
+Validation: TEST
+
+Manifest snapshot readers may run concurrently. They hold a shared environment
+lock while capturing fresh, detached manifest data and any associated workflow
+prompt artifacts; mutations retain the exclusive operation lock. Read scopes
+must not span asynchronous waits or GPU execution, and must not upgrade to writes.
+Contention raises `CDEnvironmentBusyError` with best-effort owner diagnostics.
+Other filesystem failures remain errors. Lock files are never deleted as recovery
+for contention: their presence alone does not mean an OS lock is held.
+
 ### CGSYNC-LIFE-10A [PARTIAL]: Sync orchestration has explicit plan and apply phases
 Validation: MIXED
 

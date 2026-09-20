@@ -242,6 +242,9 @@
             },
             "type": "array"
           },
+          "manifest_revision": {
+            "type": "string"
+          },
           "outputs": {
             "items": {
               "$ref": "#/components/schemas/ContractOutput"
@@ -269,6 +272,9 @@
             "type": "array"
           },
           "environment": {
+            "type": "string"
+          },
+          "manifest_revision": {
             "type": "string"
           }
         },
@@ -708,6 +714,9 @@
             },
             "type": "array"
           },
+          "manifest_revision": {
+            "type": "string"
+          },
           "message": {
             "type": "string"
           },
@@ -723,8 +732,17 @@
             },
             "type": "array"
           },
+          "prompt_digest": {
+            "type": "string"
+          },
           "prompt_id": {
             "type": "string"
+          },
+          "request_id": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "run_id": {
             "type": "string"
@@ -860,6 +878,71 @@
               }
             },
             "description": "Contracts response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "const": "environment_busy"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "properties": {
+                        "acquired_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "operation": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "pid": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "retryable",
+                    "request_id",
+                    "owner"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Environment mutation in progress; no run submitted. Retry GET after Retry-After. Do not replay uncertain POSTs.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "List available workflow contracts"
@@ -886,6 +969,71 @@
               }
             },
             "description": "Contract response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "const": "environment_busy"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "properties": {
+                        "acquired_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "operation": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "pid": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "retryable",
+                    "request_id",
+                    "owner"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Environment mutation in progress; no run submitted. Retry GET after Retry-After. Do not replay uncertain POSTs.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "Return one workflow contract"
@@ -952,6 +1100,71 @@
               }
             },
             "description": "Executor unavailable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "const": "environment_busy"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "owner": {
+                      "properties": {
+                        "acquired_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "operation": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "pid": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "request_id": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "retryable",
+                    "request_id",
+                    "owner"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Environment mutation in progress; no run submitted. Retry GET after Retry-After. Do not replay uncertain POSTs.",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "504": {
             "content": {

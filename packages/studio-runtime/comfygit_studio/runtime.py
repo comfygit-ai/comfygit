@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import secrets
 import subprocess
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass
+from functools import wraps
 from importlib import resources
 from pathlib import Path
 from typing import Any, cast
@@ -18,7 +20,11 @@ from urllib.parse import quote
 import aiohttp
 from aiohttp import web
 from comfygit_core import Environment
-from comfygit_core.models import NamedWorkflowContract
+from comfygit_core.models import (
+    CDEnvironmentBusyError,
+    EnvironmentManifestSnapshot,
+    NamedWorkflowContract,
+)
 from comfygit_core.workflow import build_manifest_contract_prompt
 
 from .api_schema import studio_contract_api_openapi
@@ -90,6 +96,43 @@ UPLOAD_MIME_TYPE_ALIASES = {
     "audio/mp3": "audio/mpeg",
     "audio/x-wav": "audio/wav",
 }
+
+
+logger = logging.getLogger(__name__)
+
+
+class _ContractPreparationBusy(CDEnvironmentBusyError):
+    """Known contention before any executor call; safe to report as unsubmitted."""
+
+
+def _contract_request(
+    handler: Callable[[web.Request], Awaitable[web.Response]],
+) -> Callable[[web.Request], Awaitable[web.Response]]:
+    """Correlate contract requests and expose pre-submission lock contention."""
+    @wraps(handler)
+    async def wrapped(request: web.Request) -> web.Response:
+        request_id = uuid.uuid4().hex
+        request["contract_request_id"] = request_id
+        try:
+            response = await handler(request)
+        except CDEnvironmentBusyError as exc:
+            owner = asdict(exc.owner)
+            logger.warning("Environment busy request_id=%s method=%s route=%s owner=%s",
+                           request_id, request.method, request.path, owner)
+            response = web.json_response({
+                "error": "environment_busy", "retryable": True,
+                "message": "Environment is being updated; retry after the operation completes.",
+                "request_id": request_id, "owner": owner,
+            }, status=503, headers={"Retry-After": "1"})
+        except web.HTTPException:
+            raise
+        except Exception:
+            logger.exception("Contract request failed request_id=%s route=%s", request_id, request.path)
+            response = web.json_response({"error": "internal_error", "request_id": request_id,
+                                          "message": "Contract request failed; inspect the server log."}, status=500)
+        response.headers["X-Request-ID"] = request_id
+        return response
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -959,10 +1002,12 @@ async def proxy_artifact_handler(request: web.Request) -> web.StreamResponse:
     return web.Response(body=output_response.body, status=output_response.status, headers=headers)
 
 
+@_contract_request
 async def contracts_handler(request: web.Request) -> web.Response:
     return web.json_response(_contracts_payload(_state(request)))
 
 
+@_contract_request
 async def single_contract_handler(request: web.Request) -> web.Response:
     try:
         payload = _single_contract_payload(
@@ -1491,6 +1536,7 @@ def _localize_worker_callback_outputs(
     return output_payloads
 
 
+@_contract_request
 async def run_contract_handler(request: web.Request) -> web.Response:
     body: dict[str, Any] = {}
     session = _serve_session(request)
@@ -1502,9 +1548,12 @@ async def run_contract_handler(request: web.Request) -> web.Response:
             request.match_info["workflow"],
             request.match_info["contract"],
             body,
+            request_id=request["contract_request_id"],
         )
         status = 400 if payload.get("status") == "invalid_request" else 200
         return _json_response_for_session(payload, session, status=status, request=request)
+    except _ContractPreparationBusy:
+        raise  # Preparation did not submit a run; the outer handler returns 503.
     except web.HTTPRequestEntityTooLarge:
         state = _state(request)
         max_mib = _max_request_bytes(state) // (1024 * 1024)
@@ -1552,7 +1601,9 @@ async def run_contract_handler(request: web.Request) -> web.Response:
         payload.update(_record_failed_run(_state(request), session, request.match_info["workflow"], request.match_info["contract"], body, payload))
         return _json_response_for_session(payload, session, status=400)
     except Exception as exc:
-        payload = {"error": "internal_error", "message": str(exc)}
+        request_id = request["contract_request_id"]
+        logger.exception("Contract request failed request_id=%s route=%s", request_id, request.path)
+        payload = {"error": "internal_error", "message": str(exc), "request_id": request_id}
         payload.update(_record_failed_run(_state(request), session, request.match_info["workflow"], request.match_info["contract"], body, payload))
         return _json_response_for_session(payload, session, status=500)
 
@@ -2241,6 +2292,7 @@ def _contracts_payload(state: ServeState) -> dict[str, Any]:
             contracts.append(_contract_payload(workflow_name, contract_name, contract))
     return {
         "environment": state.env.name,
+        "manifest_revision": manifest.revision,
         "contracts": contracts,
     }
 
@@ -2257,7 +2309,7 @@ def _single_contract_payload(
     contract = workflow.execution_contract.contracts.get(contract_name)
     if contract is None:
         raise ValueError(f"Workflow '{workflow_name}' does not declare contract '{contract_name}'.")
-    return _contract_payload(workflow_name, contract_name, contract)
+    return {**_contract_payload(workflow_name, contract_name, contract), "manifest_revision": manifest.revision}
 
 
 def _contract_payload(
@@ -2281,6 +2333,8 @@ async def _run_contract(
     workflow_name: str,
     contract_name: str,
     body: dict[str, Any],
+    *,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     if "inputs" in body:
         inputs = body["inputs"]
@@ -2293,16 +2347,19 @@ async def _run_contract(
     timeout_seconds = float(body.get("timeout_seconds", state.config.run_timeout_seconds))
     poll_interval_seconds = float(body.get("poll_interval_seconds", 1))
 
-    manifest = state.manifest_snapshot()
-    prepared_contract = await _prepare_contract_run_inputs(state, workflow_name, contract_name, inputs)
-    inputs = prepared_contract.inputs
-    build_result = build_manifest_contract_prompt(
-        manifest,
-        state.env.cec_path,
-        workflow_name,
-        inputs,
-        contract_name=contract_name,
-    )
+    # One synchronous shared read protects both manifest and captured prompt.
+    # No environment lock is held across any network call or GPU execution.
+    try:
+        with state.env.read_manifest_snapshot() as manifest:
+            prepared_contract = _resolve_contract_run_inputs(state, manifest, workflow_name, contract_name, inputs)
+            inputs = prepared_contract.inputs
+            build_result = build_manifest_contract_prompt(
+                manifest, state.env.cec_path, workflow_name, inputs, contract_name=contract_name,
+            )
+            manifest_revision = manifest.revision
+            prompt_digest = hashlib.sha256(json.dumps(build_result.prompt, sort_keys=True).encode()).hexdigest()
+    except CDEnvironmentBusyError as exc:
+        raise _ContractPreparationBusy(exc.lock_path, exc.owner) from exc
     if build_result.has_errors:
         payload: dict[str, Any] = {
             "status": "invalid_request",
@@ -2318,8 +2375,13 @@ async def _run_contract(
     callback_token = _callback_auth_token(state) if callback_url else None
 
     async def record_submitted(prompt_id: str) -> None:
+        logger.info("Contract submitted request_id=%s run_id=%s prompt_id=%s manifest_revision=%s prompt_digest=%s",
+                    request_id, run_id, prompt_id, manifest_revision, prompt_digest)
         response = {
             "status": "submitted",
+            "manifest_revision": manifest_revision,
+            "prompt_digest": prompt_digest,
+            "request_id": request_id,
             "run_id": run_id,
             "prompt_id": prompt_id,
             "issues": [asdict(issue) for issue in build_result.issues],
@@ -2356,6 +2418,9 @@ async def _run_contract(
 
     response: dict[str, Any] = {
         "status": execution.status,
+        "manifest_revision": manifest_revision,
+        "prompt_digest": prompt_digest,
+        "request_id": request_id,
         "run_id": run_id,
         "prompt_id": execution.prompt_id,
         "issues": [asdict(issue) for issue in build_result.issues],
@@ -3139,7 +3204,16 @@ async def _prepare_contract_run_inputs(
 ) -> PreparedContractInputs:
     """Resolve uploaded media refs before building the ComfyUI prompt."""
 
-    manifest = state.manifest_snapshot()
+    return _resolve_contract_run_inputs(state, state.manifest_snapshot(), workflow_name, contract_name, inputs)
+
+
+def _resolve_contract_run_inputs(
+    state: ServeState,
+    manifest: EnvironmentManifestSnapshot,
+    workflow_name: str,
+    contract_name: str,
+    inputs: dict[str, Any],
+) -> PreparedContractInputs:
     workflow = manifest.workflows.get(workflow_name)
     execution_contract = getattr(workflow, "execution_contract", None) if workflow else None
     contract = execution_contract.contracts.get(contract_name) if execution_contract else None

@@ -41,6 +41,28 @@ class CDEnvironmentError(ComfyDockError):
     """Environment-related errors."""
     pass
 
+
+@dataclass(frozen=True)
+class EnvironmentLockOwner:
+    """Best-effort diagnostics, never authority to delete or steal a lock."""
+
+    pid: int | None = None
+    operation: str | None = None
+    acquired_at: str | None = None
+
+
+class CDEnvironmentBusyError(CDEnvironmentError):
+    """An environment lock is held; the requested operation has not begun."""
+
+    def __init__(self, lock_path: str, owner: EnvironmentLockOwner):
+        self.lock_path = lock_path
+        self.owner = owner
+        super().__init__(
+            "Another ComfyGit operation is running on this environment. "
+            f"Wait for it to complete (owner PID: {owner.pid}, operation: {owner.operation}). "
+            "Do not delete the lock file while an operation may be running."
+        )
+
 class CDEnvironmentNotFoundError(ComfyDockError):
     """Environment doesn't exist."""
     pass

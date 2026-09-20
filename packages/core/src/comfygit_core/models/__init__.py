@@ -11,6 +11,8 @@ _EXPORTS: dict[str, str] = {
     "CDWorkspaceExistsError": "exceptions",
     "CDCredentialStoreError": "exceptions",
     "CDEnvironmentError": "exceptions",
+    "CDEnvironmentBusyError": "exceptions",
+    "EnvironmentLockOwner": "exceptions",
     "CDEnvironmentNotFoundError": "exceptions",
     "CDEnvironmentExistsError": "exceptions",
     "CDDependencyPreviewStaleError": "exceptions",
