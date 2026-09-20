@@ -35,6 +35,25 @@ cg serve --port 8190 --comfy-url http://127.0.0.1:8188
 Run requests use the public input names defined by the workflow contract. File
 inputs should use upload references rather than inline file bytes.
 
+Contract reads share a short environment read lock. Run preparation captures
+the manifest and API prompt together, then releases the lock before execution.
+Contract responses include `manifest_revision`; run responses also include a
+`prompt_digest` for the prepared prompt and a `request_id` for log correlation.
+These identify the captured inputs, not a guarantee that a live environment can
+be upgraded safely while generation is running.
+
+If an environment mutation is active, these routes return HTTP **503** with
+`error: "environment_busy"`, `retryable: true`, `Retry-After: 1`, and
+`X-Request-ID`. The JSON includes the request ID and best-effort owner PID,
+operation, and acquisition time. No generation has been submitted for this
+response. Queue owners can retain the job and retry readiness after backoff.
+Other errors, including generic HTTP 500 responses, do not prove lock contention.
+
+Retry read-only GET requests within a bounded deadline. Never automatically
+replay a POST whose submission outcome is unknown. Inspect run records first.
+Do not delete `.comfygit.lock` as a contention fix; an existing file alone does
+not mean a lock is held.
+
 ## Uploads
 
 | Method | Path | Purpose |

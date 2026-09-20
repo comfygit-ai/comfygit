@@ -6,7 +6,8 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from functools import cached_property, wraps
 from pathlib import Path
@@ -125,7 +126,7 @@ def _workflow_api_prompt_relpath(workflow_name: str) -> Path:
 def _requires_env_lock(method):
     @wraps(method)
     def wrapper(self, *args, **kwargs):
-        with self._operation_lock:
+        with self._operation_lock.named(method.__name__):
             return method(self, *args, **kwargs)
     return wrapper
 
@@ -2532,10 +2533,21 @@ class Environment:
     # Public Snapshots and Readiness
     # =====================================================
 
-    @_requires_env_lock
     def get_manifest_snapshot(self) -> EnvironmentManifestSnapshot:
         """Return a typed read-only projection of the current manifest."""
-        return self.pyproject.get_manifest_snapshot()
+        with self.read_manifest_snapshot() as snapshot:
+            return snapshot
+
+    @contextmanager
+    def read_manifest_snapshot(self) -> Iterator[EnvironmentManifestSnapshot]:
+        """Capture manifest and related artifacts under a short shared lock.
+
+        Do not await, mutate the environment, or execute a prompt in this scope.
+        A new detached snapshot is loaded each time; no stale-cache fallback is
+        used when a writer is active.
+        """
+        with self._operation_lock.read():
+            yield self.pyproject.get_manifest_snapshot(force_reload=True)
 
     def list_manifest_nodes(self) -> Mapping[str, NodeInfo]:
         """Return tracked manifest nodes without exposing the manifest manager."""

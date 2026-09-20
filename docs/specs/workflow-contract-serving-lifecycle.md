@@ -7,6 +7,22 @@ environment state.
 
 ## Core Execution Semantics
 
+### CGSERVE-CORE-00 [LIVE]: Contract reads and run preparation are consistent under concurrency
+Validation: TEST
+
+Contract discovery uses shared snapshot reads. Run preparation resolves inputs
+and captures the API prompt from the same protected manifest snapshot before
+any executor submission; the lock is released before network/GPU work. Responses
+identify the manifest revision used. Existing runtimes must be quiesced before
+dependency replacement; snapshot consistency does not make live upgrades safe.
+
+An exclusive environment operation causes HTTP 503 with `error=environment_busy`,
+`retryable=true`, `Retry-After`, a generated request ID, and best-effort lock owner
+metadata. No run is submitted for this response. A GET can be retried; clients
+must not blindly retry POSTs with an unknown submission outcome. Log the request
+ID, route, and lock owner without input values. Unexpected run errors retain a
+server traceback correlated by request ID.
+
 ### CGSERVE-CORE-01 [PARTIAL]: Contracts are tracked environment truth
 Validation: TEST
 

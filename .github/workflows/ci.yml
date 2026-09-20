@@ -29,6 +29,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv run --frozen python dev/scripts/check-package-install.py --python ${{ matrix.python }}
+      - name: Snapshot and contention regression
+        run: uv run --frozen --python ${{ matrix.python }} pytest packages/core/tests/unit/core/test_environment_operation_locking.py packages/core/tests/unit/core/test_environment_shared_reads.py packages/studio-runtime/tests/test_contract_contention.py -q
 
   python:
     name: Core and CLI

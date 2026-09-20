@@ -1,5 +1,8 @@
 # models/manifest.py
+import hashlib
+import json
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Literal
@@ -304,6 +307,7 @@ class EnvironmentManifestSnapshot:
     nodes: Mapping[str, NodeInfo]
     workflows: Mapping[str, ManifestWorkflowEntry]
     models: Mapping[str, ManifestModel]
+    revision: str = ""
 
     def get_node(self, identifier: str) -> NodeInfo | None:
         """Return one manifest node by package identifier."""
@@ -331,6 +335,8 @@ class EnvironmentManifestSnapshot:
 
     @classmethod
     def from_toml_dict(cls, data: dict[str, Any]) -> "EnvironmentManifestSnapshot":
+        # Detached from the manager's mutable document, including nested defaults.
+        data = deepcopy(data)
         tool = _plain_mapping(data.get("tool", {}))
         comfygit = _plain_mapping(tool.get("comfygit", {}))
 
@@ -362,6 +368,7 @@ class EnvironmentManifestSnapshot:
             normalized_schema_version = 1
 
         return cls(
+            revision=hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest(),
             project=ManifestProjectSnapshot.from_toml_dict(data),
             schema_version=normalized_schema_version,
             comfyui_version=(
