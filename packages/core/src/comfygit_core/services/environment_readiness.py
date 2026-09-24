@@ -59,6 +59,13 @@ def node_has_portable_provenance(node: NodeInfo) -> bool:
     """Return whether a tracked custom node can be reconstructed elsewhere."""
     source = (node.source or "unknown").lower()
 
+    if source == "bundled":
+        from .bundled_nodes import validate_bundle_path
+        try:
+            validate_bundle_path(node.bundle_path)
+            return True
+        except ValueError:
+            return False
     if source == "registry":
         return bool(node.registry_id and node.version and node.version != "dev")
     if source == "git":
@@ -246,7 +253,15 @@ def collect_node_provenance_warnings(source: ReadinessInput) -> list[NodeProvena
     for node in context.manifest.nodes.values():
         if not node_is_required(node):
             continue
-        if node_has_portable_provenance(node):
+        reason = node_provenance_reason(node)
+        if node.source == "bundled":
+            from .bundled_nodes import source_snapshot
+            try:
+                source_snapshot(context.manifest_dir, node)
+                continue
+            except (ValueError, OSError) as exc:
+                reason = str(exc)
+        elif node_has_portable_provenance(node):
             continue
         warnings.append(
             NodeProvenanceWarning(
@@ -257,7 +272,7 @@ def collect_node_provenance_warnings(source: ReadinessInput) -> list[NodeProvena
                 repository=node.repository,
                 version=node.version,
                 pinned_commit=node.pinned_commit,
-                reason=node_provenance_reason(node),
+                reason=reason,
             )
         )
     return warnings

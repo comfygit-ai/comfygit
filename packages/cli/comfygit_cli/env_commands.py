@@ -1936,6 +1936,14 @@ class EnvironmentCommands:
 
         print(f"\nRun 'cg -e {env.name} status' to review changes")
 
+    @with_env_logging("node bundle")
+    def node_bundle(self, args: argparse.Namespace, logger=None) -> None:
+        """Register portable custom-node code through the Core API."""
+        env = self._get_env(args)
+        node = env.bundle_node(args.node_name, args.path)
+        print(f"✓ Bundled '{node.name}' at {node.bundle_path}")
+        print(f"Run 'cg -e {env.name} sync' to install code and requirements")
+
     @with_env_logging("node dev-link")
     def node_dev_link(self, args: argparse.Namespace, logger=None) -> None:
         """Link a tracked or new custom node to a local development checkout."""

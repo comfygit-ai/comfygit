@@ -56,6 +56,7 @@ class NodeHandler(BaseHandler):
                 criticality=node_data.get('criticality', 'required'),
                 branch=node_data.get('branch'),
                 pinned_commit=node_data.get('pinned_commit'),
+                bundle_path=node_data.get('bundle_path'),
             )
 
         return result

@@ -589,3 +589,8 @@ before pushing a commit that another runtime cannot build. Manager has a first-p
 readiness surface for export/push handoff backed by a core readiness service;
 build planners can now consume core build-readiness proofs. Source-candidate
 repair UI remains follow-on work.
+
+### CGSYNC-BUNDLE-01 [LIVE]: Environment-bundled custom nodes
+Validation: TEST
+
+Sync validates and installs bundled nodes before node dependency provisioning. Repeated sync preserves matching copies. Changed authored source updates a managed copy; conflicting runtime edits fail without deleting authored source. Bundled nodes never use Git version comparison or remote update. Dependency changes refresh node-owned groups; failures leave the environment incomplete.

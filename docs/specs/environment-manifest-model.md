@@ -82,7 +82,7 @@ CLI-only environments are not a supported path for authoring new contracts in
 the local-first slice because they cannot capture ComfyUI's native frontend API
 prompt export from the loaded graph.
 
-### CGSPEC-MAN-06 [PARTIAL]: API workflow prompts are tracked contract artifacts
+### CGSPEC-MAN-06 [LIVE]: API workflow prompts are tracked contract artifacts
 Validation: MIXED
 
 Environment repositories should track ComfyUI API-format prompt JSON for
@@ -492,3 +492,8 @@ needed to interpret the manifest is portable ComfyGit policy.
 Recording the exact uv version used by a historical materialization is deferred.
 That future field should describe reproducibility of a past run without blocking
 current ComfyGit from declaring the minimum resolver capability it needs.
+
+### CGSPEC-BUNDLE-01 [LIVE]: Environment-bundled custom nodes
+Validation: TEST
+
+A bundled node declares bundle_path relative to pyproject.toml, under bundled_nodes/. The selected environment snapshot is its source identity. It needs no external repository/version. Typed manifest reads and edits preserve bundle_path. Bundled source is distinct from machine-local development links.

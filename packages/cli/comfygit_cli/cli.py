@@ -1054,6 +1054,11 @@ def _add_env_commands(subparsers: argparse._SubParsersAction) -> None:
     )
     node_add_parser.set_defaults(func=env_cmds.node_add)
 
+    node_bundle_parser = node_subparsers.add_parser("bundle", help="Copy local node code into the portable environment")
+    node_bundle_parser.add_argument("node_name")
+    node_bundle_parser.add_argument("--path", type=Path, required=True)
+    node_bundle_parser.set_defaults(func=env_cmds.node_bundle)
+
     # node dev-link
     node_dev_link_parser = node_subparsers.add_parser(
         "dev-link",

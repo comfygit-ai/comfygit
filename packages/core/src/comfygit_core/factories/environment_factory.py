@@ -583,6 +583,10 @@ class EnvironmentFactory:
             if src.exists() and src.is_file():
                 shutil.copy2(src, cec_path / filename)
 
+        from ..managers.pyproject_manager import PyprojectManager
+        from ..services.bundled_nodes import copy_declared_bundles
+        copy_declared_bundles(source_path, cec_path, PyprojectManager(pyproject_path).nodes.get_existing())
+
         workflows_src = source_path / "workflows"
         if workflows_src.exists() and workflows_src.is_dir():
             shutil.copytree(workflows_src, cec_path / "workflows", dirs_exist_ok=True)
