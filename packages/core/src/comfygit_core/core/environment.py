@@ -1794,7 +1794,12 @@ class Environment:
         files. Run sync to materialize it and install its dependency group.
         Existing tracked nodes are never silently replaced.
         """
-        from ..services.bundled_nodes import copy_snapshot, resolve_bundle_path, snapshot_directory, validate_node_name
+        from ..services.bundled_nodes import (
+            copy_snapshot,
+            resolve_bundle_path,
+            snapshot_directory,
+            validate_node_name,
+        )
         validate_node_name(name)
         if any(n.name == name for n in self.list_nodes()):
             raise ValueError(f"Node {name!r} is already tracked; edit its source declaration explicitly")
