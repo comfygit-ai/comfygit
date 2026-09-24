@@ -1787,6 +1787,32 @@ class Environment:
         )
 
     @_requires_env_lock
+    def bundle_node(self, name: str, source_path: Path | str) -> NodeInfo:
+        """Snapshot local node code into the portable manifest and register it.
+
+        The authored bundle is retained on removal and updated by editing its
+        files. Run sync to materialize it and install its dependency group.
+        Existing tracked nodes are never silently replaced.
+        """
+        from ..services.bundled_nodes import (
+            copy_snapshot,
+            resolve_bundle_path,
+            snapshot_directory,
+            validate_node_name,
+        )
+        validate_node_name(name)
+        if any(n.name == name for n in self.list_nodes()):
+            raise ValueError(f"Node {name!r} is already tracked; edit its source declaration explicitly")
+        relative = f"bundled_nodes/{name}"
+        destination = resolve_bundle_path(self.pyproject.path.parent, relative)
+        snapshot = snapshot_directory(Path(source_path))
+        if Path(source_path).resolve() != destination.resolve():
+            copy_snapshot(snapshot, destination)
+        node = NodeInfo(name=name, source="bundled", bundle_path=relative)
+        self.pyproject.nodes.add(node, name)
+        return node
+
+    @_requires_env_lock
     def link_development_node(
         self,
         identifier: str,

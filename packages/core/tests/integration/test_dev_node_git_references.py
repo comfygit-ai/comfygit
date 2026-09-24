@@ -16,6 +16,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from comfygit_core.managers.pyproject_manager import PyprojectManager
@@ -318,14 +320,16 @@ class TestPhase3ImportChanges:
         # Local code should be preserved
         assert (node_path / "nodes.py").read_text() == "# local code"
 
-    def test_sync_warns_for_dev_node_without_repository(self, test_env):
-        """sync_nodes_to_filesystem should warn via callback when dev node has no repository."""
+    @pytest.mark.parametrize("criticality", ["required", "optional"])
+    def test_sync_reports_missing_dev_node_without_repository(self, test_env, criticality):
+        """Required missing code fails; optional code retains the diagnostic callback."""
         from unittest.mock import MagicMock
 
         # ARRANGE - Dev node WITHOUT repository
         node_info = NodeInfo(
             name="local-only-node",
             source="development",
+            criticality=criticality,
             version="dev"
             # No repository field
         )
@@ -335,7 +339,11 @@ class TestPhase3ImportChanges:
         callbacks = MagicMock()
 
         # ACT
-        test_env.node_manager.sync_nodes_to_filesystem(callbacks=callbacks)
+        if criticality == "required":
+            with pytest.raises(ValueError, match="required node is missing"):
+                test_env.node_manager.sync_nodes_to_filesystem(callbacks=callbacks)
+        else:
+            test_env.node_manager.sync_nodes_to_filesystem(callbacks=callbacks)
 
         # ASSERT - Callback should have been called for missing repo
         callbacks.on_dev_node_missing_repository.assert_called_once_with("local-only-node")

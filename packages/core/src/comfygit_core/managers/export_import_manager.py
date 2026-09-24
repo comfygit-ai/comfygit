@@ -86,7 +86,21 @@ class ExportImportManager:
         """
         logger.info(f"Creating export at {output_path}")
 
+        from ..services.bundled_nodes import source_snapshot
+        bundles = []
+        for node in pyproject_manager.nodes.get_existing().values():
+            if node.source != "bundled":
+                continue
+            try:
+                bundles.append((node, source_snapshot(self.cec_path, node)))
+            except (ValueError, OSError):
+                if node.criticality != "optional":
+                    raise
+
         with tarfile.open(output_path, "w:gz") as tar:
+            for node, bundle in bundles:
+                for relative in bundle.files:
+                    tar.add(bundle.root / relative, arcname=f"{node.bundle_path}/{relative}", recursive=False)
             # Add pyproject.toml
             pyproject_path = self.cec_path / "pyproject.toml"
             if pyproject_path.exists():

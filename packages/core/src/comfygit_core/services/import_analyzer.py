@@ -42,6 +42,7 @@ class NodeAnalysis:
     pinned_commit: str | None
     dependency_sources: list[str] | None
     is_dev_node: bool
+    bundle_path: str | None = None
 
 
 @dataclass
@@ -90,6 +91,7 @@ class ImportAnalysis:
     # Summary flags
     needs_model_downloads: bool
     needs_node_installs: bool
+    bundled_nodes: int = 0
 
     def get_download_strategy_recommendation(self) -> str:
         """Recommend strategy based on analysis."""
@@ -160,12 +162,13 @@ class ImportAnalyzer:
             registry_nodes=sum(1 for n in nodes if n.source == "registry"),
             dev_nodes=sum(1 for n in nodes if n.is_dev_node),
             git_nodes=sum(1 for n in nodes if n.source == "git"),
+            bundled_nodes=sum(1 for n in nodes if n.source == "bundled"),
             workflows=workflows,
             total_workflows=len(workflows),
             overlays=overlays,
             total_overlays=len(overlays),
             needs_model_downloads=any(m.needs_download for m in models),
-            needs_node_installs=any(n.source in ("registry", "git") for n in nodes),
+            needs_node_installs=any(n.source in ("registry", "git", "bundled") for n in nodes),
         )
 
     def _analyze_models(self, pyproject_data: dict) -> list[ModelAnalysis]:
@@ -225,7 +228,8 @@ class ImportAnalyzer:
                 branch=node_data.get("branch"),
                 pinned_commit=node_data.get("pinned_commit"),
                 dependency_sources=node_data.get("dependency_sources"),
-                is_dev_node=(source == "development")
+                is_dev_node=(source == "development"),
+                bundle_path=node_data.get("bundle_path"),
             ))
 
         return nodes

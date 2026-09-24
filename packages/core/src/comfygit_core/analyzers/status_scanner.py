@@ -401,6 +401,18 @@ class StatusScanner:
             if expected_node.source == 'development':
                 continue
 
+            if expected_node.source == "bundled":
+                from ..services.bundled_nodes import snapshot_directory, source_snapshot
+                node = next(n for n in self._pyproject.nodes.get_existing().values() if n.name == name)
+                try:
+                    desired = source_snapshot(self._pyproject.path.parent, node).digest
+                    actual = snapshot_directory(current_node.path).digest
+                except (ValueError, OSError) as exc:
+                    desired, actual = "valid bundled source", str(exc)
+                if desired != actual:
+                    comparison.version_mismatches.append({"name": name, "expected": desired, "actual": actual})
+                continue
+
             actual_version = current_node.version
             if expected_node.source == "git" and current_node.git_commit:
                 actual_version = current_node.git_commit

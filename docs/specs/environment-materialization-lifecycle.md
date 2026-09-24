@@ -207,3 +207,8 @@ Materialization should consume core readiness, provenance, and dependency
 criticality semantics. It should not introduce a separate build-only definition
 of required models, optional nodes, source provenance, or portable manifest
 validity.
+
+### CGMAT-BUNDLE-01 [LIVE]: Environment-bundled custom nodes
+Validation: TEST
+
+Git, directory and archive materialization include declared bundled node contents. Export preserves the same portable payload. Absolute/escaping paths, links and special files are rejected; generated caches and nested Git metadata are excluded consistently. Readiness must verify source contents, not just a path declaration.

@@ -51,6 +51,7 @@ def build_readiness_from_pyproject_toml(
     *,
     asset_catalog: BuildAssetCatalog | None = None,
     source_validator: BuildSourceValidator | None = None,
+    bundle_validator: BuildSourceValidator | None = None,
 ) -> BuildReadiness:
     """Create a build-readiness proof from a ComfyGit environment pyproject."""
     try:
@@ -70,6 +71,7 @@ def build_readiness_from_pyproject_toml(
         manifest,
         asset_catalog=asset_catalog,
         source_validator=source_validator,
+        bundle_validator=bundle_validator,
     )
 
 
@@ -78,6 +80,7 @@ def build_readiness_from_manifest_dict(
     *,
     asset_catalog: BuildAssetCatalog | None = None,
     source_validator: BuildSourceValidator | None = None,
+    bundle_validator: BuildSourceValidator | None = None,
 ) -> BuildReadiness:
     """Create a build-readiness proof from parsed pyproject manifest data."""
     plain_manifest = dict(manifest)
@@ -90,6 +93,7 @@ def build_readiness_from_manifest_dict(
             snapshot,
             asset_catalog=asset_catalog,
             source_validator=source_validator,
+            bundle_validator=bundle_validator,
         )
     except Exception as exc:
         return BuildReadiness(
@@ -126,6 +130,7 @@ def build_readiness_from_manifest_snapshot(
     *,
     asset_catalog: BuildAssetCatalog | None = None,
     source_validator: BuildSourceValidator | None = None,
+    bundle_validator: BuildSourceValidator | None = None,
 ) -> BuildReadiness:
     """Create a build-readiness proof from a typed manifest snapshot."""
     python_dependencies = _dedupe(
@@ -169,7 +174,7 @@ def build_readiness_from_manifest_snapshot(
         _collect_issue(proof, warnings=warnings, blockers=blockers)
 
     for node in custom_nodes:
-        proof = _classify_custom_node(node, source_validator=source_validator)
+        proof = _classify_custom_node(node, source_validator=source_validator, bundle_validator=bundle_validator)
         dependency_proof.append(proof)
         _collect_issue(proof, warnings=warnings, blockers=blockers)
 
@@ -255,7 +260,29 @@ def _classify_custom_node(
     node: BuildCustomNodeSummary,
     *,
     source_validator: BuildSourceValidator | None,
+    bundle_validator: BuildSourceValidator | None,
 ) -> BuildDependencyProof:
+    if node.source == "bundled":
+        from .bundled_nodes import validate_bundle_path, validate_node_name
+        try:
+            relative = validate_bundle_path(node.bundle_path)
+            validate_node_name(node.name)
+        except ValueError as exc:
+            return BuildDependencyProof(kind="custom_node", name=node.name,
+                status="blocked_missing_source" if node.required else "missing_optional",
+                required=node.required, detail=str(exc))
+        if bundle_validator is None:
+            return BuildDependencyProof(kind="custom_node", name=node.name,
+                status="blocked_unverified" if node.required else "missing_optional",
+                required=node.required, source=relative,
+                detail="Bundled node requires source inventory from the selected environment revision.")
+        validated = _validate_sources([relative], kind="bundled_node", required=node.required,
+            source_validator=bundle_validator, metadata={"name": node.name, "identifier": node.identifier})
+        assert validated is not None
+        return BuildDependencyProof(kind="custom_node", name=node.name,
+            status=cast(Any, validated.status), required=node.required, source=relative,
+            detail=validated.detail, source_validation=validated.source_validation)
+
     sources = [
         source
         for source in (node.repository, node.download_url)
@@ -528,6 +555,7 @@ def _custom_node_summary(identifier: str, node: NodeInfo) -> BuildCustomNodeSumm
         download_url=node.download_url,
         version=node.version,
         pinned_commit=node.pinned_commit,
+        bundle_path=node.bundle_path,
     )
 
 

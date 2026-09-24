@@ -96,8 +96,14 @@ class NodeInfo:
     branch: str | None = None           # Branch to track (e.g., "dev", "main")
     pinned_commit: str | None = None    # Commit hash for exact portable reconstruction
 
+    bundle_path: str | None = None  # Relative to the portable environment manifest
+
     def __post_init__(self) -> None:
         self.criticality = normalize_node_criticality(self.criticality)
+        if self.bundle_path is not None and self.source != "bundled":
+            raise ValueError("bundle_path requires source='bundled'; migrate the legacy source declaration")
+        if self.source == "bundled" and any((self.repository, self.download_url, self.pinned_commit, self.registry_id)):
+            raise ValueError("Bundled nodes cannot also declare a remote source")
 
     @property
     def identifier(self) -> str:
@@ -178,6 +184,7 @@ class NodeInfo:
             criticality=normalize_node_criticality(node_config.get("criticality")),
             branch=node_config.get("branch"),
             pinned_commit=node_config.get("pinned_commit"),
+            bundle_path=node_config.get("bundle_path"),
         )
 
 @dataclass

@@ -1134,6 +1134,13 @@ class NodeManager:
         # Get expected nodes from pyproject.toml
         expected_nodes = self.pyproject.nodes.get_existing()
 
+        from ..services.bundled_nodes import (
+            assert_clean_runtime_copy,
+            forget_runtime_copy,
+            validate_node_destinations,
+        )
+        validate_node_destinations(expected_nodes.values())
+
         # Get existing active nodes (not .disabled)
         existing_nodes = {
             d.name: d for d in self.custom_nodes_path.iterdir()
@@ -1166,7 +1173,9 @@ class NodeManager:
                     continue
 
                 node_path = self.custom_nodes_path / node_name
+                assert_clean_runtime_copy(self.custom_nodes_path, node_name)
                 rmtree(node_path)
+                forget_runtime_copy(self.custom_nodes_path, node_name)
                 logger.info(f"Removed extra node: {node_name}")
         else:
             # Warn about extra nodes (don't auto-delete during manual sync)
@@ -1174,10 +1183,22 @@ class NodeManager:
                 logger.warning(f"Untracked node found: {node_name}")
                 logger.warning(f"  Run 'cg node add {node_name} --dev' to track it")
 
+        from ..services.bundled_nodes import install_bundle
+
+        failures = []
+        for node_info in expected_nodes.values():
+            if node_info.source == "bundled":
+                try:
+                    install_bundle(self.pyproject.path.parent, self.custom_nodes_path, node_info)
+                except (ValueError, OSError) as exc:
+                    logger.warning("Cannot materialize bundled node '%s': %s", node_info.name, exc)
+                    if node_info.criticality != "optional":
+                        failures.append(f"{node_info.name}: {exc}")
+
         # Install missing registry/git nodes (skip if .disabled version exists)
         nodes_to_install = [
             node_info for node_info in expected_nodes.values()
-            if node_info.source != 'development'
+            if node_info.source not in {'development', 'bundled'}
             and not (self.custom_nodes_path / node_info.name).exists()
             and not (self.custom_nodes_path / f"{node_info.name}.disabled").exists()
         ]
@@ -1197,17 +1218,25 @@ class NodeManager:
                 # Download to cache
                 cache_path = self.node_lookup.download_to_cache(node_info)
                 if cache_path:
-                    shutil.copytree(cache_path, node_path, dirs_exist_ok=True)
+                    import tempfile
+                    with tempfile.TemporaryDirectory(prefix=".cg-node-", dir=self.custom_nodes_path.parent) as temporary:
+                        staged = Path(temporary) / "node"
+                        shutil.copytree(cache_path, staged)
+                        staged.rename(node_path)
                     logger.info(f"Successfully installed node: {node_info.name}")
                     success_count += 1
                     if callbacks and callbacks.on_node_complete:
                         callbacks.on_node_complete(node_info.name, True, None)
                 else:
                     logger.warning(f"Could not download node '{node_info.name}'")
+                    if node_info.criticality != "optional":
+                        failures.append(f"{node_info.name}: download failed")
                     if callbacks and callbacks.on_node_complete:
                         callbacks.on_node_complete(node_info.name, False, "Download failed")
             except Exception as e:
                 logger.warning(f"Could not download node '{node_info.name}': {e}")
+                if node_info.criticality != "optional":
+                    failures.append(f"{node_info.name}: {e}")
                 if callbacks and callbacks.on_node_complete:
                     callbacks.on_node_complete(node_info.name, False, str(e))
 
@@ -1217,9 +1246,14 @@ class NodeManager:
         # Handle missing dev nodes with repository (clone from git)
         self._sync_dev_nodes_from_git(expected_nodes, existing_nodes, callbacks)
 
+        for node_info in expected_nodes.values():
+            if node_info.criticality != "optional" and not (self.custom_nodes_path / node_info.name).is_dir():
+                failures.append(f"{node_info.name}: required node is missing")
+        if failures:
+            raise ValueError("Required custom-node materialization failed: " + "; ".join(failures))
         logger.info("Finished syncing custom nodes")
 
-    def provision_missing_node_dependencies(self) -> list[str]:
+    def provision_missing_node_dependencies(self, *, bundled_only: bool = False) -> list[str]:
         """Stage dependency groups for tracked non-dev nodes missing them.
 
         Thin imports can restore node files to disk before their Python
@@ -1234,11 +1268,13 @@ class NodeManager:
         staged_groups: list[str] = []
 
         for identifier, node_info in expected_nodes.items():
+            if bundled_only and node_info.source != "bundled":
+                continue
             if node_info.source == "development":
                 continue
 
             group_name = self.pyproject.nodes.generate_group_name(node_info, identifier)
-            if group_name in existing_groups:
+            if group_name in existing_groups and node_info.source != "bundled":
                 continue
 
             node_path = self.custom_nodes_path / node_info.name
@@ -1261,21 +1297,32 @@ class NodeManager:
                 package_config=self.package_config,
             )
 
-            if requirements:
-                self.uv.add_requirements_with_sources(
-                    requirements,
-                    group=group_name,
-                    manifest_only=True,
-                    no_sync=True,
-                    raw=True,
-                )
-            else:
-                self.pyproject.dependencies.add_to_group(group_name, [])
-                logger.info(
-                    "Recorded empty dependency group '%s' for node '%s'",
-                    group_name,
-                    node_info.name,
-                )
+            import hashlib
+            import json
+
+            from ..services.bundled_nodes import read_state, write_state
+
+            state = read_state(self.custom_nodes_path) if node_info.source == "bundled" else {}
+            requirements_digest = hashlib.sha256(json.dumps(requirements, sort_keys=True).encode()).hexdigest()
+            if (node_info.source == "bundled" and group_name in existing_groups
+                    and state.get(node_info.name, {}).get("requirements_digest") == requirements_digest):
+                continue
+            manifest_before = self.pyproject.snapshot()
+            try:
+                if node_info.source == "bundled" and group_name in existing_groups:
+                    self.pyproject.dependencies.remove_group(group_name)
+                if requirements:
+                    self.uv.add_requirements_with_sources(
+                        requirements, group=group_name, manifest_only=True, no_sync=True, raw=True,
+                    )
+                else:
+                    self.pyproject.dependencies.add_to_group(group_name, [])
+            except Exception:
+                self.pyproject.restore(manifest_before)
+                raise
+            if node_info.source == "bundled":
+                state.setdefault(node_info.name, {})["requirements_digest"] = requirements_digest
+                write_state(self.custom_nodes_path, state)
 
             new_sources = self.pyproject.uv_config.get_source_names() - existing_sources
             if new_sources:
@@ -1381,6 +1428,15 @@ class NodeManager:
         """
         import shutil
 
+        from ..services.bundled_nodes import (
+            assert_clean_runtime_copy,
+            forget_runtime_copy,
+            install_bundle,
+            validate_node_destinations,
+        )
+        validate_node_destinations(old_nodes.values())
+        validate_node_destinations(new_nodes.values())
+
         # Nodes that were removed (in old, not in new)
         removed_node_names = set(old_nodes.keys()) - set(new_nodes.keys())
 
@@ -1398,7 +1454,9 @@ class NodeManager:
                 continue  # Already gone
 
             # Registry/git node - delete it (cached globally, can reinstall)
+            assert_clean_runtime_copy(self.custom_nodes_path, old_node_info.name)
             rmtree(node_path)
+            forget_runtime_copy(self.custom_nodes_path, old_node_info.name)
             logger.info(f"Removed '{old_node_info.name}' (rollback, cached)")
 
         # Nodes that were added (in new, not in old)
@@ -1412,7 +1470,7 @@ class NodeManager:
                 continue  # Already present
 
             # Install the node (skip dev nodes - user manages those)
-            if new_node_info.source != 'development':
+            if new_node_info.source not in {'development', 'bundled'}:
                 logger.info(f"Installing '{new_node_info.name}' (rollback)")
                 try:
                     cache_path = self.node_lookup.download_to_cache(new_node_info)
@@ -1424,6 +1482,15 @@ class NodeManager:
                 except Exception as e:
                     logger.warning(f"Failed to install '{new_node_info.name}': {e}")
 
+
+        for node in new_nodes.values():
+            if node.source == "bundled":
+                try:
+                    install_bundle(self.pyproject.path.parent, self.custom_nodes_path, node)
+                except (ValueError, OSError) as exc:
+                    if node.criticality != "optional":
+                        raise
+                    logger.warning("Optional bundled node '%s' could not be restored: %s", node.name, exc)
 
     def _get_existing_node_by_registry_id(self, registry_id: str) -> dict:
         """Get existing node configuration by registry ID."""
@@ -1730,6 +1797,8 @@ class NodeManager:
             raise CDNodeNotFoundError(f"Node '{identifier}' not found")
 
         # Dispatch based on source type
+        if node_info.source == "bundled":
+            raise CDEnvironmentError("Bundled nodes are updated by editing their bundle_path and running sync")
         if node_info.source == 'development':
             return self._update_development_node(actual_identifier, node_info, no_test)
         elif node_info.source == 'registry':

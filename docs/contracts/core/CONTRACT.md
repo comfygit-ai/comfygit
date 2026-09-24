@@ -692,3 +692,8 @@ Interactive import flows may surface recoverable warnings and let users repair a
 environment later. Headless build/runtime materialization should treat dependency
 sync failures, missing required acquisition metadata, and invalid manifest state
 as command failures unless the caller explicitly opts into a weaker mode.
+
+### CGCORE-MAN-06 [LIVE]: Environment-bundled custom nodes
+Validation: TEST
+
+Bundled custom nodes use source="bundled" and a bundle_path inside the portable environment repository. Core owns source validation, installation, dependencies, status and handoff. Provider adapters must not copy these nodes after sync. Required node acquisition failures fail materialization.

@@ -60,6 +60,26 @@ class EnvironmentSyncCoordinator:
 
         logger.info("Syncing environment...")
 
+        # Refresh authored bundle requirements before resolving packages. An old
+        # group must not block a source edit that removes a broken dependency.
+        if not dry_run:
+            from .bundled_nodes import install_bundle, validate_node_destinations
+            try:
+                validate_node_destinations(env.pyproject.nodes.get_existing().values())
+                for node in env.pyproject.nodes.get_existing().values():
+                    if node.source == "bundled":
+                        try:
+                            install_bundle(env.cec_path, env.custom_nodes_path, node)
+                        except (ValueError, OSError):
+                            if node.criticality != "optional":
+                                raise
+                if any(n.source == "bundled" for n in env.pyproject.nodes.get_existing().values()):
+                    env.node_manager.provision_missing_node_dependencies(bundled_only=True)
+            except Exception as exc:
+                result.errors.append(f"Bundled node preparation failed: {exc}")
+                result.success = False
+                return result
+
         try:
             sync_result = env.uv_manager.sync_dependencies_progressive(
                 dry_run=dry_run,
@@ -88,10 +108,11 @@ class EnvironmentSyncCoordinator:
             self._remove_version_mismatched_nodes(result)
 
         try:
-            env.node_manager.sync_nodes_to_filesystem(
-                remove_extra=remove_extra_nodes and not dry_run,
-                callbacks=node_callbacks,
-            )
+            if not dry_run:
+                env.node_manager.sync_nodes_to_filesystem(
+                    remove_extra=remove_extra_nodes,
+                    callbacks=node_callbacks,
+                )
         except Exception as e:
             logger.error(f"Node sync failed: {e}")
             result.errors.append(f"Node sync failed: {e}")
@@ -134,6 +155,8 @@ class EnvironmentSyncCoordinator:
             current_status = env.status()
             for mismatch in current_status.comparison.version_mismatches:
                 node_name = mismatch["name"]
+                if any(n.name == node_name and n.source == "bundled" for n in env.pyproject.nodes.get_existing().values()):
+                    continue  # Bundle updates check drift and replace atomically.
                 node_path = env.custom_nodes_path / node_name
                 if node_path.exists():
                     logger.info(
@@ -142,7 +165,13 @@ class EnvironmentSyncCoordinator:
                         mismatch["actual"],
                         mismatch["expected"],
                     )
+                    from .bundled_nodes import assert_clean_runtime_copy, forget_runtime_copy
+                    assert_clean_runtime_copy(env.custom_nodes_path, node_name)
                     rmtree(node_path)
+                    forget_runtime_copy(env.custom_nodes_path, node_name)
+        except ValueError as e:
+            result.errors.append(f"Node reconciliation conflict: {e}")
+            result.success = False
         except Exception as e:
             logger.warning(f"Could not check/fix version mismatches: {e}")
 

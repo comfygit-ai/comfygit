@@ -156,6 +156,7 @@ class BuildCustomNodeSummary:
     download_url: str | None = None
     version: str | None = None
     pinned_commit: str | None = None
+    bundle_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -169,6 +170,7 @@ class BuildCustomNodeSummary:
             "download_url": self.download_url,
             "version": self.version,
             "pinned_commit": self.pinned_commit,
+            "bundle_path": self.bundle_path,
         }
         return {key: value for key, value in payload.items() if value is not None}
 
