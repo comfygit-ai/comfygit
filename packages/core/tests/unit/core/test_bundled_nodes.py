@@ -336,3 +336,75 @@ def test_failed_staging_does_not_leave_partial_runtime(test_env, monkeypatch):
     with pytest.raises(ValueError, match="interrupted copy"):
         test_env.node_manager.sync_nodes_to_filesystem()
     assert not (test_env.custom_nodes_path / node.name).exists()
+
+
+def test_rollback_materializes_without_lookup_and_preserves_runtime_edits(test_env, monkeypatch):
+    source, node = bundle(test_env)
+    remote = Mock(side_effect=AssertionError("rollback must not look up a bundle"))
+    monkeypatch.setattr(test_env.node_manager.node_lookup, "download_to_cache", remote)
+    test_env.node_manager.reconcile_nodes_for_rollback({}, {node.name: node})
+    target = test_env.custom_nodes_path / node.name
+    assert (target / "__init__.py").exists()
+    (source / "new.py").write_text("changed source")
+    test_env.node_manager.reconcile_nodes_for_rollback({node.name: node}, {node.name: node})
+    assert (target / "new.py").read_text() == "changed source"
+    (target / "new.py").write_text("runtime edit")
+    with pytest.raises(ValueError, match="runtime edits"):
+        test_env.node_manager.reconcile_nodes_for_rollback({node.name: node}, {})
+    assert (target / "new.py").read_text() == "runtime edit"
+    assert source.is_dir()
+    remote.assert_not_called()
+
+
+def test_duplicate_destination_rejected_before_writes(test_env):
+    from comfygit_core.models.shared import NodeInfo
+
+    source, node = bundle(test_env)
+    test_env.pyproject.nodes.add(
+        NodeInfo(name=node.name.upper(), source="bundled", bundle_path=node.bundle_path),
+        "duplicate",
+    )
+    with pytest.raises(ValueError, match="Conflicting custom-node destination"):
+        test_env.node_manager.sync_nodes_to_filesystem()
+    assert not (test_env.custom_nodes_path / node.name).exists()
+
+
+def test_import_preview_preserves_bundle_provenance(test_env):
+    from comfygit_core.services.import_analyzer import ImportAnalyzer
+
+    _, node = bundle(test_env)
+    preview = ImportAnalyzer(Mock(), Mock()).analyze_import(test_env.cec_path)
+    assert preview.nodes[0].bundle_path == node.bundle_path
+    assert preview.bundled_nodes == 1 and preview.needs_node_installs
+
+
+def test_source_type_migration_cannot_erase_runtime_edits(test_env, monkeypatch):
+    from types import SimpleNamespace
+
+    from comfygit_core.models.shared import NodeInfo
+    from comfygit_core.models.sync import SyncResult
+    from comfygit_core.services.environment_sync_coordinator import EnvironmentSyncCoordinator
+
+    _, node = bundle(test_env)
+    test_env.node_manager.sync_nodes_to_filesystem()
+    target = test_env.custom_nodes_path / node.name / "__init__.py"
+    target.write_text("runtime edits")
+    test_env.pyproject.nodes.add(
+        NodeInfo(
+            name=node.name, source="git", repository="https://example.invalid/node", version="abc"
+        ),
+        node.name,
+    )
+    monkeypatch.setattr(
+        test_env,
+        "status",
+        lambda: SimpleNamespace(
+            comparison=SimpleNamespace(
+                version_mismatches=[{"name": node.name, "expected": "abc", "actual": None}]
+            )
+        ),
+    )
+    result = SyncResult()
+    EnvironmentSyncCoordinator(test_env)._remove_version_mismatched_nodes(result)
+    assert not result.success
+    assert target.read_text() == "runtime edits"

@@ -63,8 +63,9 @@ class EnvironmentSyncCoordinator:
         # Refresh authored bundle requirements before resolving packages. An old
         # group must not block a source edit that removes a broken dependency.
         if not dry_run:
-            from .bundled_nodes import install_bundle
+            from .bundled_nodes import install_bundle, validate_node_destinations
             try:
+                validate_node_destinations(env.pyproject.nodes.get_existing().values())
                 for node in env.pyproject.nodes.get_existing().values():
                     if node.source == "bundled":
                         try:
@@ -164,7 +165,13 @@ class EnvironmentSyncCoordinator:
                         mismatch["actual"],
                         mismatch["expected"],
                     )
+                    from .bundled_nodes import assert_clean_runtime_copy, forget_runtime_copy
+                    assert_clean_runtime_copy(env.custom_nodes_path, node_name)
                     rmtree(node_path)
+                    forget_runtime_copy(env.custom_nodes_path, node_name)
+        except ValueError as e:
+            result.errors.append(f"Node reconciliation conflict: {e}")
+            result.success = False
         except Exception as e:
             logger.warning(f"Could not check/fix version mismatches: {e}")
 

@@ -1134,9 +1134,12 @@ class NodeManager:
         # Get expected nodes from pyproject.toml
         expected_nodes = self.pyproject.nodes.get_existing()
 
-        from ..services.bundled_nodes import validate_node_name
-        for node_info in expected_nodes.values():
-            validate_node_name(node_info.name)
+        from ..services.bundled_nodes import (
+            assert_clean_runtime_copy,
+            forget_runtime_copy,
+            validate_node_destinations,
+        )
+        validate_node_destinations(expected_nodes.values())
 
         # Get existing active nodes (not .disabled)
         existing_nodes = {
@@ -1170,7 +1173,9 @@ class NodeManager:
                     continue
 
                 node_path = self.custom_nodes_path / node_name
+                assert_clean_runtime_copy(self.custom_nodes_path, node_name)
                 rmtree(node_path)
+                forget_runtime_copy(self.custom_nodes_path, node_name)
                 logger.info(f"Removed extra node: {node_name}")
         else:
             # Warn about extra nodes (don't auto-delete during manual sync)
@@ -1423,6 +1428,15 @@ class NodeManager:
         """
         import shutil
 
+        from ..services.bundled_nodes import (
+            assert_clean_runtime_copy,
+            forget_runtime_copy,
+            install_bundle,
+            validate_node_destinations,
+        )
+        validate_node_destinations(old_nodes.values())
+        validate_node_destinations(new_nodes.values())
+
         # Nodes that were removed (in old, not in new)
         removed_node_names = set(old_nodes.keys()) - set(new_nodes.keys())
 
@@ -1440,7 +1454,9 @@ class NodeManager:
                 continue  # Already gone
 
             # Registry/git node - delete it (cached globally, can reinstall)
+            assert_clean_runtime_copy(self.custom_nodes_path, old_node_info.name)
             rmtree(node_path)
+            forget_runtime_copy(self.custom_nodes_path, old_node_info.name)
             logger.info(f"Removed '{old_node_info.name}' (rollback, cached)")
 
         # Nodes that were added (in new, not in old)
@@ -1454,7 +1470,7 @@ class NodeManager:
                 continue  # Already present
 
             # Install the node (skip dev nodes - user manages those)
-            if new_node_info.source != 'development':
+            if new_node_info.source not in {'development', 'bundled'}:
                 logger.info(f"Installing '{new_node_info.name}' (rollback)")
                 try:
                     cache_path = self.node_lookup.download_to_cache(new_node_info)
@@ -1466,6 +1482,15 @@ class NodeManager:
                 except Exception as e:
                     logger.warning(f"Failed to install '{new_node_info.name}': {e}")
 
+
+        for node in new_nodes.values():
+            if node.source == "bundled":
+                try:
+                    install_bundle(self.pyproject.path.parent, self.custom_nodes_path, node)
+                except (ValueError, OSError) as exc:
+                    if node.criticality != "optional":
+                        raise
+                    logger.warning("Optional bundled node '%s' could not be restored: %s", node.name, exc)
 
     def _get_existing_node_by_registry_id(self, registry_id: str) -> dict:
         """Get existing node configuration by registry ID."""

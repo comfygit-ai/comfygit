@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -222,6 +223,8 @@ def install_bundle(manifest_root: Path, custom_nodes: Path, node: NodeInfo) -> b
 def copy_declared_bundles(
     manifest_root: Path, destination: Path, nodes: dict[str, NodeInfo]
 ) -> None:
+    validate_node_destinations(nodes.values())
+    copied: set[str] = set()
     for node in nodes.values():
         if node.source != "bundled":
             continue
@@ -231,4 +234,36 @@ def copy_declared_bundles(
             if node.criticality == "optional":
                 continue
             raise
-        copy_snapshot(snapshot, destination / validate_bundle_path(node.bundle_path))
+        relative = validate_bundle_path(node.bundle_path)
+        if relative not in copied:
+            copy_snapshot(snapshot, resolve_bundle_path(destination, relative))
+            copied.add(relative)
+
+
+def validate_node_destinations(nodes: Iterable[NodeInfo]) -> None:
+    """Reject ambiguous runtime targets before any reconciliation writes."""
+    destinations: set[str] = set()
+    for node in nodes:
+        validate_node_name(node.name)
+        key = node.name.casefold()
+        if key in destinations:
+            raise ValueError(f"Conflicting custom-node destination: {node.name}")
+        destinations.add(key)
+
+
+def assert_clean_runtime_copy(custom_nodes: Path, name: str) -> None:
+    """Preserve edits when a previously managed bundle is removed by reconciliation."""
+    previous = read_state(custom_nodes).get(name)
+    if previous and snapshot_directory(custom_nodes / name).digest != previous.get(
+        "installed_digest"
+    ):
+        raise ValueError(
+            f"Bundled node {name!r} has conflicting runtime edits; preserve them before removal"
+        )
+
+
+def forget_runtime_copy(custom_nodes: Path, name: str) -> None:
+    state = read_state(custom_nodes)
+    if name in state:
+        del state[name]
+        write_state(custom_nodes, state)
